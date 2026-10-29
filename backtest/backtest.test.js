@@ -147,15 +147,20 @@ ${failOn ? `  if (html.includes('${failOn}')) throw new Error('Stub failure');\n
     return stdout.trim();
   }
 
-  async function commit(dir, day) {
-    const date = `2026-01-0${day} 10:00:00 +0000`;
-    await git(dir, 'add', '-A');
+  // Git as a test identity at a fixed date, which `git log` orders commits by
+  async function gitDated(dir, date, ...args) {
     const identity = { GIT_AUTHOR_NAME: 'Test', GIT_AUTHOR_EMAIL: 'test@example.com', GIT_COMMITTER_NAME: 'Test', GIT_COMMITTER_EMAIL: 'test@example.com' };
-    const { code, stderr } = await exec('git', ['commit', '-q', '--no-verify', '-m', `Commit ${day}`], {
+    const { code, stdout, stderr } = await exec('git', args, {
       cwd: dir,
       env: { ...process.env, ...identity, GIT_AUTHOR_DATE: date, GIT_COMMITTER_DATE: date }
     });
-    assert.strictEqual(code, 0, `git commit: ${stderr}`);
+    assert.strictEqual(code, 0, `git ${args.join(' ')}: ${stderr}`);
+    return stdout.trim();
+  }
+
+  async function commit(dir, day) {
+    await git(dir, 'add', '-A');
+    await gitDated(dir, `2026-01-0${day} 10:00:00 +0000`, 'commit', '-q', '--no-verify', '-m', `Commit ${day}`);
     return await git(dir, 'rev-parse', '--short', 'HEAD');
   }
 
@@ -244,6 +249,29 @@ ${failOn ? `  if (html.includes('${failOn}')) throw new Error('Stub failure');\n
 
     assert.strictEqual(await status(dir), '');
     await assert.rejects(fs.stat(path.join(dir, 'src/extra.js')), { code: 'ENOENT' });
+  });
+
+  test('Reports a commit without source, as from a merged unrelated history, instead of measuring other code', { timeout: 60000 }, async (t) => {
+    const { dir, hashes } = await createFixture(t);
+    // An empty root commit, older than the others, merged in as a second parent
+    const treeEmpty = await git(dir, 'mktree');
+    const root = await gitDated(dir, '2025-12-31 10:00:00 +0000', 'commit-tree', treeEmpty, '-m', 'Unrelated root');
+    const merge = await gitDated(dir, '2026-01-04 10:00:00 +0000', 'commit-tree', 'HEAD^{tree}', '-p', 'HEAD', '-p', root, '-m', 'Merge');
+    await git(dir, 'update-ref', 'HEAD', merge);
+    const rootShort = await git(dir, 'rev-parse', '--short', root);
+
+    const { code, stderr } = await runBacktest(dir, '5');
+    assert.strictEqual(code, 0, stderr);
+
+    const results = JSON.parse(await fs.readFile(path.join(dir, 'backtest/results.json'), 'utf8'));
+    const keys = Object.keys(results.sites.alpha);
+    assert.strictEqual(keys.length, 4);
+    assert.ok(!keys.some(key => key.endsWith(rootShort)), 'The commit without source should have no results');
+    assert.strictEqual(results.sites.alpha[keys.find(key => key.endsWith(hashes[0]))].match(/^[\d,]+/)[0], String(('A' + 'old' + inputs.alpha).length));
+
+    const errors = await fs.readFile(path.join(dir, 'backtest/errors.log'), 'utf8');
+    assert.match(errors, new RegExp(`^${rootShort} - No source at this commit`, 'm'));
+    assert.strictEqual(await status(dir), '');
   });
 
   test('Installs only missing historical dependencies, and reports why an install failed', { timeout: 60000 }, async (t) => {

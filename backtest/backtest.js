@@ -642,7 +642,13 @@ if (isMain && (process.argv.length > 2 || !process.send)) {
 
   process.on('message', function (hash) {
     git('reset', 'HEAD', '--', ['src', 'package.json'], function () {
-      git('checkout', hash, '--', 'src', function () {
+      git('checkout', hash, '--', 'src', function (code) {
+        // As in the repository’s first commits, which predate the merged-in history
+        if (code !== 0) {
+          console.error('No source at this commit');
+          process.disconnect();
+          return;
+        }
         git('checkout', hash, '--', 'package.json', function () {
           readConfigFromGit(hash, 0, function (data) {
             try {
