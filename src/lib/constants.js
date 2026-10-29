@@ -1,0 +1,516 @@
+/**
+ * Regex patterns, element sets, and default configuration
+ */
+
+const RE_WS_START = /^[ \n\r\t\f]+/;
+const RE_WS_END = /[ \n\r\t\f]+$/;
+const RE_WS_ONLY = /^[ \n\r\t\f]+$/;
+const RE_WS_NBSP_END = /[ \n\r\t\f\xA0]$/;
+const RE_ALL_WS_NBSP = /[ \n\r\t\f\xA0]+/g;
+const RE_NBSP_LEADING_GROUP = /(^|\xA0+)[^\xA0]+/g;
+const RE_NBSP_LEAD_GROUP = /(\xA0+)[^\xA0]+/g;
+const RE_NBSP_TRAILING_GROUP = /[^\xA0]+(\xA0+)/g;
+const RE_NBSP_TRAILING_STRIP = /[^\xA0]+$/;
+const RE_EVENT_ATTR_DEFAULT = /^on[a-z]{3,}$/;
+const RE_CAN_REMOVE_ATTR_QUOTES = /^[^ \t\n\f\r"'`=<>]+$/;
+const RE_TRAILING_SEMICOLON = /;$/;
+const RE_AMP_ENTITY = /&(#?[0-9a-zA-Z]+;)/g;
+// Line breaks HTML reads as line feeds when raw
+const RE_CR = /\r/g;
+const RE_LINE_BREAK_CR = /\r\n?/g;
+const RE_LEGACY_ENTITIES = /&((?:Iacute|aacute|uacute|plusmn|Otilde|otilde|agrave|Agrave|Yacute|yacute|Oslash|oslash|atilde|Atilde|brvbar|ccedil|Ccedil|Ograve|curren|divide|eacute|Eacute|ograve|Oacute|egrave|Egrave|Ugrave|frac12|frac14|frac34|ugrave|oacute|iacute|Ntilde|ntilde|Uacute|middot|igrave|Igrave|iquest|Aacute|cedil|laquo|micro|iexcl|Icirc|icirc|acirc|Ucirc|Ecirc|ocirc|Ocirc|ecirc|ucirc|Aring|aring|AElig|aelig|acute|pound|raquo|Acirc|times|THORN|szlig|thorn|COPY|auml|ordf|ordm|Uuml|macr|uuml|Auml|ouml|Ouml|para|nbsp|euml|quot|QUOT|Euml|yuml|cent|sect|copy|sup1|sup2|sup3|iuml|Iuml|ETH|shy|reg|not|yen|amp|AMP|REG|uml|eth|deg|gt|GT|LT|lt)(?!;)|(?:#?[0-9a-zA-Z]+;))/g;
+const RE_ESCAPE_LT = /</g;
+// A `base` element, also as character references may write it, or as a script may name it
+// (e.g., `createElement('base')`)
+const RE_BASE_ELEMENT = /(?:<|&lt;?|&#0*60;?|&#x0*3c;?)base[\s/>]|(["'`])base\1/i;
+// What decoded text and attribute values hold that XML reads otherwise: markup, and
+// line breaks and tabs XML normalizes (quotes are left to attribute quoting)
+const RE_XML_ESCAPE_TEXT = /[&<\r]|]]>/g;
+const RE_XML_ESCAPE_ATTR = /[&<\t\n\r]/g;
+// In escapable raw text only the element’s own end tag ends the element, so nothing else
+// that `decodeEntities` decoded to a `<` needs escaping there
+// (the record has no prototype, so a tag named after an inherited property—`constructor`,
+// `__proto__`—finds nothing here and falls back to escaping every `<`)
+const RE_ESCAPE_LT_RAW_TEXT = /** @type {Record<string, RegExp>} */ (Object.assign(Object.create(null), {
+  textarea: /<(?=\/textarea[\s/>])/gi,
+  title: /<(?=\/title[\s/>])/gi
+}));
+// Encodings that make an `annotation-xml` element hold HTML rather than MathML
+// https://html.spec.whatwg.org/multipage/parsing.html#html-integration-point
+const RE_HTML_ENCODING = /^(text\/html|application\/xhtml\+xml)$/i;
+// A doctype’s name, public identifier, and system identifier (quoted),
+// and what follows them, as the tokenizer reads them; unless a system
+// identifier precedes it, anything but `>` sets quirks mode
+// https://html.spec.whatwg.org/multipage/parsing.html#doctype-state
+const RE_DOCTYPE = /^<!doctype[ \n\r\t\f]*([^ \n\r\t\f>]+)[ \n\r\t\f]*(?:public[ \n\r\t\f]*("[^">]*"|'[^'>]*')[ \n\r\t\f]*("[^">]*"|'[^'>]*')?|system[ \n\r\t\f]*("[^">]*"|'[^'>]*'))?([^]*)$/i;
+const RE_ATTR_WS_CHECK = /[ \n\r\t\f]/;
+const RE_ATTR_WS_COLLAPSE = /[ \n\r\t\f]+/g;
+const RE_WS_CHAR = /\s/;
+const RE_STYLE_ELEMENT = /<style[\s/>]/i;
+const RE_EMPTY_ATTRIBUTE = new RegExp(
+  '^(?:class|id|style|title|lang|dir|on(?:focus|blur|change|click|dblclick|mouse(' +
+  '?:down|up|over|move|out)|key(?:press|down|up)))$');
+
+// Inline element sets for whitespace handling
+
+// Non-empty elements that will maintain whitespace around them
+const inlineElementsToKeepWhitespaceAround = new Set(['a', 'abbr', 'acronym', 'audio', 'b', 'bdi', 'bdo', 'big', 'button', 'canvas', 'cite', 'code', 'data', 'del', 'dfn', 'em', 'embed', 'font', 'i', 'iframe', 'img', 'input', 'ins', 'kbd', 'label', 'map', 'mark', 'math', 'meter', 'nobr', 'object', 'output', 'picture', 'progress', 'q', 'rb', 'rp', 'rt', 'rtc', 'ruby', 's', 'samp', 'select', 'selectedcontent', 'slot', 'small', 'span', 'strike', 'strong', 'sub', 'sup', 'svg', 'textarea', 'time', 'tt', 'u', 'var', 'video', 'wbr']);
+
+// Non-empty elements that will maintain whitespace within them
+const inlineElementsToKeepWhitespaceWithin = new Set(['a', 'abbr', 'acronym', 'b', 'big', 'data', 'del', 'em', 'font', 'i', 'ins', 'kbd', 'map', 'mark', 'nobr', 's', 'samp', 'slot', 'small', 'span', 'strike', 'strong', 'sub', 'sup', 'time', 'tt', 'u', 'var']);
+
+// Text-level elements that keep whitespace between them and other elements under
+// `collapseInlineTagWhitespace`
+const inlineElementsToKeepWhitespaceBetween = new Set([...inlineElementsToKeepWhitespaceWithin, 'bdi', 'bdo', 'cite', 'code', 'dfn', 'label', 'math', 'q', 'ruby']);
+
+// Phrasing elements that don’t render, whose neighbors decide on the whitespace around them
+const inlineElementsTransparent = new Set(['area', 'datalist', 'link', 'meta', 'noscript', 'script', 'style', 'template']);
+const inlineElementsTransparentVoid = new Set(['area', 'link', 'meta']);
+
+// What the parser reports as the tag next to text that borders a processing instruction—
+// no tag name can be `?`, and content may be inserted there, so whitespace around it stays
+const processingInstructionTag = '?';
+
+// Elements that will always maintain whitespace around them
+const inlineElementsToKeepWhitespace = new Set(['comment', 'embed', 'img', 'input', 'wbr', processingInstructionTag]);
+
+// Formatting elements, which browsers reopen after a block that closed them, so their end tags
+// count even when stray, https://html.spec.whatwg.org/multipage/parsing.html#formatting
+const formattingElements = new Set(['a', 'b', 'big', 'code', 'em', 'font', 'i', 'nobr', 's', 'small', 'strike', 'strong', 'tt', 'u']);
+
+// Form control elements (for conditional whitespace collapsing)
+const formControlElements = new Set(['input', 'button', 'select', 'textarea', 'output', 'meter', 'progress']);
+
+// End-tag spellings (`/a`) of a set of element names
+/** @param {Iterable<string>} names */
+const toEndTags = names => new Set(Array.from(names, name => '/' + name));
+
+// Membership under either spelling, for the whitespace checks that ignore the slash;
+// looking a tag up as it comes keeps the hot path from slicing one string per call
+const formControlElementsEither = new Set([...formControlElements, ...toEndTags(formControlElements)]);
+
+const inlineElementsToKeepWhitespaceBetweenEnd = toEndTags(inlineElementsToKeepWhitespaceBetween);
+// Spelled as the tags that sit before and after the element: a start tag before it, an end tag
+// (or, for void elements, the start tag) after it
+const inlineElementsTransparentAfter = new Set([...toEndTags(inlineElementsTransparent), ...inlineElementsTransparentVoid]);
+
+// Default attribute values (could apply to any element)
+const generalDefaults = {
+  autocorrect: 'on',
+  fetchpriority: 'auto',
+  loading: 'eager',
+  popovertargetaction: 'toggle'
+};
+
+// Tag-specific default attribute values
+const tagDefaults = {
+  area: { shape: 'rect' },
+  button: { type: 'submit' },
+  col: { span: '1' },
+  colgroup: { span: '1' },
+  form: {
+    autocomplete: 'on',
+    enctype: 'application/x-www-form-urlencoded',
+    method: 'get'
+  },
+  html: { dir: 'ltr' },
+  iframe: { scrolling: 'auto' },
+  img: { decoding: 'auto' },
+  input: {
+    colorspace: 'limited-srgb',
+    type: 'text'
+  },
+  link: { media: 'all' },
+  marquee: {
+    behavior: 'scroll',
+    direction: 'left'
+  },
+  meta: { media: 'all' },
+  meter: {
+    max: '1',
+    min: '0'
+  },
+  // Not `start` on reversed lists, which count down from their number of items
+  ol: {
+    start: '1',
+    type: '1'
+  },
+  progress: { max: '1' },
+  source: { media: 'all' },
+  style: { media: 'all' },
+  td: {
+    colspan: '1',
+    rowspan: '1'
+  },
+  textarea: {
+    cols: '20',
+    rows: '2',
+    wrap: 'soft'
+  },
+  th: {
+    colspan: '1',
+    rowspan: '1',
+    scope: 'auto'
+  },
+  track: { kind: 'subtitles' }
+};
+
+// SVG and MathML elements whose children HTML reads as HTML, but for MathML `mglyph` and
+// `malignmark` (`foreignObject` and `annotation-xml` get a context of their own)
+// https://html.spec.whatwg.org/multipage/parsing.html#mathml-text-integration-point
+const integrationPointsForeign = {
+  svg: new Set(['desc', 'title']),
+  math: new Set(['mi', 'mn', 'mo', 'ms', 'mtext'])
+};
+
+// `meta` element `http-equiv` and `name` values no current browser acts on, in lowercase
+const metaHttpEquivNoEffect = new Set(['cleartype', 'content-script-type', 'content-style-type', 'imagetoolbar', 'msthemecompatible', 'page-enter', 'page-exit', 'pics-label', 'site-enter', 'site-exit', 'window-target', 'x-ua-compatible']);
+const metaNamesNoEffect = new Set(['handheldfriendly', 'ie_rm_off', 'mobileoptimized', 'mssmarttagspreventparsing']);
+
+// Elements whose `target` defaults to `_self` where no `base` element sets another
+const targetSelfElements = new Set(['a', 'area', 'form']);
+
+const transferFunctionDefaults = { amplitude: '1', exponent: '1', intercept: '0', offset: '0', slope: '1', type: 'identity' };
+
+// SVG default attribute values, keyed by element and attribute names in lowercase, with
+// values in lowercase as well; presentation attributes are left out, as they inherit
+const tagDefaultsSVG = {
+  animatemotion: { rotate: '0' },
+  animatetransform: { type: 'translate' },
+  circle: { cx: '0', cy: '0' },
+  clippath: { clippathunits: 'userspaceonuse' },
+  ellipse: { cx: '0', cy: '0' },
+  feblend: { mode: 'normal' },
+  fecolormatrix: { type: 'matrix' },
+  fecomposite: { k1: '0', k2: '0', k3: '0', k4: '0', operator: 'over' },
+  feconvolvematrix: { bias: '0', edgemode: 'duplicate', order: '3', preservealpha: 'false' },
+  fediffuselighting: { diffuseconstant: '1', surfacescale: '1' },
+  fedisplacementmap: { scale: '0', xchannelselector: 'a', ychannelselector: 'a' },
+  fedistantlight: { azimuth: '0', elevation: '0' },
+  fedropshadow: { dx: '2', dy: '2', stddeviation: '2' },
+  fefunca: transferFunctionDefaults,
+  fefuncb: transferFunctionDefaults,
+  fefuncg: transferFunctionDefaults,
+  fefuncr: transferFunctionDefaults,
+  fegaussianblur: { stddeviation: '0' },
+  feimage: { preserveaspectratio: 'xmidymid meet' },
+  femorphology: { operator: 'erode', radius: '0' },
+  feoffset: { dx: '0', dy: '0' },
+  fepointlight: { x: '0', y: '0', z: '0' },
+  fespecularlighting: { specularconstant: '1', specularexponent: '1', surfacescale: '1' },
+  fespotlight: { pointsatx: '0', pointsaty: '0', pointsatz: '0', specularexponent: '1', x: '0', y: '0', z: '0' },
+  feturbulence: { basefrequency: '0', numoctaves: '1', seed: '0', stitchtiles: 'nostitch', type: 'turbulence' },
+  filter: { filterunits: 'objectboundingbox', height: '120%', primitiveunits: 'userspaceonuse', width: '120%', x: '-10%', y: '-10%' },
+  foreignobject: { x: '0', y: '0' },
+  image: { preserveaspectratio: 'xmidymid meet', x: '0', y: '0' },
+  line: { x1: '0', x2: '0', y1: '0', y2: '0' },
+  lineargradient: { gradientunits: 'objectboundingbox', spreadmethod: 'pad', x1: ['0', '0%'], x2: '100%', y1: ['0', '0%'], y2: ['0', '0%'] },
+  marker: { markerheight: '3', markerunits: 'strokewidth', markerwidth: '3', orient: '0', preserveaspectratio: 'xmidymid meet', refx: '0', refy: '0' },
+  mask: { height: '120%', maskcontentunits: 'userspaceonuse', maskunits: 'objectboundingbox', width: '120%', x: '-10%', y: '-10%' },
+  pattern: { height: '0', patterncontentunits: 'userspaceonuse', patternunits: 'objectboundingbox', preserveaspectratio: 'xmidymid meet', width: '0', x: '0', y: '0' },
+  radialgradient: { cx: '50%', cy: '50%', fr: ['0', '0%'], gradientunits: 'objectboundingbox', r: '50%', spreadmethod: 'pad' },
+  rect: { x: '0', y: '0' },
+  stop: { offset: '0' },
+  svg: { preserveaspectratio: 'xmidymid meet', version: '1.1', x: '0', y: '0' },
+  // Not `refX` and `refY` on `symbol`, which, unset, set no reference point
+  symbol: { preserveaspectratio: 'xmidymid meet' },
+  // Unlike in `tspan`, where they continue from the text before
+  text: { lengthadjust: 'spacing', x: '0', y: '0' },
+  textpath: { lengthadjust: 'spacing', method: 'align', spacing: 'exact', startoffset: '0' },
+  tspan: { lengthadjust: 'spacing' },
+  use: { x: '0', y: '0' },
+  view: { preserveaspectratio: 'xmidymid meet' }
+};
+
+// SVG elements taking what they do not set from the element they refer to
+const svgElementsInheritingByReference = new Set(['filter', 'lineargradient', 'pattern', 'radialgradient']);
+
+// The namespaces HTML puts elements in, which `xmlns` may only repeat
+const namespaceHTML = 'http://www.w3.org/1999/xhtml';
+const namespaceSVG = 'http://www.w3.org/2000/svg';
+const namespaceMathML = 'http://www.w3.org/1998/Math/MathML';
+const namespaceXLink = 'http://www.w3.org/1999/xlink';
+
+// Script MIME types
+
+// https://mathiasbynens.be/demo/javascript-mime-type
+// https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/script
+const executableScriptsMimetypes = new Set([
+  'text/javascript',
+  'text/x-javascript',
+  'text/ecmascript',
+  'text/x-ecmascript',
+  'text/jscript',
+  'application/javascript',
+  'application/x-javascript',
+  'application/ecmascript',
+  'application/x-ecmascript',
+  'module'
+]);
+
+const keepScriptsMimetypes = new Set([
+  'module'
+]);
+
+// Boolean attribute sets
+
+const isSimpleBoolean = new Set(['allowfullscreen', 'async', 'autofocus', 'autoplay', 'checked', 'compact', 'controls', 'declare', 'default', 'defaultchecked', 'defaultmuted', 'defaultselected', 'defer', 'disabled', 'enabled', 'formnovalidate', 'hidden', 'indeterminate', 'inert', 'ismap', 'itemscope', 'loop', 'multiple', 'muted', 'nohref', 'noresize', 'noshade', 'novalidate', 'nowrap', 'open', 'pauseonexit', 'readonly', 'required', 'reversed', 'scoped', 'seamless', 'selected', 'sortable', 'truespeed', 'typemustmatch', 'visible']);
+
+const isBooleanValue = new Set(['true', 'false']);
+
+// Values that collapse to the bare attribute name:
+// - `crossorigin=""` and `crossorigin="anonymous"` → `crossorigin` (anonymous is the default)
+// - `contenteditable=""` → `contenteditable` (empty string means inherit/true)
+const collapsibleValues = new Map([
+  ['crossorigin', new Set(['', 'anonymous'])],
+  ['contenteditable', new Set([''])]
+]);
+
+const srcsetElements = new Set(['img', 'source']);
+
+const jsonScriptTypes = new Set([
+  'application/json',
+  'application/ld+json',
+  'application/manifest+json',
+  'application/vnd.geo+json',
+  'application/problem+json',
+  'application/merge-patch+json',
+  'application/json-patch+json',
+  'importmap',
+  'speculationrules',
+]);
+
+// Tag omission rules from https://html.spec.whatwg.org/multipage/syntax.html#optional-tags
+// with the following extensions:
+// - retain `<body>` if followed by `<noscript>`
+// - `<rb>`, `<rt>`, `<rtc>`, `<rp>` follow the HTML Ruby Markup Extensions draft:
+//   https://www.w3.org/TR/html-ruby-extensions/
+// - retain all tags which are adjacent to non-standard HTML tags
+
+const optionalStartTags = new Set(['html', 'head', 'body', 'colgroup', 'tbody']);
+
+const optionalEndTags = new Set(['html', 'head', 'body', 'li', 'dt', 'dd', 'p', 'rb', 'rt', 'rtc', 'rp', 'optgroup', 'option', 'colgroup', 'caption', 'thead', 'tbody', 'tfoot', 'tr', 'td', 'th']);
+
+const headerElements = new Set(['meta', 'link', 'script', 'style', 'template', 'noscript']);
+
+const descriptionElements = new Set(['dt', 'dd']);
+
+const pBlockElements = new Set(['address', 'article', 'aside', 'blockquote', 'details', 'dialog', 'div', 'dl', 'fieldset', 'figcaption', 'figure', 'footer', 'form', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'header', 'hgroup', 'hr', 'main', 'menu', 'nav', 'ol', 'p', 'pre', 'search', 'section', 'table', 'ul']);
+
+// Elements whose end tags close an open `p` in browsers, so that `</p>` may be omitted before them
+const pClosingParents = new Set(['address', 'applet', 'article', 'aside', 'blockquote', 'body', 'button', 'caption', 'center', 'dd', 'details', 'dialog', 'dir', 'div', 'dl', 'dt', 'fieldset', 'figcaption', 'figure', 'footer', 'form', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'header', 'hgroup', 'html', 'li', 'listing', 'main', 'marquee', 'menu', 'nav', 'object', 'ol', 'pre', 'search', 'section', 'summary', 'td', 'template', 'th', 'ul']);
+
+const rubyEndTagOmission = new Set(['rb', 'rt', 'rtc', 'rp']); // `</rb>`, `</rt>`, `</rp>` can be omitted if followed by `<rb>`, `<rt>`, `<rtc>`, or `<rp>`
+
+const rubyRtcEndTagOmission = new Set(['rb', 'rtc']); // `</rtc>` can be omitted if followed by `<rb>` or `<rtc>` (not `<rt>` or `<rp>`)
+
+const optionElements = new Set(['option', 'optgroup']);
+
+const tableContentElements = new Set(['tbody', 'tfoot']);
+
+const tableSectionElements = new Set(['thead', 'tbody', 'tfoot']);
+
+const cellElements = new Set(['td', 'th']);
+
+const topLevelElements = new Set(['html', 'head', 'body']);
+
+const compactElements = new Set(['html', 'body']);
+
+const looseElements = new Set(['head', 'colgroup', 'caption']);
+
+const trailingElements = new Set(['dt', 'thead']);
+
+const htmlElements = new Set(['a', 'abbr', 'acronym', 'address', 'applet', 'area', 'article', 'aside', 'audio', 'b', 'base', 'basefont', 'bdi', 'bdo', 'bgsound', 'big', 'blink', 'blockquote', 'body', 'br', 'button', 'canvas', 'caption', 'center', 'cite', 'code', 'col', 'colgroup', 'command', 'content', 'data', 'datalist', 'dd', 'del', 'details', 'dfn', 'dialog', 'dir', 'div', 'dl', 'dt', 'element', 'em', 'embed', 'fieldset', 'figcaption', 'figure', 'font', 'footer', 'form', 'frame', 'frameset', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'head', 'header', 'hgroup', 'hr', 'html', 'i', 'iframe', 'image', 'img', 'input', 'ins', 'isindex', 'kbd', 'keygen', 'label', 'legend', 'li', 'link', 'listing', 'main', 'map', 'mark', 'marquee', 'menu', 'menuitem', 'meta', 'meter', 'multicol', 'nav', 'nobr', 'noembed', 'noframes', 'noscript', 'object', 'ol', 'optgroup', 'option', 'output', 'p', 'param', 'picture', 'plaintext', 'pre', 'progress', 'q', 'rb', 'rp', 'rt', 'rtc', 'ruby', 's', 'samp', 'script', 'search', 'section', 'select', 'selectedcontent', 'shadow', 'small', 'source', 'spacer', 'span', 'strike', 'strong', 'style', 'sub', 'summary', 'sup', 'table', 'tbody', 'td', 'template', 'textarea', 'tfoot', 'th', 'thead', 'time', 'title', 'tr', 'track', 'tt', 'u', 'ul', 'var', 'video', 'wbr', 'xmp']);
+
+// Doctype identifiers that set quirks mode, lowercase for their case-insensitive comparison
+// https://html.spec.whatwg.org/multipage/parsing.html#the-initial-insertion-mode
+
+const quirksPublicIds = new Set(['-//w3o//dtd w3 html strict 3.0//en//', '-/w3c/dtd html 4.0 transitional/en', 'html']);
+
+const quirksSystemIds = new Set(['http://www.ibm.com/data/dtd/v11/ibmxhtml1-transitional.dtd']);
+
+const quirksPublicIdPrefixes = ['+//silmaril//dtd html pro v0r11 19970101//', '-//as//dtd html 3.0 aswedit + extensions//', '-//advasoft ltd//dtd html 3.0 aswedit + extensions//', '-//ietf//dtd html 2.0 level 1//', '-//ietf//dtd html 2.0 level 2//', '-//ietf//dtd html 2.0 strict level 1//', '-//ietf//dtd html 2.0 strict level 2//', '-//ietf//dtd html 2.0 strict//', '-//ietf//dtd html 2.0//', '-//ietf//dtd html 2.1e//', '-//ietf//dtd html 3.0//', '-//ietf//dtd html 3.2 final//', '-//ietf//dtd html 3.2//', '-//ietf//dtd html 3//', '-//ietf//dtd html level 0//', '-//ietf//dtd html level 1//', '-//ietf//dtd html level 2//', '-//ietf//dtd html level 3//', '-//ietf//dtd html strict level 0//', '-//ietf//dtd html strict level 1//', '-//ietf//dtd html strict level 2//', '-//ietf//dtd html strict level 3//', '-//ietf//dtd html strict//', '-//ietf//dtd html//', '-//metrius//dtd metrius presentational//', '-//microsoft//dtd internet explorer 2.0 html strict//', '-//microsoft//dtd internet explorer 2.0 html//', '-//microsoft//dtd internet explorer 2.0 tables//', '-//microsoft//dtd internet explorer 3.0 html strict//', '-//microsoft//dtd internet explorer 3.0 html//', '-//microsoft//dtd internet explorer 3.0 tables//', '-//netscape comm. corp.//dtd html//', '-//netscape comm. corp.//dtd strict html//', '-//o\'reilly and associates//dtd html 2.0//', '-//o\'reilly and associates//dtd html extended 1.0//', '-//o\'reilly and associates//dtd html extended relaxed 1.0//', '-//sq//dtd html 2.0 hotmetal + extensions//', '-//softquad software//dtd hotmetal pro 6.0::19990601::extensions to html 4.0//', '-//softquad//dtd hotmetal pro 4.0::19971010::extensions to html 4.0//', '-//spyglass//dtd html 2.0 extended//', '-//sun microsystems corp.//dtd hotjava html//', '-//sun microsystems corp.//dtd hotjava strict html//', '-//w3c//dtd html 3 1995-03-24//', '-//w3c//dtd html 3.2 draft//', '-//w3c//dtd html 3.2 final//', '-//w3c//dtd html 3.2//', '-//w3c//dtd html 3.2s draft//', '-//w3c//dtd html 4.0 frameset//', '-//w3c//dtd html 4.0 transitional//', '-//w3c//dtd html experimental 19960712//', '-//w3c//dtd html experimental 970421//', '-//w3c//dtd w3 html//', '-//w3o//dtd w3 html 3.0//', '-//c.0//', '-//webtechs//dtd mozilla html//'];
+
+// Prefixes that set quirks mode only without a system identifier or with an empty one
+// (limited-quirks mode otherwise)
+const quirksPublicIdPrefixesNoSystemId = ['-//w3c//dtd html 4.01 frameset//', '-//w3c//dtd html 4.01 transitional//'];
+
+const specialContentElements = new Set(['script', 'style']);
+
+// Elements the parser reads as raw text as well, though only `script` and `style` are raw text
+// elements by name—these are HTML’s alone, where `script` and `style` hold text in SVG, too
+// https://html.spec.whatwg.org/multipage/parsing.html#generic-raw-text-element-parsing-algorithm
+//
+// (`noscript`, `noframes`, and `noembed` are raw text, too, but stay markup here: What they
+// hold is markup to the UA that displays it—one without scripting or frames—so minifying it
+// as markup keeps what that UA sees)
+const genericRawTextElements = new Set(['iframe', 'plaintext', 'xmp']);
+
+// `plaintext` is the one element among these whose content has no end: The text runs to the
+// end of the document, `</plaintext>` and all, as nothing switches the parser back to markup
+// https://html.spec.whatwg.org/multipage/parsing.html#plaintext-state
+const endlessRawTextElements = new Set(['plaintext']);
+
+// Escapable raw text elements, whose content is text rather than markup
+// https://html.spec.whatwg.org/multipage/syntax.html#elements-2
+const escapableRawTextElements = new Set(['textarea', 'title']);
+
+// Raw text is read without resolving character references, so its text keeps them—unlike that
+// of `textarea` and `title`, where they are resolved as they are anywhere else
+const rawTextElements = new Set([...specialContentElements, ...genericRawTextElements]);
+
+// Marks the error for a minifier that was asked for but isn’t available—a
+// configuration error, and so not one that `continueOnMinifyError` waves through
+const MISSING_DEPENDENCY = 'HM_MISSING_DEPENDENCY';
+
+// SVGO’s `preset-default` treats an SVG as a file of its own, but an inline SVG’s
+// IDs, `style` rules, hidden sprites, and empty attributes (`[data-v-…]` hooks, `alt=""`)
+// reach into the rest of the document, so the plugins that assume otherwise stay off,
+// and `minifyStyles` keeps the rules the SVG itself does not use
+const svgoPluginsInline = [{
+  name: 'preset-default',
+  params: {
+    overrides: {
+      cleanupIds: false,
+      inlineStyles: false,
+      minifyStyles: { usage: false },
+      removeEmptyAttrs: false,
+      removeHiddenElems: false,
+      removeUnknownsAndDefaults: { keepRoleAttr: true }
+    }
+  }
+}];
+
+// Mixed-case names the HTML parser gives SVG elements and attributes and MathML attributes, keyed
+// by the lowercase it reads every other name as (no lowercase name is both an element and an
+// attribute of different case, so one table serves both)
+// https://html.spec.whatwg.org/multipage/parsing.html#parsing-main-inforeign
+const namesForeignMixedCase = new Map([
+  // SVG elements
+  'altGlyph', 'altGlyphDef', 'altGlyphItem', 'animateColor', 'animateMotion', 'animateTransform',
+  'clipPath', 'feBlend', 'feColorMatrix', 'feComponentTransfer', 'feComposite', 'feConvolveMatrix',
+  'feDiffuseLighting', 'feDisplacementMap', 'feDistantLight', 'feDropShadow', 'feFlood', 'feFuncA',
+  'feFuncB', 'feFuncG', 'feFuncR', 'feGaussianBlur', 'feImage', 'feMerge', 'feMergeNode',
+  'feMorphology', 'feOffset', 'fePointLight', 'feSpecularLighting', 'feSpotLight', 'feTile',
+  'feTurbulence', 'foreignObject', 'glyphRef', 'linearGradient', 'radialGradient', 'textPath',
+  // SVG attributes
+  'attributeName', 'attributeType', 'baseFrequency', 'baseProfile', 'calcMode', 'clipPathUnits',
+  'diffuseConstant', 'edgeMode', 'filterUnits', 'gradientTransform', 'gradientUnits',
+  'kernelMatrix', 'kernelUnitLength', 'keyPoints', 'keySplines', 'keyTimes', 'lengthAdjust',
+  'limitingConeAngle', 'markerHeight', 'markerUnits', 'markerWidth', 'maskContentUnits', 'maskUnits',
+  'numOctaves', 'pathLength', 'patternContentUnits', 'patternTransform', 'patternUnits', 'pointsAtX',
+  'pointsAtY', 'pointsAtZ', 'preserveAlpha', 'preserveAspectRatio', 'primitiveUnits', 'refX', 'refY',
+  'repeatCount', 'repeatDur', 'requiredExtensions', 'requiredFeatures', 'specularConstant',
+  'specularExponent', 'spreadMethod', 'startOffset', 'stdDeviation', 'stitchTiles', 'surfaceScale',
+  'systemLanguage', 'tableValues', 'targetX', 'targetY', 'textLength', 'viewBox', 'viewTarget',
+  'xChannelSelector', 'yChannelSelector', 'zoomAndPan',
+  // MathML attributes
+  'definitionURL'
+].map(name => [name.toLowerCase(), name]));
+
+export {
+  // Regex patterns
+  RE_WS_START,
+  RE_WS_END,
+  RE_WS_ONLY,
+  RE_WS_NBSP_END,
+  RE_ALL_WS_NBSP,
+  RE_NBSP_LEADING_GROUP,
+  RE_NBSP_LEAD_GROUP,
+  RE_NBSP_TRAILING_GROUP,
+  RE_NBSP_TRAILING_STRIP,
+  RE_EVENT_ATTR_DEFAULT,
+  RE_CAN_REMOVE_ATTR_QUOTES,
+  RE_TRAILING_SEMICOLON,
+  RE_AMP_ENTITY,
+  RE_CR,
+  RE_LINE_BREAK_CR,
+  RE_LEGACY_ENTITIES,
+  RE_ESCAPE_LT,
+  RE_BASE_ELEMENT,
+  RE_ESCAPE_LT_RAW_TEXT,
+  RE_XML_ESCAPE_TEXT,
+  RE_XML_ESCAPE_ATTR,
+  RE_HTML_ENCODING,
+  RE_DOCTYPE,
+  RE_ATTR_WS_CHECK,
+  RE_ATTR_WS_COLLAPSE,
+  RE_WS_CHAR,
+  RE_STYLE_ELEMENT,
+  RE_EMPTY_ATTRIBUTE,
+
+  // Inline element sets
+  formattingElements,
+  inlineElementsToKeepWhitespaceAround,
+  inlineElementsToKeepWhitespaceWithin,
+  inlineElementsToKeepWhitespaceBetween,
+  inlineElementsToKeepWhitespaceBetweenEnd,
+  inlineElementsTransparent,
+  inlineElementsTransparentAfter,
+  inlineElementsToKeepWhitespace,
+  processingInstructionTag,
+  formControlElementsEither,
+  toEndTags,
+
+  // Default values
+  generalDefaults,
+  tagDefaults,
+  metaHttpEquivNoEffect,
+  metaNamesNoEffect,
+  targetSelfElements,
+  integrationPointsForeign,
+  tagDefaultsSVG,
+  svgElementsInheritingByReference,
+  namespaceHTML,
+  namespaceSVG,
+  namespaceMathML,
+  namespaceXLink,
+
+  // Script/style constants
+  executableScriptsMimetypes,
+  keepScriptsMimetypes,
+  jsonScriptTypes,
+
+  // Boolean sets
+  isSimpleBoolean,
+  isBooleanValue,
+  collapsibleValues,
+
+  // Misc
+  srcsetElements,
+  MISSING_DEPENDENCY,
+  namesForeignMixedCase,
+  svgoPluginsInline,
+
+  // Tag omission rules
+  optionalStartTags,
+  optionalEndTags,
+  headerElements,
+  descriptionElements,
+  pBlockElements,
+  pClosingParents,
+  rubyEndTagOmission,
+  rubyRtcEndTagOmission,
+  optionElements,
+  tableContentElements,
+  tableSectionElements,
+  cellElements,
+  topLevelElements,
+  compactElements,
+  looseElements,
+  trailingElements,
+  htmlElements,
+
+  // Doctype identifiers
+  quirksPublicIds,
+  quirksSystemIds,
+  quirksPublicIdPrefixes,
+  quirksPublicIdPrefixesNoSystemId,
+
+  // Special content elements
+  specialContentElements,
+  genericRawTextElements,
+  endlessRawTextElements,
+  escapableRawTextElements,
+  rawTextElements
+};

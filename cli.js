@@ -1,0 +1,1095 @@
+#!/usr/bin/env node
+
+/**
+ * html-minifier CLI tool
+ *
+ * MIT License
+ *
+ *  Copyright 2014–2016 Zoltan Frombach
+ *  Copyright Juriy “kangax” Zaytsev
+ *  Copyright 2025 Jens Oliver Meiert
+ *
+ *  Permission is hereby granted, free of charge, to any person obtaining a copy of
+ *  this software and associated documentation files (the "Software"), to deal in
+ *  the Software without restriction, including without limitation the rights to
+ *  use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
+ *  the Software, and to permit persons to whom the Software is furnished to do so,
+ *  subject to the following conditions:
+ *
+ *  The above copyright notice and this permission notice shall be included in all
+ *  copies or substantial portions of the Software.
+ *
+ *  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ *  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+ *  FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+ *  COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+ *  IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+ *  CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ *
+ */
+
+import fs from 'fs';
+import path from 'path';
+import { pathToFileURL } from 'url';
+import os from 'os';
+import readline from 'readline';
+import { Command, Option } from 'commander';
+
+/** @param {string} str */
+const camelCase = (str) => paramCase(str).replace(/-([a-z])/g, (_, c) => c.toUpperCase());
+
+// Commander derives its option key by applying paramCase then camelCase to the flag name, after
+// stripping a leading `no-` for negated flags (`--no-foo-bar` → `fooBar`); as option definition
+// keys may not survive that round-trip (`minifyURLs` → `minifyUrls`, `noNewlinesBeforeTagClose` →
+// `newlinesBeforeTagClose`), `commanderOptionKey` takes the same path to get Commander’s key
+/** @param {string} key */
+const commanderOptionKey = (key) => {
+  const pc = paramCase(key);
+  return pc.startsWith('no-') ? camelCase(pc.slice(3)) : camelCase(pc);
+};
+
+// Lazy-load HM to reduce CLI cold-start overhead
+import { getPreset, getPresetNames } from './src/presets.js';
+import { paramCase, parseRegExp } from './src/lib/utils.js';
+import { optionDefinitions } from './src/lib/option-definitions.js';
+import { writeFileAtomic } from './src/lib/file-write.js';
+
+const pkg = JSON.parse(fs.readFileSync(new URL('./package.json', import.meta.url), 'utf8'));
+
+const EXTENSIONS_DEFAULT = ['html', 'htm', 'shtml', 'shtm'];
+const EXTENSIONS_NON_HTML = new Set(['css', 'js', 'mjs', 'cjs', 'jsx', 'ts', 'tsx', 'svg']);
+
+const CONCURRENCY_IN_PROCESS = Math.max(1, Math.min(os.cpus().length || 4, 8));
+
+// A run with many files earns back each worker’s isolate/JIT startup cost. A smaller
+// run can do so too when it carries enough bytes to share out, which a file count
+// alone cannot see.
+const FILES_PER_RUN_MIN = 128;
+const PARALLEL_BYTES_MIN = 2 * 1024 * 1024;
+// Each worker warms up its own JIT, so the useful count tops out well short of the cores
+const WORKERS_MAX = 6;
+
+/** @type {WeakMap<string[], Promise<number[]>>} */
+const fileSizesByList = new WeakMap();
+
+const MARK_ERROR = process.stderr.isTTY ? '\x1b[31m' : '';
+const MARK_SUCCESS = process.stderr.isTTY ? '\x1b[32m' : '';
+const MARK_WARNING = process.stderr.isTTY ? '\x1b[33m' : '';
+const MARK_RESET = process.stderr.isTTY ? '\x1b[0m' : '';
+
+const program = new Command();
+program.name(pkg.name);
+
+/**
+ * @param {string} message
+ * @returns {never}
+ */
+function fatal(message) {
+  console.error(`${MARK_ERROR}${message}${MARK_RESET}`);
+  process.exit(1);
+}
+
+// `catch` bindings are `unknown`, and throw values need not be `Error`s
+/** @param {unknown} err */
+const errorMessage = (err) => err instanceof Error ? err.message : String(err);
+
+// Handle broken pipe (e.g., when piping to `head`)
+process.stdout.on('error', (/** @type {NodeJS.ErrnoException} */ err) => {
+  if (err && err.code === 'EPIPE') {
+    process.exit(0);
+  }
+  fatal('STDOUT error\n' + (err && err.message ? err.message : String(err)));
+});
+
+/**
+ * JSON does not support regexes, so, e.g., `JSON.parse()` will not create
+ * a RegExp from the JSON value `[ "/matchString/" ]`, which is
+ * technically just an array containing a string that begins and end with
+ * a forward slash. To get a RegExp from a JSON string, it must be
+ * constructed explicitly in JavaScript.
+ *
+ * The likelihood of actually wanting to match text that is enclosed in
+ * forward slashes is probably quite rare, so if forward slashes were
+ * included in an argument that requires a regex, the user most likely
+ * thought they were part of the syntax for specifying a regex.
+ *
+ * In the unlikely case that forward slashes are indeed desired in the
+ * search string, the user would need to enclose the expression in a
+ * second set of slashes:
+ *
+ *    --customAttrSurround "[\"//matchString//\"]"
+ */
+
+/** @param {string} value */
+function parseJSON(value) {
+  if (value) {
+    try {
+      return JSON.parse(value);
+    } catch {
+      if (/^\s*[{[]/.test(value)) {
+        fatal('Could not parse JSON value `' + value + '`');
+      }
+      return value;
+    }
+  }
+}
+
+/** @param {string} value */
+function parseJSONArray(value) {
+  if (!value) return undefined;
+  const parsed = parseJSON(value);
+  return Array.isArray(parsed) ? parsed : [parsed];
+}
+
+/** @param {string} value */
+function parseJSONRegExpArray(value) {
+  const values = parseJSONArray(value);
+  return values && values.map(parseRegExp);
+}
+
+/** @param {string} value */
+const parseString = value => value;
+
+/** @param {string} optionName */
+const parseValidInt = (optionName) => (/** @type {string} */ value) => {
+  const s = String(value).trim();
+  // Accept only non-negative whole integers
+  if (!/^\d+$/.test(s)) {
+    fatal(`Invalid number for \`--${paramCase(optionName)}: "${value}"\``);
+  }
+  const num = Number(s);
+  return num;
+};
+
+// Map option types to CLI parsers—`int` is resolved by `getParser`, as its
+// parser closes over the option name for error messages
+/** @type {Record<string, (value: string) => any>} */
+const typeParsers = {
+  regexp: parseRegExp,
+  regexpArray: parseJSONRegExpArray,
+  json: parseJSON,
+  jsonObject: parseJSON,
+  jsonArray: parseJSONArray,
+  string: parseString
+};
+
+/**
+ * @param {string} key Option definition key, for the `int` parser’s error messages
+ * @param {string} type Option definition type
+ * @returns {(value: string) => any}
+ */
+function getParser(key, type) {
+  const parser = type === 'int' ? parseValidInt(key) : typeParsers[type];
+  if (!parser) {
+    fatal(`No CLI parser for option \`${key}\` (type \`${type}\`)—add the type to \`typeParsers\` in cli.js`);
+  }
+  return parser;
+}
+
+// Configure command-line flags from shared option definitions
+const mainOptionKeys = Object.keys(optionDefinitions);
+Object.entries(optionDefinitions).forEach(function ([key, { description, descriptionAffirmative, type }]) {
+  const flag = paramCase(key);
+  if (type === 'invertedBoolean') {
+    // The positive form (to re-enable after a preset/config disables it) is hidden from
+    // help—the footer note covers the convention; the negative form is the primary use case
+    program.addOption(new Option('--' + flag, descriptionAffirmative ?? 'Enable --' + flag).hideHelp());
+    program.option('--no-' + flag, description);
+  } else if (type === 'boolean') {
+    program.option('--' + flag, description);
+    // The negation form is hidden from help—the footer note covers the convention;
+    // skip options whose flag already starts with `no-` (currently only
+    // `noNewlinesBeforeTagClose`), as `--no-no-X` is not usable
+    if (!flag.startsWith('no-')) {
+      program.addOption(new Option('--no-' + flag, 'Disable --' + flag).hideHelp());
+    }
+  } else {
+    const cliFlag = '--' + flag + (type === 'json' || type === 'jsonObject' ? ' [value]' : ' <value>');
+    program.option(cliFlag, description, getParser(key, type));
+  }
+});
+program.option('-i --input <file>', 'Specify input file (alternative to positional argument; pair with `--output` for output)');
+program.option('-o --output <file>', 'Specify output file (reads from `--input` file argument or STDIN; outputs to STDOUT if not specified)');
+program.option('-v --verbose', 'Show detailed processing information (active options, worker thread count, file statistics, and minifier warnings)');
+program.option('-d --dry', 'Dry run: Process and report statistics without writing output');
+program.addHelpText('after', '\nBoolean options support a `--no-<flag>` form to disable them, overriding a preset or config file (e.g., `--preset=comprehensive --no-collapse-whitespace`).\n\nHTML Minifier documentation: https://meiert.com/hm');
+
+// Lazy import wrapper for HM
+/** @type {Promise<typeof import('./src/htmlminifier.js').minify> | undefined} */
+let minifyFnPromise;
+async function getMinify() {
+  if (!minifyFnPromise) {
+    minifyFnPromise = import('./src/htmlminifier.js').then(m => m.minify);
+  }
+  return minifyFnPromise;
+}
+
+/** @param {string} file */
+function readFile(file) {
+  try {
+    return fs.readFileSync(file, { encoding: 'utf8' });
+  } catch (err) {
+    fatal('Cannot read ' + file + '\n' + errorMessage(err));
+  }
+}
+
+/**
+ * Load config from a file path. Extensions .json, .js, and .mjs are handled
+ * directly; for unknown extensions, JSON is tried first, then module import.
+ * @param {string} configPath - Path to config file
+ * @returns {Promise<Record<string, any>>} Loaded config object
+ */
+async function loadConfigFromPath(configPath) {
+  const abs = path.resolve(configPath);
+  const ext = path.extname(configPath).toLowerCase();
+
+  if (ext === '.json') {
+    try { return JSON.parse(readFile(abs).replace(/^\uFEFF/, '')); }
+    catch (err) { fatal(`Cannot parse config file as JSON: ${errorMessage(err)}`); }
+  }
+
+  if (ext === '.js' || ext === '.mjs') {
+    // `import()` handles both ESM and CJS .js files—Node resolves the type via the
+    // nearest package.json `type` field, same as it does for regular module loading
+    try { const mod = await import(pathToFileURL(abs).href); return 'default' in mod ? mod.default : mod; }
+    catch (err) { fatal(`Cannot load config file: ${errorMessage(err)}`); }
+  }
+
+  /** @type {unknown} */
+  let jsonErr;
+  try { return JSON.parse(readFile(abs).replace(/^\uFEFF/, '')); }
+  catch (err) { jsonErr = err; }
+
+  try { const mod = await import(pathToFileURL(abs).href); return 'default' in mod ? mod.default : mod; }
+  catch (esmErr) {
+    fatal(`Cannot read the specified config file.\nAs JSON: ${errorMessage(jsonErr)}\nAs module: ${errorMessage(esmErr)}`);
+  }
+}
+
+// Config keys the CLI handles itself, beyond the options in `optionDefinitions`
+const CONFIG_KEYS_EXTRA = new Set(['$schema', 'preset', 'fileExt', 'ignoreDir']);
+
+// Default config file, looked up in the working directory when `--config-file` isn’t specified
+const CONFIG_FILE_DEFAULT = 'html-minifier.config.json';
+
+/**
+ * Parse a config value—strings as on the command line, anything else as it is, since
+ * a JSON round trip would drop what only a module config can hold (functions, regexes)
+ * @param {string} key Option definition key
+ * @param {string} type Option definition type
+ * @param {unknown} value
+ */
+function parseConfigValue(key, type, value) {
+  if (typeof value === 'string') return getParser(key, type)(value);
+  switch (type) {
+    case 'int':
+      return getParser(key, type)(String(value));
+    // A single value is wrapped as its string form is; `null` and `undefined` leave it unset
+    case 'regexpArray':
+      return value == null ? undefined : (Array.isArray(value) ? value : [value]).map(parseRegExp);
+    case 'jsonArray':
+      return value == null ? undefined : (Array.isArray(value) ? value : [value]);
+    default:
+      return value;
+  }
+}
+
+/**
+ * Normalize and validate config object by applying parsers and transforming values.
+ * @param {Record<string, any>} config - Raw config object
+ * @returns {Record<string, any>} Normalized config object
+ */
+function normalizeConfig(config) {
+  /** @type {Record<string, any>} */
+  const normalized = { ...config };
+
+  // Warn about unrecognized config keys—catches typos and options removed in earlier versions
+  Object.keys(normalized).forEach(function (key) {
+    if (!Object.hasOwn(optionDefinitions, key) && !CONFIG_KEYS_EXTRA.has(key)) {
+      console.error(`Ignoring unknown or deprecated config option \`${key}\` (see \`--help\` or README for available options)`);
+    }
+  });
+
+  // Apply parsers to main options
+  Object.entries(optionDefinitions).forEach(function ([key, { type }]) {
+    if (key in normalized) {
+      if (type !== 'boolean' && type !== 'invertedBoolean') {
+        normalized[key] = parseConfigValue(key, type, normalized[key]);
+      }
+    }
+  });
+
+  if ('fileExt' in normalized) {
+    // Support both string (`html,htm`) and array (`["html", "htm"]`) formats
+    if (Array.isArray(normalized.fileExt)) {
+      normalized.fileExt = normalized.fileExt.join(',');
+    }
+  }
+
+  if ('ignoreDir' in normalized) {
+    // Support both string (`libs,vendor`) and array (`["libs", "vendor"]`) formats
+    if (Array.isArray(normalized.ignoreDir)) {
+      normalized.ignoreDir = normalized.ignoreDir.join(',');
+    }
+  }
+
+  return normalized;
+}
+
+/** @type {Record<string, any>} */
+let config = {};
+program.option('-z, --zero', 'Minify all HTML files in the current folder and its subfolders in place (except node_modules), using comprehensive settings (standalone—the flag is ignored when combined with other options)');
+program.option('-I --input-dir <dir>', 'Specify an input directory');
+program.option('-X --ignore-dir <patterns>', 'Exclude directories—relative to input directory—from processing (comma-separated, overrides config file setting)');
+program.option('-O --output-dir <dir>', 'Specify an output directory');
+program.option('-w --workers <n>', 'Number of worker threads for multi-file runs; defaults to half the available cores (at most 6) for runs large enough to justify them', parseValidInt('workers'));
+program.option('-f --file-ext <extensions>', 'Specify file extension(s) to process (comma-separated, overrides config file setting); defaults to `html,htm,shtml,shtm`; use `*` for all files');
+program.option('-p --preset <name>', `Use a preset configuration (${getPresetNames().join(', ')})`);
+program.option('-c --config-file <file>', 'Use a configuration file (defaults to html-minifier.config.json in the working directory, if present)');
+program.version(pkg.version, '-V, --version', 'Output the version number');
+program.helpOption('-h, --help', 'Display help for command');
+
+(async () => {
+  /** @type {string} */
+  let content;
+  let filesProvided = false;
+  /** @type {string[]} */
+  let capturedFiles = [];
+  await program.arguments('[files...]').action(function (files) {
+    capturedFiles = files;
+    filesProvided = files.length > 0;
+    // Defer reading files until after check for consumed filenames
+  }).parseAsync(process.argv);
+
+  const programOptions = program.opts();
+
+  // A `parseJSON` option that consumed a filename as its value is `true`, and the
+  // file goes back on the list
+  const jsonOptionKeys = ['minifyCss', 'minifyJs', 'minifyUrls'];
+  for (const key of jsonOptionKeys) {
+    const value = programOptions[key];
+    if (typeof value === 'string' && /\.(html?|shtml?|xhtml?|php|xml|svg|jsx|tsx|vue|ejs|hbs|mustache|twig)$/i.test(value)) {
+      programOptions[key] = true;
+      capturedFiles.push(value);
+      filesProvided = true;
+    }
+  }
+
+  if (programOptions.input) {
+    capturedFiles.unshift(programOptions.input);
+    filesProvided = true;
+  }
+
+  // Handle zero config mode (standalone in-place minification of the current folder)
+  if (programOptions.zero) {
+    const hasOtherArgs = process.argv.slice(2).some(arg => arg !== '--zero' && arg !== '-z');
+    if (hasOtherArgs) {
+      console.error('Note: `--zero` was ignored—it can only be used on its own, to minify the current folder at comprehensive settings.');
+    } else {
+      const cwd = process.cwd();
+      const [execPath = '', scriptPath = ''] = process.argv;
+      const commandName = process.env.npm_command === 'exec'
+        ? 'npx html-minifier'
+        : scriptPath.endsWith('.js')
+          ? `${path.basename(execPath)} ${scriptPath}`
+          : path.basename(scriptPath);
+
+      process.stderr.write(
+        `${MARK_WARNING}Zero-config mode minifies all HTML files in the current folder and its subfolders (${cwd}) in place, using comprehensive settings. If you want to compare results and be able to revert, do this under version control.${MARK_RESET}\n` +
+        `Equivalent to: ${commandName} --input-dir=. --output-dir=. --ignore-dir=node_modules --preset=comprehensive\n\n` +
+        `Do you want to continue? [y/N] `
+      );
+
+      const answer = await new Promise((resolve) => {
+        const rl = readline.createInterface({ input: process.stdin });
+        rl.once('line', (line) => {
+          resolve(line.trim().toLowerCase());
+          rl.close();
+        });
+        rl.once('close', () => resolve(''));
+      });
+
+      if (answer !== 'y') {
+        process.stderr.write(`${MARK_ERROR}In-place minification aborted.${MARK_RESET}\n`);
+        process.exit(0);
+      }
+
+      programOptions.preset = 'comprehensive';
+
+      const inputDirResolved = await fs.promises.realpath(cwd).catch(() => cwd);
+      const stats = await processDirectory(cwd, cwd, EXTENSIONS_DEFAULT, false, false, undefined, Boolean(process.stderr.isTTY), ['node_modules'], inputDirResolved);
+      reportProcessed(stats.length);
+
+      process.exit(0);
+    }
+  }
+
+  // Load and normalize config if `--config-file` was specified; otherwise look
+  // for a default config file in the working directory
+  if (programOptions.configFile) {
+    config = await loadConfigFromPath(programOptions.configFile);
+    config = normalizeConfig(config);
+  } else if (fs.existsSync(path.resolve(CONFIG_FILE_DEFAULT))) {
+    console.error(`Using config file ${CONFIG_FILE_DEFAULT}`);
+    config = normalizeConfig(await loadConfigFromPath(CONFIG_FILE_DEFAULT));
+  }
+
+  function createOptions() {
+    /** @type {Record<string, any>} */
+    const options = {};
+
+    // Priority order: preset < config < CLI
+    // 1. Apply preset if specified (CLI `--preset` takes priority over config.preset)
+    const presetName = programOptions.preset || config.preset;
+    if (presetName) {
+      const preset = getPreset(presetName);
+      if (!preset) {
+        fatal(`Unknown preset “${presetName}”. Available presets: ${getPresetNames().join(', ')}`);
+      }
+      Object.assign(options, preset);
+    }
+
+    // 2. Apply config file options (overrides preset)
+    mainOptionKeys.forEach(function (key) {
+      if (key in config) {
+        options[key] = config[key];
+      }
+    });
+
+    // 3. Apply CLI options (overrides config and preset)
+    Object.entries(optionDefinitions).forEach(function ([key, { type }]) {
+      const ck = commanderOptionKey(key);
+      if (program.getOptionValueSource(ck) === 'cli') {
+        const val = programOptions[ck];
+        // For boolean options whose param-case name starts with `no-`, Commander treats
+        // the flag as a negation and stores the inverted value under the stripped key;
+        // invert back so the option definition key gets the intended value
+        options[key] = (type === 'boolean' && paramCase(key).startsWith('no-')) ? !val : val;
+      }
+    });
+
+    // 4. Surface minifier diagnostics when verbose
+    if (programOptions.verbose || programOptions.dry) {
+      options.log = createLog();
+    }
+
+    return options;
+  }
+
+  /**
+   * Diagnostics name no file of their own, so a run over a directory—where several are in
+   * flight at once and lines interleave—says which file each came from
+   * @param {string} [fileLabel]
+   */
+  function createLog(fileLabel) {
+    const where = fileLabel ? ` (${fileLabel})` : '';
+    return (/** @type {unknown} */ message) => {
+      // The hook carries the minifier’s per-call timing as well, which the run's own
+      // per-file statistics already cover
+      if (typeof message === 'string' && message.startsWith('minified in: ')) {
+        return;
+      }
+      // Only `continueOnMinifyError` passes `Error` objects, always after leaving the
+      // offending content unminified—so say that
+      if (message instanceof Error) {
+        console.error(`  ${MARK_WARNING}Warning: Minification failed, content left as-is: ${message.message || message}${where}${MARK_RESET}`);
+      } else if (String(message).startsWith('Warning: ') || String(message).startsWith('HTML Minifier: ')) {
+        console.error(`  ${MARK_WARNING}${message}${where}${MARK_RESET}`);
+      } else {
+        console.error(`  ${message}${where}`);
+      }
+    };
+  }
+
+  /** @param {Record<string, unknown>} minifierOptions */
+  function getActiveOptionsDisplay(minifierOptions) {
+    const presetName = programOptions.preset || config.preset;
+    if (presetName) {
+      console.error(`Using preset: ${presetName}`);
+    }
+    const activeOptions = Object.entries(minifierOptions)
+      .filter(([k]) => program.getOptionValueSource(commanderOptionKey(k)) === 'cli')
+      .map(([k, v]) => (typeof v === 'boolean' ? (v ? k : `no-${k}`) : k));
+    if (activeOptions.length > 0) {
+      console.error('CLI options: ' + activeOptions.join(', '));
+    }
+  }
+
+  /**
+   * @param {string} original
+   * @param {string} minified
+   */
+  function calculateStats(original, minified) {
+    return calculateSizeStats(Buffer.byteLength(original, 'utf8'), Buffer.byteLength(minified, 'utf8'));
+  }
+
+  /**
+   * @param {number} originalSize
+   * @param {number} minifiedSize
+   */
+  function calculateSizeStats(originalSize, minifiedSize) {
+    const saved = originalSize - minifiedSize;
+    const sign = saved >= 0 ? '-' : '+';
+    const percentage = originalSize ? ((Math.abs(saved) / originalSize) * 100).toFixed(1) : '0.0';
+    return { originalSize, minifiedSize, saved, sign, percentage };
+  }
+
+  /** @param {ReturnType<typeof calculateSizeStats>} stats */
+  function formatSizeStats(stats) {
+    return `${stats.originalSize.toLocaleString()} → ${stats.minifiedSize.toLocaleString()} bytes (${stats.sign}${Math.abs(stats.saved).toLocaleString()}, ${stats.percentage}%)`;
+  }
+
+  /**
+   * @param {string} label
+   * @param {ReturnType<typeof calculateSizeStats>} stats
+   */
+  function reportFileStats(label, stats) {
+    console.error(`  ${MARK_SUCCESS}✓${MARK_RESET} ${label}: ${formatSizeStats(stats)}`);
+  }
+
+  /** @param {number} count */
+  function reportProcessed(count) {
+    console.error(`${MARK_SUCCESS}Processed ${count.toLocaleString()} file${count === 1 ? '' : 's'}.${MARK_RESET}`);
+  }
+
+  /**
+   * Reports a single-output run and writes its result to `--output` or STDOUT; a dry
+   * run reports only
+   * @param {string} inputSource
+   * @param {string} original
+   * @param {string} minified
+   */
+  async function reportAndWrite(inputSource, original, minified) {
+    const stats = calculateStats(original, minified);
+
+    if (programOptions.dry) {
+      console.error(`[DRY RUN] Would minify: ${inputSource} → ${programOptions.output || 'STDOUT'}`);
+      console.error(`  Original: ${stats.originalSize.toLocaleString()} bytes`);
+      console.error(`  Minified: ${stats.minifiedSize.toLocaleString()} bytes`);
+      console.error(`  Saved: ${stats.sign}${Math.abs(stats.saved).toLocaleString()} bytes (${stats.percentage}%)`);
+      await printCacheStats();
+      return;
+    }
+
+    if (programOptions.verbose) {
+      reportFileStats(inputSource, stats);
+      await printCacheStats();
+    }
+
+    if (programOptions.output) {
+      try {
+        await fs.promises.mkdir(path.dirname(programOptions.output), { recursive: true });
+        await writeFileAtomic(programOptions.output, minified);
+      } catch (err) {
+        fatal('Cannot write ' + programOptions.output + '\n' + errorMessage(err));
+      }
+      return;
+    }
+
+    process.stdout.write(minified);
+  }
+
+  /**
+   * Byte size per file, read once per list whichever step asks first; a failed stat counts
+   * as 0, leaving normal file processing to report the read error with its usual wording
+   * @param {string[]} files
+   */
+  function getFileSizes(files) {
+    let sizes = fileSizesByList.get(files);
+    if (!sizes) {
+      sizes = Promise.all(files.map(file => fs.promises.stat(file).then(stat => stat.size, () => 0)));
+      fileSizesByList.set(files, sizes);
+    }
+    return sizes;
+  }
+
+  /**
+   * A pool for this run, or `null` where one wouldn’t pay or wouldn’t work—in which case
+   * the caller minifies in-process exactly as before
+   * @param {string[]} files
+   */
+  async function createPool(files) {
+    const fileCount = files.length;
+    const requested = programOptions.workers;
+    const isVerbose = Boolean(programOptions.verbose || programOptions.dry);
+    // Whether the run went wide is worth saying, since the default weighs the file
+    // count and the bytes there are to share out, neither of which the caller sees
+    const inProcess = () => {
+      if (isVerbose) console.error('Worker threads: none (minifying in-process)');
+      return null;
+    };
+    // `availableParallelism` reports what this process may actually use, which under a
+    // CPU affinity mask—a container, commonly—is less than the machine’s core count
+    const isDefault = requested === undefined;
+    const size = isDefault
+      ? Math.max(1, Math.min(Math.floor(os.availableParallelism() / 2), WORKERS_MAX))
+      : requested;
+
+    // The file count only decides the default; asking for workers outright is the
+    // caller’s judgment to make, whatever the run looks like
+    if (size <= 1) {
+      return inProcess();
+    }
+
+    if (isDefault && fileCount < FILES_PER_RUN_MIN) {
+      // `stat()` is cheaper than starting workers, and a pooled run reuses the sizes
+      const sizes = await getFileSizes(files);
+      // No single file is split across workers, so the largest one sets a floor no
+      // pool can beat; what the rest carry is the work there is to share out
+      const parallelBytes = sizes.reduce((sum, byteSize) => sum + byteSize, 0) - Math.max(0, ...sizes);
+      if (parallelBytes < PARALLEL_BYTES_MIN) {
+        return inProcess();
+      }
+    }
+
+    // `log` is a closure over this process’s console and is rebuilt inside the worker;
+    // anything else unclonable (such as a function from a module config) stays in-process
+    const { log, ...options } = createOptions();
+    try {
+      structuredClone(options);
+    } catch {
+      return inProcess();
+    }
+
+    // A pool this small has nothing to share out and still pays for its workers, so an
+    // explicit request for them lands in-process as `--workers=1` does
+    const poolSize = Math.min(size, fileCount);
+    if (poolSize <= 1) {
+      return inProcess();
+    }
+
+    try {
+      const { createFilePool } = await import('./src/lib/file-pool.js');
+      const pool = createFilePool({
+        options,
+        size: poolSize,
+        // `log` is only set when the run asks for diagnostics
+        onLog: log
+          ? (/** @type {string} */ message, /** @type {boolean} */ isError, /** @type {string} */ file) =>
+            createLog(path.relative(process.cwd(), file))(isError ? new Error(message) : message)
+          : undefined
+      });
+      if (isVerbose) console.error(`Worker threads: ${poolSize}`);
+      return pool;
+    } catch {
+      return inProcess();
+    }
+  }
+
+  async function printCacheStats() {
+    const { getCacheStats } = await import('./src/htmlminifier.js');
+    const cacheStats = getCacheStats();
+    /** @type {Record<string, string>} */
+    const labels = { css: 'CSS', js: 'JS', svg: 'SVG' };
+
+    /** @type {string[]} */
+    const lines = [];
+    for (const [key, { gets, hits, size, limit }] of Object.entries(cacheStats)) {
+      // Untouched caches (e.g., with their minifier disabled) are left out
+      if (gets === 0) continue;
+      const misses = gets - hits;
+      lines.push(`  ${labels[key]} cache: ${hits.toLocaleString()} hit${hits === 1 ? '' : 's'}, ${misses.toLocaleString()} miss${misses === 1 ? '' : 'es'}, ${size.toLocaleString()}/${limit.toLocaleString()} entries`);
+    }
+
+    if (lines.length === 0) return;
+    console.error('Cache stats:');
+    lines.forEach(line => console.error(line));
+  }
+
+  /**
+   * @param {string} inputFile
+   * @param {string} outputFile
+   * @param {boolean} [isDryRun]
+   * @param {boolean} [isVerbose]
+   */
+  async function processFile(inputFile, outputFile, isDryRun = false, isVerbose = false) {
+    const data = await fs.promises.readFile(inputFile, { encoding: 'utf8' }).catch(err => {
+      fatal('Cannot read ' + inputFile + '\n' + errorMessage(err));
+    });
+
+    let minified;
+    try {
+      const minify = await getMinify();
+      const fileOptions = createOptions();
+      if (fileOptions.log) {
+        fileOptions.log = createLog(path.relative(process.cwd(), inputFile));
+      }
+      minified = await minify(data, fileOptions);
+    } catch (err) {
+      fatal('Minification error on ' + inputFile + '\n' + errorMessage(err));
+    }
+
+    const stats = calculateStats(data, minified);
+
+    if (isDryRun || isVerbose) {
+      reportFileStats(path.relative(process.cwd(), inputFile), stats);
+    }
+
+    if (!isDryRun) {
+      await writeFileAtomic(outputFile, minified).catch(err => {
+        fatal('Cannot write ' + outputFile + '\n' + errorMessage(err));
+      });
+    }
+
+    return { originalSize: stats.originalSize, minifiedSize: stats.minifiedSize, saved: stats.saved };
+  }
+
+  /**
+   * @param {string} fileExt
+   * @returns {string[]}
+   */
+  function parseFileExtensions(fileExt) {
+    if (!fileExt) return [];
+    if (fileExt.trim() === '*') return ['*'];
+    const list = fileExt
+      .split(',')
+      .map(ext => ext.trim().replace(/^\.+/, '').toLowerCase())
+      .filter(ext => ext.length > 0);
+    return [...new Set(list)];
+  }
+
+  /**
+   * @param {string} filename
+   * @param {string[]} fileExtensions
+   */
+  function shouldProcessFile(filename, fileExtensions) {
+    if (fileExtensions.includes('*')) {
+      return true;
+    }
+
+    const fileExt = path.extname(filename).replace(/^\.+/, '').toLowerCase();
+    return fileExtensions.includes(fileExt);
+  }
+
+  /**
+   * @param {string} patterns - Comma-separated directory patterns (e.g., "libs,vendor")
+   * @returns {string[]} Array of trimmed pattern strings with normalized separators
+   */
+  function parseIgnorePatterns(patterns) {
+    if (!patterns) return [];
+    return patterns
+      .split(',')
+      .map(p => p.trim().replace(/\\/g, '/').replace(/\/+$/, ''))
+      .filter(p => p.length > 0);
+  }
+
+  /**
+   * Check if a directory should be ignored based on ignore patterns.
+   * Supports matching by directory name or relative path.
+   * @param {string} dirPath - Absolute path to the directory
+   * @param {string[]} ignorePatterns - Array of patterns to match against (with forward slashes)
+   * @param {string} baseDir - Base directory for relative path calculation
+   * @returns {boolean} True if directory should be ignored
+   */
+  function shouldIgnoreDirectory(dirPath, ignorePatterns, baseDir) {
+    if (!ignorePatterns || ignorePatterns.length === 0) return false;
+
+    // Normalize to forward slashes for cross-platform comparison
+    const relativePath = path.relative(baseDir, dirPath).replace(/\\/g, '/');
+    const dirName = path.basename(dirPath);
+
+    return ignorePatterns.some(pattern => {
+      // Support both exact directory names and relative paths
+      return dirName === pattern || relativePath === pattern || relativePath.startsWith(pattern + '/');
+    });
+  }
+
+  /**
+   * @param {number} current
+   * @param {number} total
+   */
+  function updateProgress(current, total) {
+    // Clear the line first, then write simple progress
+    process.stderr.write(`\r\x1b[K`);
+    const percentage = ((current / total) * 100).toFixed(1);
+    process.stderr.write(`Processing ${current.toLocaleString()}/${total.toLocaleString()} (${percentage}%)`);
+  }
+
+  function clearProgress() {
+    process.stderr.write('\r\x1b[K'); // Clear the line
+  }
+
+  /**
+   * @template T, R
+   * @param {T[]} items
+   * @param {number} limit
+   * @param {(item: T, index: number) => Promise<R>} worker
+   * @returns {Promise<R[]>}
+   */
+  async function runWithConcurrency(items, limit, worker) {
+    /** @type {R[]} */
+    const results = new Array(items.length);
+    let next = 0;
+    let active = 0;
+    return new Promise((resolve, reject) => {
+      const launch = () => {
+        while (active < limit && next < items.length) {
+          const current = next++;
+          const item = /** @type {T} */ (items[current]);
+          active++;
+          Promise.resolve(worker(item, current))
+            .then((res) => {
+              results[current] = res;
+              active--;
+              launch();
+            })
+            .catch(reject);
+        }
+        if (next >= items.length && active === 0) {
+          resolve(results);
+        }
+      };
+      launch();
+    });
+  }
+
+  /**
+   * @param {string} dir
+   * @param {string[]} extensions
+   * @param {string | undefined} skipRootAbs
+   * @param {string[]} ignorePatterns
+   * @param {string} baseDir
+   * @returns {Promise<string[]>}
+   */
+  async function collectFiles(dir, extensions, skipRootAbs, ignorePatterns, baseDir) {
+    /** @type {string[]} */
+    const out = [];
+    const entries = await fs.promises.readdir(dir).catch(() => []);
+    for (const name of entries) {
+      const filePath = path.join(dir, name);
+      if (skipRootAbs) {
+        const real = await fs.promises.realpath(filePath).catch(() => undefined);
+        if (real && (real === skipRootAbs || real.startsWith(skipRootAbs + path.sep))) continue;
+      }
+      const lst = await fs.promises.lstat(filePath).catch(() => null);
+      if (!lst || lst.isSymbolicLink()) continue;
+      if (lst.isDirectory()) {
+        if (shouldIgnoreDirectory(filePath, ignorePatterns, baseDir)) continue;
+        const sub = await collectFiles(filePath, extensions, skipRootAbs, ignorePatterns, baseDir);
+        out.push(...sub);
+      } else if (shouldProcessFile(name, extensions)) {
+        out.push(filePath);
+      }
+    }
+    return out;
+  }
+
+  /**
+   * @param {string} inputDir
+   * @param {string} outputDir
+   * @param {string[]} extensions
+   * @param {boolean} isDryRun
+   * @param {boolean} isVerbose
+   * @param {string | undefined} skipRootAbs
+   * @param {boolean} showProgress
+   * @param {string[]} ignorePatterns
+   * @param {string} baseDir
+   */
+  async function processDirectory(inputDir, outputDir, extensions, isDryRun, isVerbose, skipRootAbs, showProgress, ignorePatterns, baseDir) {
+    // Collect all files first for bounded parallel processing
+    const list = await collectFiles(inputDir, extensions, skipRootAbs, ignorePatterns, baseDir);
+    const allStats = new Array(list.length);
+
+    const prepareOutDir = async (/** @type {string} */ inputFile) => {
+      const outFile = path.join(outputDir, path.relative(inputDir, inputFile));
+      if (!isDryRun) {
+        await fs.promises.mkdir(path.dirname(outFile), { recursive: true }).catch(err => {
+          fatal('Cannot create directory ' + path.dirname(outFile) + '\n' + errorMessage(err));
+        });
+      }
+      return outFile;
+    };
+
+    let done = 0;
+    const advanceProgress = () => {
+      if (showProgress) updateProgress(++done, list.length);
+    };
+
+    const pool = await createPool(list);
+    if (pool) {
+      try {
+        const { orderLargestFirst } = await import('./src/lib/file-pool.js');
+        const [fileSizes, tasks] = await Promise.all([
+          getFileSizes(list),
+          Promise.all(list.map(async (inputFile, idx) => ({ inputFile, outFile: await prepareOutDir(inputFile), idx })))
+        ]);
+        // `run()` queues synchronously, so the files reach the pool in exactly this order
+        await Promise.all(orderLargestFirst(tasks, fileSizes).map(async ({ inputFile, outFile, idx }) => {
+          const sizes = await pool.run({ inputFile, outputFile: outFile, dryRun: isDryRun })
+            .catch(err => {
+              // A worker names the step it failed at, so the wording matches what this
+              // file would have got had it been minified in this process
+              if (err?.stage === 'read') fatal('Cannot read ' + inputFile + '\n' + errorMessage(err));
+              if (err?.stage === 'write') fatal('Cannot write ' + outFile + '\n' + errorMessage(err));
+              fatal('Minification error on ' + inputFile + '\n' + errorMessage(err));
+            });
+          const stats = calculateSizeStats(sizes.originalSize, sizes.minifiedSize);
+          if (isDryRun || isVerbose) {
+            reportFileStats(path.relative(process.cwd(), inputFile), stats);
+          }
+          allStats[idx] = { originalSize: stats.originalSize, minifiedSize: stats.minifiedSize, saved: stats.saved };
+          advanceProgress();
+        }));
+      } finally {
+        await pool.close();
+      }
+    } else {
+      await runWithConcurrency(list, CONCURRENCY_IN_PROCESS, async (inputFile, idx) => {
+        const outFile = await prepareOutDir(inputFile);
+        allStats[idx] = await processFile(inputFile, outFile, isDryRun, isVerbose);
+        advanceProgress();
+      });
+    }
+    if (showProgress) clearProgress();
+    return allStats.filter(Boolean);
+  }
+
+  const writeMinify = async () => {
+    const minifierOptions = createOptions();
+
+    if (programOptions.verbose || programOptions.dry) {
+      getActiveOptionsDisplay(minifierOptions);
+    }
+
+    let minified;
+
+    try {
+      const minify = await getMinify();
+      minified = await minify(content, minifierOptions);
+    } catch (err) {
+      fatal('Minification error:\n' + errorMessage(err));
+    }
+
+    await reportAndWrite(program.args.length > 0 ? program.args.join(', ') : 'STDIN', content, minified);
+  };
+
+  const { inputDir, outputDir, fileExt, ignoreDir } = programOptions;
+
+  // Resolve file extensions: CLI argument > config file > defaults
+  const hasCliFileExt = program.getOptionValueSource('fileExt') === 'cli';
+  const resolvedFileExt = hasCliFileExt ? (fileExt || '*') : (config.fileExt || EXTENSIONS_DEFAULT);
+
+  // Resolve ignore patterns: CLI argument takes priority over config file
+  const hasCliIgnoreDir = program.getOptionValueSource('ignoreDir') === 'cli';
+  const resolvedIgnoreDir = hasCliIgnoreDir ? ignoreDir : config.ignoreDir;
+
+  if (inputDir || outputDir) {
+    if (!inputDir) {
+      fatal('The option `output-dir` needs to be used with the option `input-dir`—if you are working with a single file, use `--input`/`--output`');
+    } else if (!outputDir) {
+      fatal('You need to specify where to write the output files with the option `--output-dir`');
+    }
+
+    const extList = Array.isArray(resolvedFileExt) ? resolvedFileExt : parseFileExtensions(String(resolvedFileExt || ''));
+    {
+      const isWildcard = extList.includes('*');
+      const nonHtmlExts = isWildcard ? [] : extList.filter(e => EXTENSIONS_NON_HTML.has(e));
+      if (isWildcard || nonHtmlExts.length > 0) {
+        const label = isWildcard ? 'all file types' : nonHtmlExts.map(e => `.${e}`).join(', ');
+        console.error(`${MARK_WARNING}Warning: Processing ${label}—HTML Minifier processes CSS, JavaScript, and SVG only when embedded in HTML. Non-HTML files may produce incomplete or broken output.${MARK_RESET}`);
+      }
+    }
+
+    await (async () => {
+      // `--dry` automatically enables verbose mode
+      const isVerbose = programOptions.verbose || programOptions.dry;
+
+      if (isVerbose) {
+        const minifierOptions = createOptions();
+        getActiveOptionsDisplay(minifierOptions);
+      }
+
+      // Prevent traversing into the output directory when it is inside the input directory
+      let outputReal;
+      const inputReal = await fs.promises.realpath(inputDir).catch(() => undefined);
+      try {
+        outputReal = await fs.promises.realpath(outputDir);
+      } catch {
+        outputReal = path.resolve(outputDir);
+      }
+      let skipRootAbs;
+      if (inputReal && outputReal && outputReal !== inputReal && outputReal.startsWith(inputReal + path.sep)) {
+        skipRootAbs = outputReal;
+      }
+
+      if (programOptions.dry) {
+        console.error(`[DRY RUN] Would process directory: ${inputDir} → ${outputDir}`);
+      }
+
+      const showProgress = Boolean(process.stderr.isTTY) && !isVerbose;
+      const ignorePatterns = parseIgnorePatterns(resolvedIgnoreDir);
+
+      try {
+        const stat = await fs.promises.stat(inputDir);
+        if (!stat.isDirectory()) {
+          fatal(`${inputDir} is not a directory—to minify a single file, use \`--input\`/\`--output\`: html-minifier [options] -i ${inputDir} -o <output-file>`);
+        }
+      } catch (err) {
+        fatal('Cannot read directory ' + inputDir + '\n' + errorMessage(err));
+      }
+
+      // Resolve base directory for consistent path comparisons
+      const inputDirResolved = inputReal || inputDir;
+
+      const stats = await processDirectory(inputDir, outputDir, extList, Boolean(programOptions.dry), Boolean(isVerbose), skipRootAbs, showProgress, ignorePatterns, inputDirResolved);
+
+      if (showProgress) {
+        reportProcessed(stats.length);
+      }
+
+      if (isVerbose && stats.length > 0) {
+        const totalOriginal = stats.reduce((sum, s) => sum + s.originalSize, 0);
+        const totalMinified = stats.reduce((sum, s) => sum + s.minifiedSize, 0);
+        console.error('---');
+        console.error(`Total: ${formatSizeStats(calculateSizeStats(totalOriginal, totalMinified))}`);
+      }
+
+      if (isVerbose) {
+        await printCacheStats();
+      }
+    })();
+  } else if (filesProvided) { // Minifying one or more files specified on the command line
+    // Process each file independently, then concatenate outputs
+    const minifierOptions = createOptions();
+    if (programOptions.verbose || programOptions.dry) {
+      getActiveOptionsDisplay(minifierOptions);
+    }
+
+    for (const file of capturedFiles) {
+      const ext = path.extname(file).replace(/^\./, '').toLowerCase();
+      if (EXTENSIONS_NON_HTML.has(ext)) {
+        console.error(`${MARK_WARNING}Warning: ${path.basename(file)} does not appear to be an HTML file—HTML Minifier processes CSS, JavaScript, and SVG only when embedded in HTML. The output may be incomplete or broken.${MARK_RESET}`);
+      }
+    }
+
+    const inputs = capturedFiles.slice();
+
+    const originals = new Array(inputs.length);
+    const outputs = new Array(inputs.length);
+
+    await runWithConcurrency(inputs, CONCURRENCY_IN_PROCESS, async (file, idx) => {
+      const data = await fs.promises.readFile(file, 'utf8').catch(err => fatal('Cannot read ' + file + '\n' + errorMessage(err)));
+      const minify = await getMinify();
+      let out;
+      try {
+        out = await minify(data, minifierOptions);
+      } catch (err) {
+        fatal('Minification error on ' + file + '\n' + errorMessage(err));
+      }
+      originals[idx] = data;
+      outputs[idx] = out;
+    });
+
+    await reportAndWrite(capturedFiles.join(', '), originals.join(''), outputs.join(''));
+    process.exit(0);
+  } else { // Minifying input coming from STDIN
+    content = '';
+    process.stdin.setEncoding('utf8');
+    process.stdin.on('data', function (/** @type {string} */ data) {
+      content += data;
+    }).on('end', async function() {
+      await writeMinify();
+      process.exit(0);
+    });
+  }
+})();

@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8">
+		<meta name="viewport" content="width=device-width">
+		<title>HTML Minifier · Web demo of the highly effective, super-configurable, well-tested web page minifier</title>
+		<link rel="stylesheet" href="./default.css">
+	</head>
+	<body>
+		<h1>HTML Minifier <span id="minifier-version"></span></h1>
+		<main x-data="minifier" x-cloak>
+			<div class="workspace">
+				<textarea rows="10" cols="40" id="input" x-ref="input" x-model="input" x-show="!inputMarked" @focus="editingInput = true" @blur="showInputView()" aria-label="Markup to minify"></textarea>
+				<pre id="input-view" x-ref="inputView" role="region" aria-label="Markup to minify, invisible characters marked; select to edit" tabindex="0" x-show="inputMarked" x-html="annotatedInput" @pointerdown="_pointerOnInputView = true" @focus="_pointerOnInputView || editInput()" @click="editInput($event)" @blur="_pointerOnInputView = false"></pre>
+				<div class="alt">
+					<button type="button" @click="minify()">Minify</button>
+					<button type="button" @click="shareUrl()">Share</button>
+					<span x-show="share" x-text="share" class="share"></span>
+				</div>
+				<div class="form-group">
+					<input type="checkbox" id="show-invisibles" x-model="showInvisibles">
+					<label for="show-invisibles">Show <i>invisibles</i></label>
+					<span class="quiet">Mark characters that don’t show or look like plain spaces<span>: runs of spaces (“·”) and tabs within a line (not indentation), no-break and other special spaces, and zero-width characters such as soft hyphens and direction marks</span></span>
+				</div>
+				<textarea rows="10" cols="40" id="output" readonly x-model="output" x-show="!showInvisibles" aria-label="Minified markup"></textarea>
+				<pre id="output-view" role="region" aria-label="Minified markup, invisible characters marked" tabindex="0" x-show="showInvisibles" x-html="annotatedOutput" @copy="copyFromView($event, output)"></pre>
+				<div class="alt">
+					<button type="button" @click="copyOutput()">Copy output</button>
+					<span x-show="copied" x-text="copied" class="share"></span>
+				</div>
+				<p x-text="stats.text" :class="stats.result"></p>
+			</div>
+			<div class="options">
+				<form class="alt">
+					<template x-for="option in options">
+						<div>
+							<template x-if="option.type === 'checkbox'">
+								<div class="form-group">
+									<input type="checkbox" :id="option.id" x-model="option.checked" :disabled="option.disabled === true">
+									<label :for="option.id" x-html="option.label" :class="option.unsafe ? 'unsafe' : ''"></label>
+									<template x-if="option.helpText">
+										<span class="quiet" x-html="option.helpText"></span>
+									</template>
+								</div>
+							</template>
+							<template x-if="option.type === 'text' || option.type === 'number'">
+								<div class="form-group">
+									<label :for="option.id" x-html="option.label" :class="option.unsafe ? 'unsafe' : ''"></label>
+									<input :type="option.type" :id="option.id" x-model="option.value">
+									<template x-if="option.helpText">
+										<span class="quiet" x-html="option.helpText"></span>
+									</template>
+								</div>
+							</template>
+						</div>
+					</template>
+				</form>
+				<div>
+					<span>Select:</span>
+					<a href="#" @click.prevent="selectAllOptions(true)">All</a>,
+					<a href="#" @click.prevent="applyPreset('conservative')">conservative</a>,
+					<a href="#" @click.prevent="applyPreset('comprehensive')">comprehensive</a>,
+					<a href="#" @click.prevent="selectAllOptions(false)">none</a>,
+					<a href="#" @click.prevent="resetOptions()">reset</a>
+					<p>(Cf. <a href="https://github.com/j9t/html-minifier?tab=readme-ov-file#options-quick-reference">README</a> or CLI for all options)</p>
+				</div>
+			</div>
+		</main>
+		<footer>
+			<p class="quiet">
+				HTML Minifier is an enhanced and maintained minifier by <a href="https://meiert.com/">Jens Oliver Meiert</a>.
+				The original HTML Minifier was made by <a href="https://perfectionkills.com/">Juriy “kangax” Zaytsev</a>,
+				using a tweaked version of HTML parser by <a href="https://johnresig.com/">John Resig</a>,
+				which was based on work by <a href="https://web.archive.org/web/20200818163733/http://erik.eae.net/">Erik Arvidsson</a>.
+				Source and bug tracker are <a href="https://github.com/j9t/html-minifier">available on GitHub</a>.
+			</p>
+		</footer>
+		<script src="/lz-string.min.js"></script>
+		<script src="./default.js" type="module"></script>
+		<script src="https://cdn.jsdelivr.net/npm/alpinejs@3/dist/cdn.min.js" defer></script>
+	</body>
+</html>

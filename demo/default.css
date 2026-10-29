@@ -1,0 +1,207 @@
+:not(code) {
+	font-family: ui-sans-serif, system-ui, sans-serif;
+}
+
+html,
+body,
+p {
+	margin: 0;
+}
+
+html,
+body {
+	font-size: 16px;
+	line-height: 1.5;
+	padding: 0;
+}
+
+body {
+	padding: 12px;
+}
+
+footer,
+p {
+	margin-top: 1rem;
+}
+
+main {
+	column-gap: 10px;
+	display: grid;
+	grid-template-columns: 4fr 2fr;
+}
+
+h1 {
+	font-size: 1.25rem;
+	margin-top: 0;
+}
+
+label,
+button {
+	cursor: pointer;
+}
+
+input[type='text'],
+input[type='number'],
+span.quiet {
+	display: block;
+}
+
+input[type='text'],
+input[type='number'] {
+	margin: .2rem 0;
+}
+
+input[type='text'] {
+	width: 70%;
+}
+
+input[type='number'] {
+	max-width: 70%;
+}
+
+input[type='checkbox'] {
+	bottom: -1px;
+	margin: 0 2px 0 0;
+	position: relative;
+}
+
+button {
+	font-size: 1rem;
+	margin: .25rem 0 1rem;
+	padding: .25rem .5rem;
+}
+
+textarea + p,
+#input-view,
+#output-view {
+	margin-top: 0;
+}
+
+i,
+.invisible {
+	background: #ffc000;
+}
+
+i {
+	font-style: normal;
+}
+
+code,
+.quiet {
+	font-size: smaller;
+}
+
+code {
+	word-break: break-all;
+}
+
+.form-group {
+	margin-bottom: .75rem;
+}
+
+.quiet {
+	color: #888;
+}
+
+.options {
+	background: #f9f9f9;
+	overflow: auto;
+	padding: 10px;
+}
+
+.success,
+.share {
+	color: #008000;
+}
+
+.failure,
+.unsafe {
+	color: #f00;
+}
+
+/* Isolated so that bidi controls reorder neither the text around them nor their markers */
+.invisible,
+.invisible.zero-width::after {
+	unicode-bidi: isolate;
+}
+
+.invisible {
+	border-radius: 2px;
+}
+
+.invisible.space {
+	background: none;
+	position: relative;
+}
+
+/* Laid over the character, so as not to add width or be copied */
+.invisible.space::after {
+	color: #888;
+	content: '·';
+	content: '·' / '';
+	inset: 0;
+	pointer-events: none;
+	position: absolute;
+	text-align: center;
+}
+
+.invisible.zero-width::after {
+	content: attr(data-marker);
+	font-size: .7em;
+	padding: 0 1px;
+	vertical-align: middle;
+}
+
+.alt {
+	margin-bottom: 1rem;
+}
+
+[x-cloak] {
+	display: none !important;
+}
+
+#input,
+#input-view,
+#output,
+#output-view {
+	/* Set explicitly, as form controls take neither the page’s font nor its box model */
+	background: #fff;
+	border: 1px solid #767676;
+	box-sizing: border-box;
+	display: block;
+	font-size: .8333rem;
+	height: 36vh;
+	line-height: normal;
+	margin-bottom: 5px;
+	min-height: 15rem;
+	padding: 2px;
+	resize: vertical;
+	width: 100%;
+}
+
+#input-view,
+#output-view {
+	overflow: auto;
+	overflow-wrap: anywhere;
+	white-space: pre-wrap;
+}
+
+@media screen and (max-width: 600px) {
+
+	main {
+		grid-template-columns: 3fr 2fr;
+	}
+
+	.quiet span {
+		display: none;
+	}
+
+}
+
+@media screen and (max-width: 400px) {
+
+	main {
+		grid-template-columns: 2fr 2fr;
+	}
+
+}

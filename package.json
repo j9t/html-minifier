@@ -1,0 +1,98 @@
+{
+  "author": "Jens Oliver Meiert",
+  "bin": {
+    "html-minifier": "./cli.js",
+    "hm": "./cli.js"
+  },
+  "bugs": "https://github.com/j9t/html-minifier/issues",
+  "dependencies": {
+    "commander": "^15.0.0",
+    "entities": "^8.1.0",
+    "lightningcss": "^1.33.0",
+    "svgo": "^4.1.0",
+    "terser": "^5.51.2"
+  },
+  "description": "Highly effective, super-configurable, well-tested web page minifier",
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@swc/core": "^1.16.20",
+    "@types/node": "^26.6.5",
+    "eslint": "^10.13.0",
+    "globals": "^17.13.0",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.5"
+  },
+  "engines": {
+    "node": ">=22.13"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/types/htmlminifier.d.ts",
+      "import": "./src/htmlminifier.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "cli.js",
+    "dist/types",
+    "html-minifier.schema.json",
+    "src"
+  ],
+  "funding": "https://github.com/j9t/html-minifier?sponsor=1",
+  "homepage": "https://j9t.github.io/html-minifier/",
+  "keywords": [
+    "cli",
+    "compress",
+    "compressor",
+    "css",
+    "html",
+    "htmlmin",
+    "javascript",
+    "js",
+    "min",
+    "minification",
+    "minifier",
+    "minify",
+    "optimize",
+    "optimizer",
+    "pack",
+    "packer",
+    "svg",
+    "svgo",
+    "swc",
+    "terser",
+    "uglifier",
+    "uglify"
+  ],
+  "license": "MIT",
+  "name": "html-minifier",
+  "peerDependencies": {
+    "@swc/core": "^1.15.7"
+  },
+  "peerDependenciesMeta": {
+    "@swc/core": {
+      "optional": true
+    }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/j9t/html-minifier.git"
+  },
+  "scripts": {
+    "build": "tsc && npm run build:schema",
+    "build:docs": "vite build --base /html-minifier/",
+    "build:schema": "node scripts/build-schema.js",
+    "deploy": "npm run build && npm run build:docs",
+    "lint": "eslint .",
+    "prebuild": "node --input-type=module --eval \"import {rmSync} from 'fs';rmSync('dist',{recursive:true,force:true})\"",
+    "prepack": "npm run build",
+    "prepare": "git config core.hooksPath .githooks || true",
+    "serve": "vite",
+    "test": "npm run test:types && node --test \"test/**/*.test.js\" \"backtest/*.test.js\"",
+    "test:types": "tsc --noEmit && tsc --project tsconfig.test.json",
+    "test:watch": "node --test --watch \"test/**/*.test.js\" \"backtest/*.test.js\""
+  },
+  "type": "module",
+  "types": "dist/types/htmlminifier.d.ts",
+  "version": "5.0.0"
+}

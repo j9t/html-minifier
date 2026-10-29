@@ -1,0 +1,58 @@
+/**
+ * Preset configurations
+ *
+ * Presets provide curated option sets for common use cases:
+ * - `conservative`: Safe minification suitable for most projects
+ * - `comprehensive`: Aggressive minification for maximum file size reduction
+ */
+
+export const presets = {
+  conservative: {
+    caseSensitive: true,
+    collapseBooleanAttributes: true,
+    collapseWhitespace: true,
+    conservativeCollapse: true,
+    preserveLineBreaks: true,
+    removeComments: true,
+    removeDefaultTypeAttributes: true,
+    useShortDoctype: true
+  },
+  comprehensive: {
+    collapseAttributeWhitespace: true,
+    collapseBooleanAttributes: true,
+    collapseEmptyAttributes: true,
+    collapseWhitespace: true,
+    decodeEntities: true,
+    mergeScripts: true,
+    minifyCSS: true,
+    minifyJS: true,
+    minifyJSON: true,
+    minifySVG: true,
+    minifyURLs: true,
+    removeAttributeQuotes: true,
+    removeComments: true,
+    removeDefaultTypeAttributes: true,
+    removeEmptyAttributes: true,
+    removeOptionalTags: true,
+    removeRedundantAttributes: true,
+    selfCloseForeignElements: true,
+    useShortDoctype: true
+  }
+};
+
+/**
+ * @param {string} name - Preset name (“conservative” or “comprehensive”)
+ * @returns {object|null} Preset options object or null if not found
+ */
+export function getPreset(name) {
+  if (!name) return null;
+  const normalizedName = name.toLowerCase();
+  return /** @type {Record<string, object>} */ (presets)[normalizedName] || null;
+}
+
+/**
+ * @returns {string[]} Array of preset names
+ */
+export function getPresetNames() {
+  return Object.keys(presets);
+}

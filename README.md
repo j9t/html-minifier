@@ -1,3 +1,901 @@
 # HTML Minifier
 
-@@
+[![npm version](https://img.shields.io/npm/v/html-minifier.svg)](https://www.npmjs.com/package/html-minifier) [![Build status](https://github.com/j9t/html-minifier/workflows/Tests/badge.svg)](https://github.com/j9t/html-minifier/actions) [![Socket](https://badge.socket.dev/npm/package/html-minifier)](https://socket.dev/npm/package/html-minifier) [![GitHub Sponsors](https://badgen.net/static/Support/Open%20Source/cyan)](https://github.com/sponsors/j9t)
+
+Your web page optimization precision tool: HTML Minifier (HM) is a **highly effective, super-configurable, well-tested HTML minifier**, written in JavaScript, that also handles in-document CSS, JavaScript, and SVG minification.
+
+HTML Minifier was originally created by [Juriy “kangax” Zaytsev](https://github.com/kangax/html-minifier). As of version 5, it’s actively maintained by [Jens Oliver Meiert](https://github.com/j9t)—richer in features, easier to use, and significantly faster ([engineering philosophy](https://meiert.com/blog/html-minifier-next-engineering-philosophy/)).
+
+<!-- @@ Link HM 4 upgrade guide and HMN transfer guide -->
+
+## Installation
+
+HTML Minifier is ESM-only and requires Node.js ≥22.13.
+
+For use as a command-line app, use npx:
+
+```shell
+npx html-minifier --help
+```
+
+(For immediate, zero-config use in the current folder: `npx html-minifier --zero`)
+
+For programmatic use, install as a development dependency:
+
+```shell
+npm i -D html-minifier
+```
+
+## General usage
+
+### CLI
+
+Use `npx html-minifier --help` to check all available options:
+
+| Option | Description | Example |
+| --- | --- | --- |
+| `--zero`, `-z` | Minify all HTML files in the current folder and its subfolders in place (except node_modules), using comprehensive settings (standalone—the flag is ignored when combined with other options) | `npx html-minifier --zero` |
+| `--input-dir <dir>`, `-I <dir>` | Specify an input directory | `--input-dir=src` |
+| `--ignore-dir <patterns>`, `-X <patterns>` | Exclude directories—relative to input directory—from processing (comma-separated, overrides config file setting) | `--ignore-dir=libs`, `--ignore-dir=libs,vendor,node_modules` |
+| `--output-dir <dir>`, `-O <dir>` | Specify an output directory | `--output-dir=dist` |
+| `--workers <n>`, `-w <n>` | Number of worker threads for multi-file runs; defaults to half the available cores (at most 6) for runs large enough to justify them | `--workers=4` |
+| `--input <file>`, `-i <file>` | Specify input file (alternative to positional argument; pair with `--output` for file output) | `npx html-minifier -i input.html -o output.html` |
+| `--output <file>`, `-o <file>` | Specify output file (reads from `--input` file argument or STDIN; outputs to STDOUT if not specified) | File to file: `npx html-minifier input.html -o output.html`<br>File to file (explicit): `npx html-minifier -i input.html -o output.html`<br>Pipe to file: `cat input.html \| npx html-minifier -o output.html`<br>File to STDOUT: `npx html-minifier input.html` |
+| `--file-ext <extensions>`, `-f <extensions>` | Specify file extension(s) to process (comma-separated, overrides config file setting); defaults to `html,htm,shtml,shtm`; use `*` for all files | `--file-ext=html,php`, `--file-ext='*'` |
+| `--preset <name>`, `-p <name>` | Use a preset configuration (conservative or comprehensive) | `--preset=conservative` |
+| `--config-file <file>`, `-c <file>` | Use a configuration file (defaults to html-minifier.config.json in the working directory, if present) | `--config-file=path/to/config.json` |
+| `--verbose`, `-v` | Show detailed processing information (active options, worker thread count, file statistics, and minifier warnings) | `npx html-minifier --input-dir=src --output-dir=dist --verbose --collapse-whitespace` |
+| `--dry`, `-d` | Dry run: Process and report statistics without writing output | `npx html-minifier input.html --dry --collapse-whitespace` |
+
+### Configuration file
+
+You can use a configuration file to specify options. If an html-minifier.config.json file is present in the current working directory—only there; subfolders (including `--input-dir`) and parent folders are not searched—the CLI picks it up automatically, with a note on STDERR confirming this. An explicit `--config-file` takes precedence. (The standalone `--zero` mode is deliberately config-free and ignores default config files.) The file can be either in JSON format or a JavaScript module that exports the configuration object:
+
+**JSON configuration example:**
+
+```json
+{
+  "collapseWhitespace": true,
+  "removeComments": true,
+  "fileExt": "html,php",
+  "ignoreDir": "libs,vendor"
+}
+```
+
+For editor support (validation, autocomplete, and inline documentation) in JSON configuration files, reference the [JSON Schema](https://raw.githubusercontent.com/j9t/html-minifier/main/html-minifier.schema.json) that ships with the package:
+
+```json
+{
+  "$schema": "https://raw.githubusercontent.com/j9t/html-minifier/main/html-minifier.schema.json",
+  "collapseWhitespace": true,
+  "removeComments": true
+}
+```
+
+(If HM is installed locally, you can also use the path ./node_modules/html-minifier/html-minifier.schema.json instead of the URL.)
+
+**JavaScript module configuration example** (requires `"type": "module"` in the project’s package.json, or use a .mjs extension):
+
+```js
+export default {
+  collapseWhitespace: true,
+  removeComments: true,
+  fileExt: "html,php",
+  ignoreDir: ["libs", "vendor"]
+};
+```
+
+A module can also hold values JSON cannot express, like regular expressions (e.g., `ignoreCustomFragments: [/\{\{[\s\S]*?\}\}/]`) and functions (for `minifyCSS`, `minifyJS`, and `minifyURLs`, or in custom SVGO plugins for `minifySVG`). As functions cannot be passed to worker threads, a run using them minifies in-process.
+
+### Node.js
+
+```js
+import { minify } from 'html-minifier';
+
+const result = await minify('<p title="example" id="moo">foo</p>', {
+  removeAttributeQuotes: true,
+  removeOptionalTags: true
+});
+console.log(result); // `<p title=example id=moo>foo`
+```
+
+(CommonJS consumers can still use dynamic import—`const { minify } = await import('html-minifier')`—as `minify()` is async.)
+
+See [the original blog post](https://perfectionkills.com/experimenting-with-html-minifier/) for details of [how it works](https://perfectionkills.com/experimenting-with-html-minifier/#how_it_works), [descriptions of most options](https://perfectionkills.com/experimenting-with-html-minifier/#options), [testing results](https://perfectionkills.com/experimenting-with-html-minifier/#field_testing), and [conclusions](https://perfectionkills.com/experimenting-with-html-minifier/#cost_and_benefits).
+
+## Presets
+
+HTML Minifier provides presets for common use cases. Presets are pre-configured option sets that can be used as a starting point:
+
+* `conservative`: Basic minification with whitespace collapsing, comment removal, and removal of select attributes.
+* `comprehensive`: More advanced minification for better file size reduction, including relevant conservative options plus attribute quote removal, optional tag removal, and more.
+
+To review the specific options set, [presets.js](https://github.com/j9t/html-minifier/blob/main/src/presets.js) lists them in an accessible manner. For output served with Gzip or Brotli, see [“Optimizing for compression”](#optimizing-for-compression) for what to add.
+
+**Using presets:**
+
+```shell
+# Via CLI flag
+npx html-minifier --preset conservative input.html
+
+# Via config file
+npx html-minifier --config-file=path/to/config.json input.html
+# where config.json contains `{ "preset": "conservative" }`
+
+# Override preset options
+npx html-minifier --preset conservative --remove-empty-attributes input.html
+```
+
+**Priority order:** Presets are applied first, then config file options, then CLI flags. This allows you to start with a preset and customize as needed.
+
+## Options quick reference
+
+Most of the options are disabled by default. Experiment and find what works best for you and your project.
+
+Options can be used in config files (camelCase) or via CLI flags (kebab-case with `--` prefix). Boolean options generally support both `--option-name` to enable and `--no-option-name` to disable, so you can override a preset or config file from the command line. (Exception: Options whose name already starts with `no-`, such as `noNewlinesBeforeTagClose`, only expose the `--no-…` CLI flag.)
+
+| Option (config/CLI) | Description | Default |
+| --- | --- | --- |
+| `cacheCSS`<br>`--cache-css` | [Set CSS minification cache size](#css-javascript-and-svg-cache-configuration); higher values improve performance for batch processing | `500` |
+| `cacheJS`<br>`--cache-js` | [Set JavaScript minification cache size](#css-javascript-and-svg-cache-configuration); higher values improve performance for batch processing | `500` |
+| `cacheSVG`<br>`--cache-svg` | [Set SVG minification cache size](#css-javascript-and-svg-cache-configuration); higher values improve performance for batch processing | `500` |
+| `caseSensitive`<br>`--case-sensitive` | Keep element and attribute names as written (e.g., for framework components like `<MyButton>`) | `false` |
+| `collapseAttributeWhitespace`<br>`--collapse-attribute-whitespace` | Trim and collapse whitespace characters within attribute values | `false` |
+| `collapseBooleanAttributes`<br>`--collapse-boolean-attributes` | [Omit attribute values from boolean attributes](https://perfectionkills.com/experimenting-with-html-minifier/#collapse_boolean_attributes) | `false` |
+| `collapseEmptyAttributes`<br>`--collapse-empty-attributes` | Omit empty attribute values (e.g., `alt=""` → `alt`) | `false` |
+| `collapseInlineTagWhitespace`<br>`--collapse-inline-tag-whitespace` | Collapse whitespace more aggressively between inline elements—use with [`collapseWhitespace`](#combining-whitespace-options) | `false` |
+| `collapseNoBreakSpaces`<br>`--collapse-no-break-spaces` | Remove whitespace next to no-break spaces, narrow no-break spaces, and figure spaces in text (e.g., `a &nbsp; b` → `a&nbsp;b`), keeping runs of them—use with [`collapseWhitespace`](#combining-whitespace-options) | `false` |
+| `collapseWhitespace`<br>`--collapse-whitespace` | [Collapse whitespace that contributes to text nodes in a document tree](https://perfectionkills.com/experimenting-with-html-minifier/#collapse_whitespace); [enable other whitespace options](#combining-whitespace-options) | `false` |
+| `conservativeCollapse`<br>`--conservative-collapse` | Always collapse to one space (never remove it entirely)—use with [`collapseWhitespace`](#combining-whitespace-options) | `false` |
+| `continueOnMinifyError`<br>`--continue-on-minify-error`<br>`--no-continue-on-minify-error` | Continue on minification errors; when `false`, minification errors throw and abort processing | `true` |
+| `continueOnParseError`<br>`--continue-on-parse-error` | [Handle parse errors](https://html.spec.whatwg.org/multipage/parsing.html#parse-errors) instead of aborting | `false` |
+| `customAttrAssign`<br>`--custom-attr-assign` | Array of regexes that allow to support custom attribute assign expressions (e.g., `<div flex?="{{mode != cover}}"></div>`) | `[]` |
+| `customAttrCollapse`<br>`--custom-attr-collapse` | Regex that specifies custom attribute to strip newlines from (e.g., `/ng-class/`) | `undefined` |
+| `customAttrSurround`<br>`--custom-attr-surround` | Array of regexes that allow to support custom attribute surround expressions (e.g., `<input {{#if value}}checked="checked"{{/if}}>`) | `[]` |
+| `customEventAttributes`<br>`--custom-event-attributes` | Array of regexes that allow to support custom event attributes (e.g., `ng-click`)—use with `minifyJS` | `[ /^on[a-z]{3,}$/ ]` |
+| `decodeEntities`<br>`--decode-entities` | Use direct Unicode characters whenever possible | `false` |
+| `ignoreCustomComments`<br>`--ignore-custom-comments` | Array of regexes that allow to ignore matching comments | `[ /^!/, /^\s*#/ ]` |
+| `ignoreCustomFragments`<br>`--ignore-custom-fragments` | Array of regexes that allow to ignore certain fragments, when matched (e.g., `<?php … ?>`, `{{ … }}`, etc.; see [“Minifying server-side templates”](#minifying-server-side-templates)) | `[ /<%[\s\S]*?%>/, /<\?(?:php[\t\n\r ]\|=\|\$\|xml(?:-stylesheet)?(?![\w-])\|\s)[\s\S]*?\?>/i ]` |
+| `includeAutoGeneratedTags`<br>`--include-auto-generated-tags` | Insert elements generated by HTML parser | `false` |
+| `inlineCustomElements`<br>`--inline-custom-elements` | Array of names of custom elements which are inline, for whitespace handling—use with `collapseWhitespace` | `[]` |
+| `keepClosingSlash`<br>`--keep-closing-slash` | Keep the trailing slash on void elements and other start tags that carry one, and read it as closing the element | `false` |
+| `maxInputLength`<br>`--max-input-length` | Maximum input length to prevent ReDoS attacks (disabled by default) | `undefined` |
+| `maxLineLength`<br>`--max-line-length` | Specify a maximum line length; output will be split by newlines in tags only (between attributes or before a tag’s `>`), where they can’t change the page, so lines may run longer | `undefined` |
+| `mergeScripts`<br>`--merge-scripts` | Merge consecutive inline `script` elements into one (only merges compatible scripts with same `type`, matching `async`/`defer`/`nomodule`/`nonce`) | `false` |
+| `minifyCSS`<br>`--minify-css` | [Minify CSS](#css-minification) in `style` elements and attributes (uses [Lightning CSS](https://lightningcss.dev/)) | `false` (could be `true`, `Object`, `Function(text, type)`) |
+| `minifyJS`<br>`--minify-js` | [Minify JavaScript](#javascript-minification) in `script` elements and event attributes (uses [Terser](https://terser.org/) or [SWC](https://swc.rs/)) | `false` (could be `true`, `Object`, `Function(text, inline)`) |
+| `minifyJSON`<br>`--minify-json` | [Minify JSON](#json-minification) in `script` elements (e.g., `application/ld+json`, `importmap`, etc.) by removing whitespace | `false` |
+| `minifySVG`<br>`--minify-svg` | [Minify SVG](#svg-minification) elements (uses [SVGO](https://svgo.dev/)) | `false` (could be `true`, `Object`) |
+| `minifyURLs`<br>`--minify-urls` | Minify URLs in various attributes | `false` (could be `true`, `String`, `Object`, `Function(text)`) |
+| `noNewlinesBeforeTagClose`<br>`--no-newlines-before-tag-close` | Never split a line in a tag that closes an element—use with `maxLineLength` | `false` |
+| `partialMarkup`<br>`--partial-markup` | Treat input as a partial HTML fragment, preserving stray end tags (closing tags without opening tags) and preventing auto-closing of unclosed tags at end of input | `false` |
+| `preserveLineBreaks`<br>`--preserve-line-breaks` | Always collapse to one line break (never remove it entirely) when whitespace between tags includes a line break—use with [`collapseWhitespace`](#combining-whitespace-options) | `false` |
+| `preventAttributesEscaping`<br>`--prevent-attributes-escaping` | Prevents the escaping of the values of attributes | `false` |
+| `processScripts`<br>`--process-scripts` | Array of strings corresponding to types of `script` elements to process through minifier (e.g., `text/ng-template`, `text/x-handlebars-template`, etc.) | `[]` |
+| `quoteCharacter`<br>`--quote-character` | Type of quote to use for attribute values (`'` or `"`) | Auto-detected (uses the quote requiring less escaping; defaults to `"` when equal) |
+| `removeAttributeQuotes`<br>`--remove-attribute-quotes` | [Remove quotes around attributes when possible](https://perfectionkills.com/experimenting-with-html-minifier/#remove_attribute_quotes) | `false` |
+| `removeComments`<br>`--remove-comments` | [Strip HTML comments](https://perfectionkills.com/experimenting-with-html-minifier/#remove_comments) | `false` |
+| `removeDefaultTypeAttributes`<br>`--remove-default-type-attributes` | Remove default `type` attributes from `style`/`link` (e.g., `type="text/css"`) and `script` (e.g., `type="text/javascript"`) elements; other `type` attribute values are left intact | `false` |
+| `removeEmptyAttributes`<br>`--remove-empty-attributes` | [Remove all attributes with whitespace-only values](https://perfectionkills.com/experimenting-with-html-minifier/#remove_empty_or_blank_attributes) | `false` (could be `true`, `Function(attrName, tag)`) |
+| `removeEmptyElements`<br>`--remove-empty-elements` | [Remove all elements with empty contents](#removing-empty-elements) | `false` |
+| `removeEmptyElementsExcept`<br>`--remove-empty-elements-except` | Array of elements to preserve—use with `removeEmptyElements`; accepts simple tag names (e.g., `["td"]`) or HTML-like markup with attributes (e.g., `["<i class='test'>"]`); supports double quotes, single quotes, and unquoted attribute values | `[]` |
+| `removeOptionalTags`<br>`--remove-optional-tags` | [Remove optional tags](https://perfectionkills.com/experimenting-with-html-minifier/#remove_optional_tags) | `false` |
+| `removeRedundantAttributes`<br>`--remove-redundant-attributes` | [Remove attributes when value matches default](https://meiert.com/blog/optional-html/#toc-attribute-values) or has no effect (as well as `rel` keywords and `meta` elements without effect) | `false` |
+| `removeTagWhitespace`<br>`--remove-tag-whitespace` | Remove space between attributes whenever possible; **note that this will result in invalid HTML** | `false` |
+| `removeUnusedCSS`<br>`--remove-unused-css` | [Remove CSS from `style` elements](#unused-css-removal) that name an element, class, or ID the document doesn’t reference—use with `minifyCSS`, and `safelist` for names only external scripts use | `false` (could be `true`, `{ safelist, scripts }`) |
+| `selfCloseForeignElements`<br>`--self-close-foreign-elements` | Self-close empty SVG and MathML elements (e.g., `<path d="…"></path>` → `<path d="…"/>`) | `false` |
+| `sortAttributes`<br>`--sort-attributes` | [Sort attributes by frequency](#sorting-attributes-and-style-classes) | `false` |
+| `sortClassNames`<br>`--sort-class-names` | [Sort style classes by frequency](#sorting-attributes-and-style-classes) | `false` |
+| `strictCustomFragments`<br>`--strict-custom-fragments` | [Reject `ignoreCustomFragments` patterns that risk catastrophic backtracking](#redos-protection) (rather than warning about them) | `false` |
+| `trimCustomFragments`<br>`--trim-custom-fragments` | Trim whitespace around custom fragments (`ignoreCustomFragments`) where it does not affect the output (see [“Minifying server-side templates”](#minifying-server-side-templates))—use with `collapseWhitespace` | `false` |
+| `useShortDoctype`<br>`--use-short-doctype` | [Replaces the doctype with the short HTML doctype](https://perfectionkills.com/experimenting-with-html-minifier/#use_short_doctype) | `false` |
+
+### API-only options
+
+A few options take functions and are therefore only available programmatically, not via CLI flags or config files:
+
+| Option | Description | Default |
+| --- | --- | --- |
+| `canCollapseWhitespace` | `Function(tag, attrs, defaultFn)` that determines whether runs of whitespace inside an element can be collapsed (whether its content may be trimmed is up to `canTrimWhitespace`)—override to protect additional elements, delegating to `defaultFn` for the rest | Built-in handling (protects `pre`, `textarea`, etc.) |
+| `canMinifyCSS` | Synchronous `Function(text, type)` that determines whether `minifyCSS` may process a given piece of CSS—returning `false` [leaves it as if `minifyCSS` were off](#css-minification) | All CSS is minified |
+| `canMinifyJS` | Synchronous `Function(text, inline)` that determines whether `minifyJS` may process a given piece of JavaScript—returning `false` [leaves it unminified](#javascript-minification) | All JavaScript is minified |
+| `canMinifySVG` | Synchronous `Function(text)` that determines whether `minifySVG` may pass a given outermost `svg` element to SVGO—returning `false` [skips SVGO for it](#svg-minification) | All SVG is minified |
+| `canTrimWhitespace` | `Function(tag, attrs, defaultFn)` that determines whether whitespace inside an element may be trimmed; where not, it stays as written, as in `pre` | Built-in handling (protects `pre`, `textarea`, etc.) |
+| `log` | `Function(message)` called with warnings and errors, including minification errors (`continueOnMinifyError`) and parse errors (`continueOnParseError`); the CLI wires this up under `--verbose` and `--dry` | No-op (errors are silent) |
+
+### Options that rely on another option
+
+Some options modify what another option does, and do nothing when that other option is off. Setting one on its own is reported through [the `log` hook](#api-only-options) (and, in the CLI, on STDERR), once per message per run:
+
+```text
+HTML Minifier: Ignoring `conservativeCollapse`—use with `collapseWhitespace` (`--collapse-whitespace`)
+```
+
+| Option | Needs |
+| --- | --- |
+| `canMinifyCSS` | `minifyCSS`, and not [a function of your own](#css-minification) |
+| `canMinifyJS` | `minifyJS`, and not [a function of your own](#javascript-minification) |
+| `canMinifySVG` | `minifySVG`, and not [a function of your own](#svg-minification) |
+| `collapseInlineTagWhitespace` | `collapseWhitespace` |
+| `collapseNoBreakSpaces` | `collapseWhitespace` |
+| `conservativeCollapse` | `collapseWhitespace` |
+| `customEventAttributes` | `minifyJS` |
+| `inlineCustomElements` | `collapseWhitespace` |
+| `noNewlinesBeforeTagClose` | `maxLineLength` |
+| `preserveLineBreaks` | `collapseWhitespace` |
+| `removeEmptyElementsExcept` | `removeEmptyElements` |
+| `removeUnusedCSS` | `minifyCSS`, and not [a function of your own](#unused-css-removal) |
+| `trimCustomFragments` | `collapseWhitespace` |
+
+Passing the option `false`, or an empty array, asks for nothing and is not reported. `cacheCSS`, `cacheJS`, and `cacheSVG` are not included because they size a cache rather than transform markup, and therefore don’t change output.
+
+### Combining whitespace options
+
+`collapseInlineTagWhitespace`, `collapseNoBreakSpaces`, `conservativeCollapse`, and `preserveLineBreaks` are modifiers: They do nothing on their own, and only take effect when `collapseWhitespace` is enabled.
+
+Given input
+
+```html
+<nav>
+  <button>A</button> <button>B</button>
+</nav>
+```
+
+you get the following output (condensed, `\n` represents an actual line break):
+
+| Options | Output |
+| --- | --- |
+| `collapseInlineTagWhitespace` | `<nav>\n  <button>A</button> <button>B</button>\n</nav>` (unchanged) |
+| `collapseWhitespace` | `<nav><button>A</button> <button>B</button></nav>` |
+| `collapseWhitespace`, `collapseInlineTagWhitespace` | `<nav><button>A</button><button>B</button></nav>` |
+| `collapseWhitespace`, `conservativeCollapse` | `<nav> <button>A</button> <button>B</button> </nav>` |
+| `collapseWhitespace`, `preserveLineBreaks` | `<nav>\n<button>A</button> <button>B</button>\n</nav>` |
+| `collapseWhitespace`, `preserveLineBreaks`, `collapseInlineTagWhitespace` | `<nav>\n<button>A</button><button>B</button>\n</nav>` |
+
+`collapseInlineTagWhitespace` only removes whitespace between tags, and keeps it around text-level elements (like `a`, `code`, or `em`), where it separates words: `<p><button>A</button> <button>B</button> or <code>C</code> <code>D</code></p>` becomes `<p><button>A</button><button>B</button> or <code>C</code> <code>D</code></p>`.
+
+Where the modifiers disagree, the preserving one wins—`conservativeCollapse` and `preserveLineBreaks` do not let `collapseInlineTagWhitespace` remove a space or line break entirely.
+
+Regardless of these options, whitespace at the start and end of the output goes, and so do lines that a removed comment or tag leaves with nothing but whitespace (blank lines of the source stay). Whitespace stays, however, where it’s kept verbatim (in `pre` or `textarea`, or in `pre`, `textarea`, or `script` content left open at the end), next to custom fragments where their handling keeps it (see `trimCustomFragments`), at either end of partial markup (cf. `partialMarkup`), and where `conservativeCollapse` or `preserveLineBreaks` keep it.
+
+Note: `preserveLineBreaks` keeps line breaks, not indentation. HTML Minifier doesn’t format: To keep the source formatting, leave `collapseWhitespace` off (as in the first row of the table above). Line breaks and indentation then stay as written, while other options still apply.
+
+### Sorting attributes and style classes
+
+`sortAttributes` and `sortClassNames` reorder attributes and class names by frequency, so that repeated markup looks more alike. This doesn’t change the plain-text size of the output, only how well it compresses: `sortAttributes` makes Gzip and Brotli output slightly smaller on average, though not on every page (see [“Optimizing for compression”](#optimizing-for-compression)); `sortClassNames` doesn’t help, and alongside `sortAttributes` cancels most of its gain with Brotli.
+
+### Optimizing for compression
+
+Most HTML is served compressed, so the Gzip or Brotli size is often what counts—and it doesn’t always follow the raw size. Added to the `comprehensive` preset, these options changed output size as follows (average per page, relative to `comprehensive`):
+
+| Added to `comprehensive` | Raw | Gzip (level 6) | Brotli (quality 6) | Brotli (quality 11) |
+| --- | --- | --- | --- | --- |
+| `sortAttributes` | ±0% | −0.10% | −0.11% | −0.07% |
+| `sortAttributes`, `removeAttributeQuotes: false`, `quoteCharacter: '"'` | +1.68% | +0.20% | −0.02% | −0.30% |
+| `removeEmptyElements` | −1.37% | −0.76% | −0.65% | −0.66% |
+
+* **Gzip or on-the-fly Brotli:** Add `sortAttributes`. The gain is small and uneven, however, and sorting can double minification time for very large documents.
+* **Brotli precompressed at quality 11** (as for static files compressed at build time): Add `sortAttributes`, don’t remove attribute quotes, and make the quotes double quotes. Raw and Gzip output grow, so this only pays off when clients receive the precompressed Brotli files.
+* **`removeEmptyElements`** saves more than either, but may change the respective document—see [“Removing empty elements”](#removing-empty-elements) before enabling it.
+
+```shell
+# Gzip or on-the-fly Brotli
+npx html-minifier --preset comprehensive --sort-attributes input.html
+
+# Brotli precompressed at quality 11
+npx html-minifier --preset comprehensive --sort-attributes --no-remove-attribute-quotes --quote-character='"' input.html
+```
+
+These figures were measured in October 2026 with HTML Minifier Next 8.8.1 on 61 pages of the [backtest corpus](#regression-tests) (retrieved February and September 2026). They are indications, not guarantees, as they depend on the markup and will shift as HM and the minifiers it bundles change. The [benchmark](#working-tree-benchmarks) reports Gzip and Brotli (quality 6) sizes to re-check them.
+
+### Removing empty elements
+
+`removeEmptyElements` removes elements without content—no text and no child elements (comments don’t count; whitespace does, unless `collapseWhitespace` removes it). It keeps:
+
+* elements with an `id` attribute,
+* elements with a `role`, `tabindex`, or ARIA attribute (e.g., `aria-label` or `aria-hidden`), and `label`, `output`, and `template` elements with a `for` attribute (e.g., a `label` styled as a menu toggle), unless its value is empty,
+* custom elements (e.g., `<my-player></my-player>`), `canvas`, and `textarea` elements,
+* `audio`, `video`, and `script` elements with a `src` attribute, `iframe` elements with `src` or `srcdoc`, `object` elements with `data`, and `applet` elements with `code`,
+* elements inside SVG and MathML—though an empty `svg` or `math` element itself is removed, and HTML inside them (as in `foreignObject` or `annotation-xml`) is still processed.
+
+Everything else goes, including elements that are empty on purpose: icons and other elements styled with CSS (e.g., `<i class="test"></i>` or `<span style="width:50%"></span>`), named anchors (`<a name="top"></a>`), other elements that scripts fill, empty `option` elements, and empty table cells (which shifts the cells that follow). Keep such elements with `removeEmptyElementsExcept`, for example `["td", "<i class='test'>"]`. A parent that is left empty by the removal goes, too, unless the above keeps it.
+
+Where the markup allows it, the option is effective: On a test corpus, it reduced output by 1.37% raw and 0.76% with Gzip on average (see [“Optimizing for compression”](#optimizing-for-compression)).
+
+### CSS minification
+
+When `minifyCSS` is set to `true`, HTML Minifier uses [Lightning CSS](https://lightningcss.dev/) to minify CSS in `style` elements and attributes. Lightning CSS provides excellent minification by default.
+
+You can pass Lightning CSS configuration options by providing an object:
+
+```js
+const result = await minify(html, {
+  minifyCSS: {
+    // Support Safari 15 and later (Lightning CSS encodes versions as `major << 16`)
+    targets: { safari: 15 << 16 },
+    unusedSymbols: ['unused-class', 'old-animation']
+  }
+});
+```
+
+Available Lightning CSS options when passed as an object:
+
+* `targets`: Oldest browser versions to support; without it, CSS is minified as written. Lightning CSS encodes versions as `major << 16` (e.g., `{ safari: 15 << 16 }`; a plain `15` means version 0.0.15); in a JSON configuration file, use the computed number (`983040` for 15). Projects already using Browserslist can convert their query with Lightning CSS’s `browserslistToTargets()`.
+* `unusedSymbols`: Array of class names, IDs, keyframe names, and CSS variables to remove.
+* `errorRecovery`: Boolean to skip invalid rules instead of throwing errors. This is disabled by default in Lightning CSS, but enabled in HM when the `continueOnMinifyError` option is set to `true` (the default). Explicitly setting `errorRecovery` in `minifyCSS` options will override this automatic behavior. What Lightning CSS takes issue with is reported through [the `log` hook](#api-only-options)—it drops some of it (`@property` with an invalid `syntax`) and passes the rest through (an unknown at-rule), so that a dropped rule does not go unnoticed. Every document is reported on separately.
+* `sourceMap`: Boolean to generate source maps.
+
+For advanced usage, you can also pass a function:
+
+```js
+const result = await minify(html, {
+  minifyCSS: function(text, type) {
+    // `text`: CSS string to minify
+    // `type`: `inline` for style attributes, `media` for media queries, `undefined` for `<style>` elements
+    return yourCustomMinifier(text);
+  }
+});
+```
+
+To exempt individual pieces of CSS, pass `canMinifyCSS` a synchronous function. It receives the CSS and its type—`undefined` for `style` elements, `'inline'` for `style` attributes, and `'media'` for `media` attributes. CSS for which it returns `false` comes out as if `minifyCSS` were off, so its URLs are not minified and its unused rules not removed, either. (Within `svg` elements, `minifySVG` has SVGO minify CSS as well—exempt those with [`canMinifySVG`](#svg-minification).)
+
+```js
+const result = await minify(html, {
+  minifyCSS: true,
+  canMinifyCSS: text => !text.includes('/* keep */')
+});
+```
+
+### Unused CSS removal
+
+`removeUnusedCSS` removes selectors from `style` elements that name an element, class, or ID the document doesn’t reference, as well as rules that are left without selectors. In `.used, .unused { … }`, only `.unused` goes. It needs to be used with `minifyCSS`, because the removal runs through Lightning CSS—passing `minifyCSS` a function of your own replaces that step, so the removal does not apply, either. Both cases are reported through [the `log` hook](#api-only-options). It doesn’t touch `style` or `media` attributes.
+
+```js
+const result = await minify(html, {
+  minifyCSS: true,
+  removeUnusedCSS: true
+});
+```
+
+Elements are considered used when the markup contains them (`html`, `head`, and `body` always count, as do `tbody` and `tr` in tables, and `colgroup` with `col`) or when their name appears inside an inline `script` element, unless `scripts` is set to `false`. An element doesn’t count as a reference to a class of the same name, nor the other way around.
+
+Classes and IDs are considered used when they appear
+
+* in a `class` or `id` attribute,
+* in an attribute that references an ID (`for`, `headers`, `list`, `popovertarget`, `aria-controls`, and similar),
+* in a same-document fragment URL, as `href="#main"`, `<use href="#icon">`, or `usemap="#map"`, and in a `url(#gradient)` reference from any attribute,
+* anywhere in a `data-*` attribute value, or
+* anywhere inside an inline `script` element, unless `scripts` is set to `false`.
+
+Only a selector’s own compounds are judged: Names inside pseudo-classes and pseudo-elements, as in `:not(.unused)`, `:has(.unused)`, or `:host(.unused)`, keep their selector. Style sheets containing `@scope`—and all of them when [`minifyCSS` carries a Lightning CSS `visitor`](#css-minification) of your own—keep their selector lists whole and only lose rules whose selectors all go.
+
+Names carrying characters that end a CSS identifier—`md:flex`, `w-1/2`, `p-[3px]`—are matched as whole tokens, so utility-CSS class names survive whether they come from markup, a `data-*` value, or a string in an inline script.
+
+**Elements, classes, and IDs that only appear in external scripts cannot be detected.** A minifier sees one document, not the DOM that scripts later build from it, so a `dialog` that, say, a bundle.js creates, or a class it adds, looks exactly like one nobody uses. List those under `safelist`, as strings or regular expressions:
+
+```js
+const result = await minify(html, {
+  minifyCSS: true,
+  removeUnusedCSS: {
+    safelist: ['is-open', /^js-/, 'dialog'],
+    // Set to `false` to also drop rules only referenced from inline scripts
+    scripts: true
+  }
+});
+```
+
+Names used by `@keyframes` and `@counter-style` rules are not removed, even when no element carries them as a class or ID, since those at-rules are referenced from CSS rather than from markup.
+
+Values that cannot be honored—a `safelist` that isn’t an array, an entry that is neither a string nor a regular expression, a misspelled key—are reported through the `log` hook.
+
+### JavaScript minification
+
+When `minifyJS` is set to `true`, HTML Minifier uses [Terser](https://terser.org/) by default to minify JavaScript in `<script>` elements and event attributes.
+
+You can choose between different JS minifiers—for `script` elements and event attributes alike—using the `engine` field:
+
+```js
+const result = await minify(html, {
+  minifyJS: {
+    engine: 'swc', // Use SWC for faster minification
+    // SWC-specific options here
+  }
+});
+```
+
+**Available engines:**
+
+* `terser` (default): The standard JavaScript minifier with excellent compression
+* [`swc`](https://swc.rs/): Rust-based minifier multiple times faster than Terser (requires separate installation)
+
+The engine also decides how work is scheduled: SWC minifies a document’s script bodies as one batch dispatched ahead of the parse, while Terser shares the thread the parse runs on.
+
+**To use SWC**, install it as a development dependency:
+
+```shell
+npm i -D @swc/core
+```
+
+You can pass engine-specific configuration options:
+
+```js
+// Using Terser with custom options
+const result = await minify(html, {
+  minifyJS: {
+    compress: {
+      drop_console: true  // Remove console.log statements
+    }
+  }
+});
+
+// Using SWC for faster minification
+const result = await minify(html, {
+  minifyJS: {
+    engine: 'swc'
+  }
+});
+```
+
+For advanced usage, you can also pass a function:
+
+```js
+const result = await minify(html, {
+  minifyJS: function(text, inline) {
+    // `text`: JavaScript string to minify
+    // `inline`: `true` for event handlers (e.g., `onclick`), `false` for `<script>` elements
+    return yourCustomMinifier(text);
+  }
+});
+```
+
+To exempt individual pieces of JavaScript, pass `canMinifyJS` a synchronous function. It receives the JavaScript and whether it is inline—`true` for event handler attributes (e.g., `onclick`), `false` for `script` elements. JavaScript for which it returns `false` is left unminified, though `mergeScripts` still merges it with adjacent scripts:
+
+```js
+const result = await minify(html, {
+  minifyJS: true,
+  canMinifyJS: text => !text.includes('/* keep */')
+});
+```
+
+### JSON minification
+
+`minifyJSON` minifies JSON script types—`application/json`, `application/ld+json`, `application/manifest+json`, `application/vnd.geo+json`, `application/problem+json`, `application/merge-patch+json`, `application/json-patch+json`, `importmap`, and `speculationrules`. It removes whitespace between tokens and unneeded escapes in strings, escaping `<`, and leaves values as written (e.g., large numbers and duplicate keys). Malformed JSON is preserved by default (with `continueOnMinifyError: true`).
+
+Note: The `processScripts` option is only for script types containing HTML templates (e.g., `text/ng-template`, `text/x-handlebars-template`), not for JSON.
+
+### SVG minification
+
+When `minifySVG` is set to `true`, HTML Minifier uses [SVGO](https://svgo.dev/) to optimize inline SVG elements. Complete `<svg>` subtrees are extracted and processed as a block, enabling deep structural optimization:
+
+```js
+const result = await minify(html, {
+  minifySVG: true // Enable with SVGO defaults fit for inline SVG
+});
+```
+
+Unlike an SVG file, an inline SVG is part of the page. HM runs SVGO’s `preset-default` with the plugins that assume a standalone file turned off (see overrides below). `style` elements in SVG are minified through `minifyCSS` and SVGO.
+
+You can pass custom SVGO options. Options without `plugins` (e.g., `{ floatPrecision: 2 }`) keep HM’s plugin set; options with `plugins` replace it, so include the overrides for inline SVG unless the SVGs don’t depend on the rest of the page:
+
+```js
+const result = await minify(html, {
+  minifySVG: {
+    plugins: [{
+      name: 'preset-default',
+      params: {
+        overrides: {
+          // Inline SVG
+          cleanupIds: false, // IDs may be referenced from the page (links, CSS, other SVGs)
+          inlineStyles: false, // `style` rules may target elements outside the SVG
+          minifyStyles: { usage: false }, // Keep rules the SVG itself doesn’t use
+          removeEmptyAttrs: false, // Empty attributes may be hooks (`[data-v-…]`) or meaningful (`alt=""`)
+          removeHiddenElems: false, // Hidden sprites are used from other SVGs
+          removeUnknownsAndDefaults: { keepRoleAttr: true }, // `role` matters for accessibility
+          // Custom
+          convertShapeToPath: false // Keep original shapes
+        }
+      }
+    }]
+  }
+});
+```
+
+To exempt individual `svg` elements, pass `canMinifySVG` a synchronous function. It receives each outermost `svg` element, including any `svg` elements nested in it, as the HTML pass wrote it (e.g., without comments under `removeComments`), and one for which it returns `false` skips SVGO. To keep an `svg` element exactly as written, [wrap it in `<!-- htmlmin:ignore -->`](#ignoring-chunks-of-markup) instead.
+
+```js
+const result = await minify(html, {
+  minifySVG: true,
+  canMinifySVG: text => !text.includes('data-keep')
+});
+```
+
+**Important:**
+
+* SVG minification only applies within `<svg>` elements
+* Case sensitivity and self-closing slashes are automatically preserved in SVG (regardless of global settings); where SVGO reads, names are written the way HTML reads them (e.g., `viewbox` as `viewBox`), and attributes without a value get an empty one (e.g., Vue’s `data-v-…` markers), which `collapseEmptyAttributes` removes again after SVGO
+* SVG that uses `xlink:` attributes without declaring the XLink namespace, which HTML needs not, gets the declaration for SVGO, which reads XML, and loses it again after
+* For maximum compression, use `minifySVG` together with `collapseWhitespace` and other options
+
+### CSS, JavaScript, and SVG cache configuration
+
+HTML Minifier uses in-memory caches to improve performance when processing multiple files or repeated content. The cache sizes can be configured for optimal performance based on your use case:
+
+```js
+const result = await minify(html, {
+  minifyCSS: true,
+  cacheCSS: 750, // CSS cache size, default: 500
+  minifyJS: true,
+  cacheJS: 250, // JS cache size, default: 500
+  minifySVG: true,
+  cacheSVG: 100 // SVG cache size, default: 500
+});
+```
+
+**Via CLI flags:**
+
+```shell
+npx html-minifier --minify-css --cache-css 750 --minify-js --cache-js 250 --minify-svg --cache-svg 100 input.html
+```
+
+**Via environment variables:**
+
+```shell
+export HM_CACHE_CSS=750
+export HM_CACHE_JS=250
+export HM_CACHE_SVG=100
+npx html-minifier --minify-css --minify-js --minify-svg input.html
+```
+
+**Configuration file:**
+
+```json
+{
+  "minifyCSS": true,
+  "cacheCSS": 750,
+  "minifyJS": true,
+  "cacheJS": 250,
+  "minifySVG": true,
+  "cacheSVG": 100
+}
+```
+
+**When to adjust cache sizes:**
+
+* Single file processing: Default `500` is sufficient
+* Batch processing: Increase to `1000` or higher for better cache hit rates
+* Memory-constrained environments: Cache sizes can be lowered, though the savings are usually negligible—entries are typically kilobyte-scale, so even full caches only hold a few megabytes
+* Hundreds/thousands of files: Increase to `1000`–`2000` for optimal performance
+
+**Important:**
+
+* Cache locking: Caches are created on the first `minify()` call and persist for the process lifetime. Cache sizes are locked after first initialization—subsequent calls reuse the same caches even if different `cacheCSS`, `cacheJS`, or `cacheSVG` options are provided. The first call’s options determine the cache sizes.
+* Values: `0` switches the cache off; negative and non-finite values fall back to the default size.
+* Entry size cap: Individual CSS, JavaScript, or SVG blocks larger than 1 MB are minified normally but not stored in the cache—this bounds worst-case cache memory without affecting realistically sized inline content. (This cutoff is fixed and not configurable.)
+
+The caches persist across multiple `minify()` calls, making them particularly effective when processing many files in a batch operation.
+
+**Inspecting cache effectiveness:**
+
+Use `getCacheStats()` to see hit/miss counts and current occupancy for each cache:
+
+```js
+import { minify, getCacheStats } from 'html-minifier';
+
+// After minifying pages that share templated CSS/JS…
+for (const html of pages) {
+  await minify(html, { minifyCSS: true, minifyJS: true });
+}
+
+console.log(getCacheStats());
+// {
+//   css: { gets: 392, hits: 298, size: 94, limit: 500 },
+//   js: { gets: 1196, hits: 1192, size: 4, limit: 500 },
+//   svg: { gets: 0, hits: 0, size: 0, limit: 500 }
+// }
+```
+
+A cache that was never exercised (e.g., `minifySVG` disabled, or `minify()` not yet called) reports all-zero stats.
+
+The CLI’s `--verbose` and `--dry` modes print the same information to STDERR at the end of a run, omitting caches that were never touched.
+
+## Minification comparison
+
+Please see [**the Minifier Benchmarks project**](https://j9t.github.io/minifier-benchmarks/) for details on how HTML Minifier compares to other minifiers. (The benchmarks are currently maintained by the author of HTML Minifier. Contributions, including from other minifier authors, are welcome.)
+
+## Examples
+
+### CLI
+
+**Sample command line:**
+
+```shell
+npx html-minifier --collapse-whitespace --remove-comments --minify-js --input-dir=. --output-dir=example
+
+npx html-minifier --input-dir=test --preset comprehensive --output-dir example
+```
+
+**Process specific files and directories:**
+
+```shell
+# Process default extensions (html, htm, shtml, shtm)
+npx html-minifier --collapse-whitespace --input-dir=src --output-dir=dist
+
+# Process only specific extensions
+npx html-minifier --collapse-whitespace --input-dir=src --output-dir=dist --file-ext=html,php
+
+# Using a configuration file that sets `fileExt` (e.g., `"fileExt": "html,php"`)
+npx html-minifier --config-file=path/to/config.json --input-dir=src --output-dir=dist
+
+# Process all files (explicit wildcard)
+npx html-minifier --collapse-whitespace --input-dir=src --output-dir=dist --file-ext='*'
+```
+
+**Exclude directories from processing:**
+
+```shell
+# Ignore a single directory
+npx html-minifier --collapse-whitespace --input-dir=src --output-dir=dist --ignore-dir=libs
+
+# Ignore multiple directories
+npx html-minifier --collapse-whitespace --input-dir=src --output-dir=dist --ignore-dir=libs,vendor,node_modules
+
+# Ignore by relative path (only ignores src/static/libs, not other “libs” directories)
+npx html-minifier --collapse-whitespace --input-dir=src --output-dir=dist --ignore-dir=static/libs
+```
+
+**Dry run mode (preview outcome without writing files):**
+
+```shell
+# Preview with output file
+npx html-minifier input.html -o output.html --dry --collapse-whitespace
+
+# Preview directory processing with statistics per file and total
+npx html-minifier --input-dir=src --output-dir=dist --dry --collapse-whitespace
+# Output: [DRY RUN] Would process directory: src → dist
+#   index.html: 1,234 → 892 bytes (-342, 27.7%)
+#   about.html: 2,100 → 1,654 bytes (-446, 21.2%)
+# ---
+# Total: 3,334 → 2,546 bytes (-788, 23.6%)
+```
+
+**Verbose mode (show detailed processing information):**
+
+```shell
+# Show processing details while minifying
+npx html-minifier --input-dir=src --output-dir=dist --verbose --collapse-whitespace
+# Output: CLI options: collapseWhitespace
+#   ✓ src/index.html: 1,234 → 892 bytes (-342, 27.7%)
+#   ✓ src/about.html: 2,100 → 1,654 bytes (-446, 21.2%)
+# ---
+# Total: 3,334 → 2,546 bytes (-788, 23.6%)
+
+# `--dry` automatically enables verbose output
+npx html-minifier --input-dir=src --output-dir=dist --dry --collapse-whitespace
+```
+
+## Special cases
+
+### Ignoring chunks of markup
+
+If you have chunks of markup you would like preserved, you can wrap them with `<!-- htmlmin:ignore -->`.
+
+### XHTML
+
+HM is primarily an HTML minifier. To process XHTML (`application/xhtml+xml`), keep those options off whose output XML can’t parse (e.g., `removeOptionalTags`, `removeAttributeQuotes`, and `collapseBooleanAttributes`) as well as `removeRedundantAttributes` (as the option removes `xml:lang` attributes as well as `xmlns` from `html`).
+
+### Preserving SVG and MathML elements
+
+SVG and MathML elements are automatically recognized as foreign elements, and when they are minified, both case-sensitivity and self-closing slashes are preserved, regardless of the minification settings used for the rest of the file. This ensures valid output for these namespaced elements. `selfCloseForeignElements` writes empty ones as self-closing, too (e.g., `<use href="#a"/>`), while HTML elements in them, as in `foreignObject`, keep their end tags.
+
+`removeRedundantAttributes` removes the namespace declarations HTML reads anyway (`xmlns` on `html`, `svg`, `math`, and other elements in the namespace it declares, and `xmlns:xlink` on SVG and MathML elements), along with SVG attributes set to their default values (e.g., `<feBlend mode="normal">`, `<stop offset="0">`; presentation attributes like `fill` are left alone, as they inherit). Without the declarations, SVG markup taken from the page via `outerHTML` (e.g., to save it as a file) is no standalone SVG; `XMLSerializer` adds them back.
+
+### Working with invalid or partial markup
+
+By default, HM parses markup into a complete tree structure, then modifies it (removing anything that was specified for removal, ignoring anything that was specified to be ignored, etc.), then creates markup from that tree and returns it.
+
+_Input markup (e.g., `<p id="">foo`) → Internal representation of markup in a form of tree (e.g., `{ tag: "p", attr: "id", children: ["foo"] }`) → Transformation of internal representation (e.g., removal of `id` attribute) → Output of resulting markup (e.g., `<p>foo</p>`)_
+
+For partial HTML fragments (such as template includes, SSI fragments, or closing tags without opening tags), use the `partialMarkup: true` option. This preserves stray end tags and prevents auto-closing of unclosed tags at the end of input. Note that normal HTML auto-closing rules still apply during parsing—for example, a closing parent tag will still auto-close its unclosed child elements. Whitespace at the start and end of a fragment stays, too, as it may separate the fragment from what surrounds it (unless `collapseWhitespace` removes it). `removeRedundantAttributes` keeps `target="_self"` in partial markup, as there may be a `base` element setting another target elsewhere. (Where an external script adds such a `base` element, wrap links whose `target="_self"` needs to stay in `<!-- htmlmin:ignore -->`.)
+
+Markup with [parse errors](https://html.spec.whatwg.org/multipage/parsing.html#parse-errors) that HM cannot read, like a stray `</>` or an `=` in an unquoted attribute value, makes it abort with the line and column of the error, so that the error can be fixed. With `continueOnParseError`, HM handles such errors the way browsers do instead.
+
+[Processing instructions](https://html.spec.whatwg.org/multipage/syntax.html#processing-instructions), like the `<?start name="…">`, `<?end>`, and `<?marker name="…">` that [`<template for>`](https://html.spec.whatwg.org/multipage/scripting.html#attr-template-for) targets, are kept as written: `removeComments` leaves them alone, and an element holding one counts as not empty. As content may be inserted at them, whitespace next to them is collapsed but kept next to text. `ignoreCustomFragments` takes precedence. What starts like one but isn’t, like `<?xml …>` or `<? …>`, is a bogus comment, which `continueOnParseError` keeps as written (unless `removeComments` removes it).
+
+To validate complete HTML markup, use [the W3C validator](https://validator.w3.org/) or one of [several validator packages](https://meiert.com/blog/html-validator-packages/).
+
+### Doctypes and quirks mode
+
+Where browsers parse markup differently by document mode, HM follows the doctype [as the HTML parser does](https://html.spec.whatwg.org/multipage/parsing.html#the-initial-insertion-mode): Under a doctype that sets quirks mode, like HTML 3.2 or HTML 4.01 Transitional without a system identifier, a `table` doesn’t close an open `p`, while under the HTML doctype and legacy doctypes that set no-quirks or limited-quirks mode, like XHTML 1.0 Strict or HTML 4.01 Strict, it does.
+
+Only the first doctype counts, and only after nothing but comments and whitespace, as browsers ignore any other. Without such a doctype, the mode is unknown: The markup may be a fragment of a document in either mode, or a complete document, which renders in quirks mode—and text before the doctype, like template code (e.g., `<?php … ?>`), may render to nothing or to text that makes browsers ignore the doctype. HM then keeps what either mode needs where the two differ—a `</p>` before a `table`, or after a `table` inside a `p`. `useShortDoctype` replaces the doctype with the HTML one, so where the doctype counts, markup is then read as no-quirks, which is how browsers will parse the output.
+
+### Line breaks
+
+HTML reads CRLF and CR line breaks as line feeds, so HM writes them so, too. Markup within `<!-- htmlmin:ignore -->` and custom fragments, with the whitespace padding them, stay as written. A carriage return written as a character reference (e.g., `&#13;`) stays one under `decodeEntities`.
+
+### Minifying server-side templates
+
+By default, `ignoreCustomFragments` preserves `<?php … ?>`, `<?= … ?>`, `<? … ?>`, and `<% … %>` blocks (as well as XML declarations), so PHP, ERB, JSP, and ASP templates can be minified as part of a build, with the markup, CSS, and JavaScript around those blocks being minified as usual. For includes and other partials, add `partialMarkup`.
+
+Whitespace next to template blocks is collapsed but kept, as it may matter once the template renders. `trimCustomFragments` removes it where HTML Minifier would remove whitespace anyway, as between block-level elements: `<ul> <?php foreach ($items as $item): ?> <li>` loses it, `Hello <?= $name ?>!` keeps it. Tags keep the spacing of their source, and whitespace next to template blocks in attribute values, CSS, and JavaScript is always kept.
+
+Where pages are rendered ahead of serving, as with static exports or full-page caches, you can also minify the rendered HTML instead, which makes this a non-issue.
+
+### Regex options and flags
+
+`customAttrAssign` and `customAttrSurround` patterns are merged into one attribute pattern which carries no flags of its own. `i` and `s` are written into each pattern’s source instead, so they survive the merge. `u`, `v`, and `m` cannot be, and none of them fails loudly when dropped: `u` and `v` only narrow what syntax is legal, so a source valid under either stays valid without it and quietly matches something else—a dropped `u` leaves `\p{L}` matching the literal text `p{L}`—while a dropped `m` leaves `^` and `$` matching at the ends of the input rather than of each line.
+
+A pattern is therefore refused with an error where the flag changes what its source matches—a property or code point escape, a character past the BMP, a character `i` folds by Unicode rules only while `u` is there (`/s/iu` matches `\u017F`, `/k/iu` matches `\u212A`), a `v` class that nests, subtracts, intersects, or holds strings, or—under `m`—an anchor whose meaning moves. A flag the source does not depend on, as in `/x=/u`, is left alone.
+
+Patterns given as strings, in a configuration file or on the command line, may be written either bare (`ng-class`) or delimited with flags (`/ng-class/i`).
+
+## Security
+
+### ReDoS protection
+
+You can use `ignoreCustomFragments` to hand HTML Minifier a regular expression to run against your documents. This is also where a regular expression denial of service (ReDoS) could originate:
+
+* Matching without backtracking: A pattern that wraps an any-character or negated-class body in literal delimiters—`<%[\s\S]*?%>` or `\{\{[^}]*?\}\}`, and every other shape below—is matched by scanning for those delimiters in linear time, with no regular expression involved. Patterns of other shapes run as regular expressions, one per pattern, so each keeps its own flags.
+
+* Pattern detection: HM warns about the shapes that backtrack catastrophically—an unlimited quantifier over a group that itself contains a quantifier that can vary (`(a+)+`, `(a?)+`) or alternation (`(a|b)*`), and two unbounded repeats that can consume the same character with only atoms matching empty between them (`.*.*`, `[a]*a*`, `\w*\d*`, `a*b*a*`).
+
+  A group is no wall: It counts by what its body can match, and repeats meet across its boundary, so `\s*(\w*)\s*` and `(a*)a*` are flagged like `\s*\w*\s*` and `a*a*`. A lookaround backtracks nothing, so `(?=a*)a*` passes. A fixed count does not vary, so `(?:a{4})+` passes; repeats that share no character leave nothing ambiguous to split, so `\s*\S*` passes. A pattern is read the way its own flags make it match, so `/.*\n*/s` and `/[a]*A*/i` are flagged where those same sources without the flags are not. Under `v`, a class that nests reads as the union it is, while one that subtracts (`--`) or intersects (`&&`) is left unread and passes.
+
+  These are also shapes a linear scan cannot stand in for. `strictCustomFragments` refuses them with an error instead, which is worth enabling where the patterns or the input are not entirely under your control. A pattern longer than 10,000 characters or nested more than 50 groups deep is judged risky without being analyzed further, so that reading the pattern cannot itself become the expensive step. The check reads shapes, not languages: It warns about the common ones rather than proving a pattern linear, and misses repeats that overlap only across whole subexpressions (`(ab)*(abab)*`). **Treat a pattern that passes as unflagged, not as vetted.**
+
+* Input length limits: The `maxInputLength` option allows you to set a maximum input size to prevent processing of excessively large inputs that could cause performance issues.
+
+**Important:** A single unlimited quantifier is not one of those shapes: `[\s\S]*?` running up to a literal terminator matches in linear time, and it is how HM’s defaults are written. Bounds are still worth adding where you know the maximum length of a fragment, since they cap how far a failing match can scan.
+
+#### Custom fragment examples
+
+**Safe patterns:**
+
+```js
+ignoreCustomFragments: [
+  /<%[\s\S]*?%>/,                // Lazy scan up to a literal terminator
+  /<\?php[\s\S]{0,5000}?\?>/,    // PHP with explicit bounds
+  /\{\{[^}]{0,500}\}\}/          // Handlebars without nested braces
+]
+```
+
+**Unsafe patterns** (these trigger warnings):
+
+```js
+ignoreCustomFragments: [
+  /<%(\s|\S)*?%>/,               // Unlimited quantifier over an alternating group
+  /\{\{([^}]+)+\}\}/,            // Nested unlimited quantifiers
+  /<!--[\s\S]*[\s\S]*-->/,       // Two unbounded repeats in a row
+  /<%\w*\d*%>/                   // Two unbounded repeats over overlapping sets
+]
+```
+
+**Template engine configurations:**
+
+```js
+// Handlebars/Mustache
+ignoreCustomFragments: [/\{\{[\s\S]{0,1000}?\}\}/]
+
+// Liquid (Jekyll)
+ignoreCustomFragments: [/\{%[\s\S]{0,500}?%\}/, /\{\{[\s\S]{0,500}?\}\}/]
+
+// Angular
+ignoreCustomFragments: [/\{\{[\s\S]{0,500}?\}\}/]
+
+// Vue.js
+ignoreCustomFragments: [/\{\{[\s\S]{0,500}?\}\}/]
+```
+
+##### Escaping patterns in different contexts
+
+The escaping requirements for `ignoreCustomFragments` patterns differ depending on how you’re using HM:
+
+**Config file (JSON):**
+
+```json
+{
+  "ignoreCustomFragments": ["\\{%[\\s\\S]{0,1000}?%\\}", "\\{\\{[\\s\\S]{0,500}?\\}\\}"]
+}
+```
+
+**Programmatic (JavaScript/Node.js):**
+
+```js
+ignoreCustomFragments: [/\{%[\s\S]{0,1000}?%\}/, /\{\{[\s\S]{0,500}?\}\}/]
+```
+
+**CLI (via config file—recommended):**
+
+```shell
+npx html-minifier --config-file=path/to/config.json input.html
+```
+
+**CLI (inline—not recommended due to complex escaping):**
+
+```shell
+npx html-minifier --ignore-custom-fragments '[\\\"\\\\{%[\\\\s\\\\S]{0,1000}?%\\\\}\\\"]' input.html
+```
+
+For CLI usage, using a config file is strongly recommended to avoid complex shell and JSON escaping.
+
+**[Web demo:](https://j9t.github.io/html-minifier/)**
+
+```text
+\{%[\s\S]{0,1000}?%\} \{\{[\s\S]{0,500}?\}\}
+```
+
+## Working on HTML Minifier
+
+Note: This section assumes working with main dependencies installed (`npm i`).
+
+### Local server
+
+```shell
+npm run serve
+```
+
+### Regression tests
+
+```shell
+cd backtest;
+npm i;
+npm run backtest
+```
+
+The backtest tool tracks minification performance—output size (raw, Gzip, and Brotli) and processing time—across Git history. Results are saved in the backtest folder (results.json).
+
+Parameters:
+
+* No argument: Tests last 50 commits (default)
+* `COUNT`: Tests last `COUNT` commits (e.g., `npm run backtest 100`)
+* `COUNT/STEP`: Tests last `COUNT` commits, sampling every `STEP`th commit (e.g., `npm run backtest 500/10` tests 50 commits)
+
+### Working tree benchmarks
+
+Where the backtest walks Git history, the benchmark times the code as it is _right now_—useful for A/B testing a branch against a saved baseline:
+
+```shell
+cd backtest;
+npm i;
+npm run benchmark
+```
+
+It reuses the backtest corpus (run `npm run backtest` once to download it) and reports per-file output size and processing time. Sizes are given raw and compressed—at common defaults for on-the-fly compression, i.e., Gzip at level 6 and Brotli at quality 6—since a change that shrinks raw output can still grow what is transferred.
+
+Parameters:
+
+* No argument: Runs and, if a baseline exists, shows size and time deltas
+* `--save`: Saves the run as the baseline (e.g., on `main` before switching to a branch)
+* `--core`: Disables the external minifiers (CSS, JS, SVG, URLs) to isolate HM’s processing time
+* `--cold`: Switches the minification caches off so CSS, JS, and SVG work is redone on every iteration—without it, warm caches serve those results from memory after the warm-up run and the benchmark cannot see changes to those minifiers
+* `--iterations=N`: Sets the number of timed iterations (default: 5)
+* `--config=PATH`: Uses an alternative options file (default: html-minifier.config.json); the file can name a `preset` to start from
+* `--preset=NAME`: Uses a preset instead of an options file (e.g., `--preset=comprehensive`)
+
+To compare branches (A/B run), execute `npm run benchmark -- --save` on `main`, then `npm run benchmark` on the branch to see the deltas. Add `--core` on both ends when measuring changes to HM rather than bundled minifiers, or `--cold` when measuring changes to the CSS, JS, or SVG minification paths.
+
+For changes of around 1% or less, use `npm run benchmark:ab -- main` instead: It times the working tree against any Git ref in the same session, runs both in turn per file, averages both loading orders, and reports `collapseWhitespace` on and off separately. Add `--aa` to compare the ref with a copy of itself—the noise floor any finding must clear. The script’s header lists further parameters.
+
+Reported times are the *fastest* iteration, not the median: Interference can only make a run slower, so the minimum is the most stable estimate. Each run also reports its noise—how far the reported figure moves between the first and second half of the iterations—and any delta smaller than that is marked `within noise` rather than shown as a win or a regression. Raise `--iterations` until the noise sits below the change you are trying to measure.
+
+#### Profiling
+
+To profile the current working tree, run the benchmark with Node’s built-in CPU profiler:
+
+```shell
+node --cpu-prof benchmark.js
+```
+
+This writes a .cpuprofile file to the working directory. Load it with `npx speedscope *.cpuprofile` for a flamegraph, or drag it into Chrome DevTools → Sources → JavaScript Profiler. Compare self-time per function against a clean baseline run on `main`. Pay attention to unexpectedly heavy callbacks in hot paths—V8 de-optimization from variable object shapes or unnecessary method calls can show up there.
+
+## Acknowledgements
+
+With many thanks to the previous authors of and contributors to HTML Minifier, especially [Juriy “kangax” Zaytsev](https://github.com/kangax), and to everyone who helped make this new edition better, particularly [Daniel Ruf](https://github.com/DanielRuf), [Jonas Geiler](https://github.com/jonasgeiler), [Chris Morgan](https://github.com/chris-morgan), and [Andreas Borutta](https://github.com/fermiongithub)!
+
+***
+
+You might like some of my other work:
+
+* Optimization tools: [hihtml](https://github.com/j9t/hihtml) · HTML Minifier · [ObsoHTML](https://github.com/j9t/obsohtml) · [CSS Dedup](https://github.com/j9t/css-dedup) · [Image Guard](https://github.com/j9t/image-guard) · [Compressor.js Next](https://github.com/j9t/compressorjs-next) · [.htaccess Punk](https://github.com/j9t/htaccess-punk)
+* Defense tools: [IA Defensa](https://iadefensa.com/solutions/)
+* Resources for quality web development: [Articles](https://meiert.com/topics/development/) · [Books](https://meiert.com/topics/books/) (including [_On Web Development_](https://meiert.com/blog/on-web-development-2/)) · [News](https://frontenddogma.com/) · [Terminology](https://webglossary.info/)

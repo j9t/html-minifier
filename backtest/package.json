@@ -1,0 +1,13 @@
+{
+  "dependencies": {
+    "progress": "^2.0.3"
+  },
+  "name": "html-minifier-backtest",
+  "private": true,
+  "scripts": {
+    "backtest": "node backtest.js",
+    "benchmark": "node benchmark.js",
+    "benchmark:ab": "node benchmark-ab.js"
+  },
+  "type": "module"
+}
