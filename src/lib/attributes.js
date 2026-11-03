@@ -5,7 +5,7 @@
 import {
   RE_EVENT_ATTR_DEFAULT,
   RE_CAN_REMOVE_ATTR_QUOTES,
-  RE_AMP_ENTITY,
+  RE_AMP_REFERENCE_ATTR,
   RE_CR,
   RE_BASE_ELEMENT,
   RE_ATTR_WS_CHECK,
@@ -45,17 +45,6 @@ import { escapeXML, identity, isThenable, lowercase } from './utils.js';
 
 // Lazy-load entities (used for `decodeEntities`, event-handler attribute decoding
 // before `minifyJS`, `srcdoc` decoding, and values SVGO reads)
-
-/** @type {Promise<Function> | undefined} */
-let decodeHTMLStrictPromise;
-/** @type {((text: string) => string) | undefined} The resolved `decodeHTMLStrict`, once the lazy import above has settled */
-let decodeHTMLStrictFn;
-async function getDecodeHTMLStrict() {
-  if (!decodeHTMLStrictPromise) {
-    decodeHTMLStrictPromise = import('entities').then(m => (decodeHTMLStrictFn = m.decodeHTMLStrict));
-  }
-  return decodeHTMLStrictPromise;
-}
 
 /** @type {Promise<Function> | undefined} */
 let decodeHTMLAttributePromise;
@@ -691,10 +680,10 @@ function cleanAttributeValue(tag, attrName, attrValue, options, attrs, minifyHTM
     // Browsers decode attribute values before running event-handler JS—
     // decode first so the minifier gets valid JavaScript
     if (!options.decodeEntities && options.minifyJS !== identity && attrValue.indexOf('&') !== -1) {
-      return getDecodeHTMLStrict().then(decode => {
+      return getDecodeHTMLAttribute().then(decode => {
         const decoded = decode(attrValue);
         const result = options.minifyJS(decoded, true);
-        const reEncode = (/** @type {string} */ v) => (v && v.indexOf('&') !== -1) ? v.replace(RE_AMP_ENTITY, '&amp;$1') : v;
+        const reEncode = (/** @type {string} */ v) => (v && v.indexOf('&') !== -1) ? v.replace(RE_AMP_REFERENCE_ATTR, '&amp;') : v;
         if (isThenable(result)) {
           return result.then(reEncode, (/** @type {Error} */ err) => {
             if (!options.continueOnMinifyError) throw err;
@@ -915,7 +904,7 @@ async function minifySrcdoc(attrValue, options, minifyHTMLSelf) {
   let markup = attrValue;
   let wasEncoded = false;
   if (!options.decodeEntities && attrValue.indexOf('&') !== -1) {
-    const decode = await getDecodeHTMLStrict();
+    const decode = await getDecodeHTMLAttribute();
     markup = decode(attrValue);
     wasEncoded = markup !== attrValue;
   }
@@ -924,7 +913,7 @@ async function minifySrcdoc(attrValue, options, minifyHTMLSelf) {
   // and its style sheets minify against the symbols the `srcdoc` content references itself
   const srcdocOptions = { ...options, baseState: { hasBase: undefined, source: markup } };
   if (options.removeUnusedCSS && RE_STYLE_ELEMENT.test(markup)) {
-    const decode = markup.indexOf('&') !== -1 ? await getDecodeHTMLStrict() : undefined;
+    const decode = markup.indexOf('&') !== -1 ? await getDecodeHTMLAttribute() : undefined;
     srcdocOptions.cssContext = {
       warned: options.cssContext ? options.cssContext.warned : new Set(),
       ...collectUsage(markup, options.removeUnusedCSS.scripts, /** @type {((text: string) => string) | undefined} */ (decode))
@@ -981,19 +970,10 @@ function normalizeAttr(attr, attrs, tag, tagOut, options, minifyHTML, markers) {
 
   // Entity decoding requires a lazy import—async only while that import is unresolved
   if (options.decodeEntities && attrValue && attrValue.indexOf('&') !== -1) {
-    // What SVGO reads is written for XML, which takes a value decoded fully, as HTML reads it
-    if (options.insideSVG && options.minifySVG) {
-      if (decodeHTMLAttributeFn) {
-        return normalizeAttrContinue(attrName, attrNameOut, decodeHTMLAttributeFn(attrValue), attr, attrs, tag, tagOut, options, minifyHTML, markers);
-      }
-      return getDecodeHTMLAttribute().then(decode => {
-        return normalizeAttrContinue(attrName, attrNameOut, decode(attrValue), attr, attrs, tag, tagOut, options, minifyHTML, markers);
-      });
+    if (decodeHTMLAttributeFn) {
+      return normalizeAttrContinue(attrName, attrNameOut, decodeHTMLAttributeFn(attrValue), attr, attrs, tag, tagOut, options, minifyHTML, markers);
     }
-    if (decodeHTMLStrictFn) {
-      return normalizeAttrContinue(attrName, attrNameOut, decodeHTMLStrictFn(attrValue), attr, attrs, tag, tagOut, options, minifyHTML, markers);
-    }
-    return getDecodeHTMLStrict().then(decode => {
+    return getDecodeHTMLAttribute().then(decode => {
       return normalizeAttrContinue(attrName, attrNameOut, decode(attrValue), attr, attrs, tag, tagOut, options, minifyHTML, markers);
     });
   }
@@ -1055,7 +1035,7 @@ function normalizeAttrFinish(attrName, attrNameOut, attrValue, attr, tag, tagOut
     attrValue = escapeXML(attrValue, true);
   } else if (options.decodeEntities && attrValue) {
     if (attrValue.indexOf('&') !== -1) {
-      attrValue = attrValue.replace(RE_AMP_ENTITY, '&amp;$1');
+      attrValue = attrValue.replace(RE_AMP_REFERENCE_ATTR, '&amp;');
     }
     if (attrValue.indexOf('\r') !== -1) {
       attrValue = attrValue.replace(RE_CR, '&#13;');
