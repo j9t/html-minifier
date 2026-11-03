@@ -4,6 +4,14 @@ As of version 5.0.0, all notable changes to HTML Minifier (HM) are documented in
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.0.1] - 2026-11-03
+
+### Fixed
+
+* Fixed two regular expression denial-of-service (ReDoS) issues ([GHSA-9wmg-23wv-h297](https://github.com/j9t/html-minifier-next/security/advisories/GHSA-9wmg-23wv-h297)—thanks [@aweiaaaaa](https://github.com/aweiaaaaa)), each causing quadratic (O(n²)) backtracking on the `minify()` path, now replaced by linear-time scans:
+  - A long `htmlmin:ignore` block without tags, with `collapseWhitespace` enabled
+  - A long whitespace run inside an `ignoreCustomFragments` match, with default options
+
 ## [5.0.0] - 2026-11-03
 
 ### Fixed
