@@ -6653,6 +6653,26 @@ describe('HTML', () => {
     assert.strictEqual(await minify(nested), nested);
   });
 
+  test('Avoids ReDoS on a long tagless `htmlmin:ignore` block', async () => {
+    // Finding the block’s last tag (for whitespace collapsing before the next element) took a
+    // regex that backtracked quadratically over content without tags: ~3 s for 64,000 chars
+    const content = 'a'.repeat(300000);
+    const start = Date.now();
+    const result = await minify('<!-- htmlmin:ignore -->' + content + '<!-- htmlmin:ignore -->b<p>y</p>', { collapseWhitespace: true });
+    assert.ok(Date.now() - start < 5000, 'Ignored content should be scanned in linear time');
+    assert.strictEqual(result, content + 'b<p>y</p>');
+  });
+
+  test('Avoids ReDoS on long whitespace inside a custom fragment', async () => {
+    // Splitting a fragment’s leading and trailing whitespace off took a regex that backtracked
+    // quadratically over inner whitespace runs: ~3 s for 64,000 chars, with default options
+    const input = '<p><?php a' + ' '.repeat(300000) + 'a ?></p>';
+    const start = Date.now();
+    const result = await minify(input);
+    assert.ok(Date.now() - start < 5000, 'Fragment whitespace should be split in linear time');
+    assert.strictEqual(result, input);
+  });
+
   test('Handles inline custom elements', async () => {
     let input, output;
 
