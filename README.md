@@ -6,7 +6,7 @@ Your web page optimization precision tool: HTML Minifier (HM) is a **highly effe
 
 HTML Minifier was originally created by [Juriy “kangax” Zaytsev](https://github.com/kangax/html-minifier). As of version 5, it’s actively maintained by [Jens Oliver Meiert](https://github.com/j9t)—richer in features, easier to use, and significantly faster ([engineering philosophy](https://meiert.com/blog/html-minifier-next-engineering-philosophy/)).
 
-ℹ️ **Updating from HTML Minifier 4? Use [the HTML Minifier 4 to 5 upgrade guide](https://meiert.com/blog/html-minifier-4-5/).** Switching from HTML Minifier Next? Use [the HTML Minifier Next to HTML Minifier migration guide](https://meiert.com/blog/html-minifier-next-to-html-minifier/).
+ℹ️ **Updating from HTML Minifier 4? [Use the HTML Minifier 4 to 5 upgrade guide.](https://meiert.com/blog/html-minifier-4-5/)** Switching from HTML Minifier Next? [Use the HTML Minifier Next to HTML Minifier migration guide.](https://meiert.com/blog/html-minifier-next-to-html-minifier/)
 
 ## Installation
 
