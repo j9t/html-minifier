@@ -6785,6 +6785,11 @@ describe('HTML', () => {
     output = '<iframe srcdoc="<p>1 &amp;lt; 2</p>"></iframe>';
     assert.strictEqual(await minify(input, { collapseWhitespace: true }), output);
 
+    // A no-break space round-trips as `&nbsp;`
+    input = '<iframe srcdoc="&lt;p&gt;a&amp;nbsp;b&nbsp;c&lt;/p&gt;"></iframe>';
+    output = '<iframe srcdoc="<p>a&amp;nbsp;b&nbsp;c</p>"></iframe>';
+    assert.strictEqual(await minify(input, { collapseWhitespace: true }), output);
+
     // A value carrying both quote characters keeps its delimiters intact
     input = '<iframe srcdoc=\'<p class="q" title=&#39;he said &quot;hi&quot;&#39;>x</p>\'></iframe>';
     output = '<iframe srcdoc="<p class=&quot;q&quot; title=\'he said &quot;hi&quot;\'>x</p>"></iframe>';

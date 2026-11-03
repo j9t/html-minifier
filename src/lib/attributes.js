@@ -43,8 +43,8 @@ import { escapeXML, identity, isThenable, lowercase } from './utils.js';
  *  Internal counterpart of the public typedef in htmlminifier.js—keep in sync.
  */
 
-// Lazy-load entities (used for `decodeEntities`, event-handler attribute
-// decoding before `minifyJS`, `srcdoc` decoding/re-encoding, and values SVGO reads)
+// Lazy-load entities (used for `decodeEntities`, event-handler attribute decoding
+// before `minifyJS`, `srcdoc` decoding, and values SVGO reads)
 
 /** @type {Promise<Function> | undefined} */
 let decodeHTMLStrictPromise;
@@ -68,13 +68,16 @@ async function getDecodeHTMLAttribute() {
   return decodeHTMLAttributePromise;
 }
 
-/** @type {Promise<Function> | undefined} */
-let escapeAttributePromise;
-async function getEscapeAttribute() {
-  if (!escapeAttributePromise) {
-    escapeAttributePromise = import('entities').then(m => m.escapeAttribute);
-  }
-  return escapeAttributePromise;
+const RE_ATTRIBUTE_ESCAPE = /["&\u00A0]/g;
+const attributeEscapes = { '"': '&quot;', '&': '&amp;', '\u00A0': '&nbsp;' };
+
+/**
+ * Escapes a quoted attribute value, keeping `<` and `>` (unlike `entities` 9’s `escapeAttribute`)
+ * @param {string} value
+ * @returns {string}
+ */
+function escapeAttribute(value) {
+  return value.replace(RE_ATTRIBUTE_ESCAPE, char => attributeEscapes[/** @type {'"' | '&' | '\u00A0'} */ (char)]);
 }
 
 // Validators
@@ -930,7 +933,7 @@ async function minifySrcdoc(attrValue, options, minifyHTMLSelf) {
 
   try {
     const minified = await minifyHTMLSelf(markup, srcdocOptions, true);
-    return wasEncoded ? (await getEscapeAttribute())(minified) : minified;
+    return wasEncoded ? escapeAttribute(minified) : minified;
   } catch (err) {
     if (!options.continueOnMinifyError) throw err;
     options.log(/** @type {Error} */ (err));
