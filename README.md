@@ -4,7 +4,7 @@
 
 Your web page optimization precision tool: HTML Minifier (HM) is a **highly effective, super-configurable, well-tested HTML minifier**, written in JavaScript, that also handles in-document CSS, JavaScript, and SVG minification.
 
-HTML Minifier was originally created by [Juriy “kangax” Zaytsev](https://github.com/kangax/html-minifier). As of version 5, it’s actively maintained by [Jens Oliver Meiert](https://github.com/j9t)—richer in features, easier to use, and significantly faster ([engineering philosophy](https://meiert.com/blog/html-minifier-next-engineering-philosophy/)).
+HTML Minifier was originally created by [Juriy “kangax” Zaytsev](https://perfectionkills.com/). As of version 5, it’s actively maintained by [Jens Oliver Meiert](https://meiert.com)—richer in features, easier to use, and significantly faster ([engineering philosophy](https://meiert.com/blog/html-minifier-next-engineering-philosophy/)).
 
 ℹ️ **Updating from HTML Minifier 4? [Use the HTML Minifier 4 to 5 upgrade guide.](https://meiert.com/blog/html-minifier-4-5/)** Switching from HTML Minifier Next? [Use the HTML Minifier Next to HTML Minifier migration guide.](https://meiert.com/blog/html-minifier-next-to-html-minifier/)
 
@@ -890,7 +890,7 @@ This writes a .cpuprofile file to the working directory. Load it with `npx speed
 
 ## Acknowledgements
 
-With many thanks to the previous authors of and contributors to HTML Minifier, especially [Juriy “kangax” Zaytsev](https://github.com/kangax), and to everyone who helped make this new edition better, particularly [Daniel Ruf](https://github.com/DanielRuf), [Jonas Geiler](https://github.com/jonasgeiler), [Chris Morgan](https://github.com/chris-morgan), and [Andreas Borutta](https://github.com/fermiongithub)!
+With many thanks to the previous authors of and contributors to HTML Minifier and HTML Minifier Next, especially [Juriy “kangax” Zaytsev](https://github.com/kangax), and to everyone who helped make this new edition better, particularly [Daniel Ruf](https://github.com/DanielRuf), [Jonas Geiler](https://github.com/jonasgeiler), [Chris Morgan](https://github.com/chris-morgan), and [Andreas Borutta](https://github.com/fermiongithub)!
 
 ***
 
