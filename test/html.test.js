@@ -6501,6 +6501,32 @@ describe('HTML', () => {
     assert.strictEqual(await minify(input, { collapseWhitespace: true, decodeEntities: true }), output);
   });
 
+  test('Keeps decoded ampersands in attributes from forming character references with `decodeEntities`', async () => {
+    const options = { decodeEntities: true };
+
+    // References without a semicolon that browsers resolve in attributes stay escaped
+    assert.strictEqual(await minify('<p title="&amp;copy b">x</p>', options), '<p title="&amp;copy b">x</p>');
+    assert.strictEqual(await minify('<p title="&amp;amp">x</p>', options), '<p title="&amp;amp">x</p>');
+    assert.strictEqual(await minify('<p title="&amp;#169 &amp;#xA9">x</p>', options), '<p title="&amp;#169 &amp;#xA9">x</p>');
+    assert.strictEqual(await minify('<p title="&amp;copy;">x</p>', options), '<p title="&amp;copy;">x</p>');
+
+    // Ampersands that cannot start a reference in an attribute stay bare
+    assert.strictEqual(await minify('<a href="?a=1&amp;b=2&amp;copy=3&amp;copyright">x</a>', options), '<a href="?a=1&b=2&copy=3&copyright">x</a>');
+    assert.strictEqual(await minify('<p title="a &amp; b &amp;# &amp;#x">x</p>', options), '<p title="a & b &# &#x">x</p>');
+  });
+
+  test('Keeps decoded ampersands in text from forming numeric character references with `decodeEntities`', async () => {
+    const options = { decodeEntities: true };
+    assert.strictEqual(await minify('<p>&amp;#169 &amp;#xA9 &amp;#169;</p>', options), '<p>&amp#169 &amp#xA9 &amp#169;</p>');
+    assert.strictEqual(await minify('<p>&amp;# &amp;#x &amp;#xg</p>', options), '<p>&# &#x &#xg</p>');
+  });
+
+  test('Decodes references without a semicolon in attributes as browsers do with `decodeEntities`', async () => {
+    const options = { decodeEntities: true };
+    assert.strictEqual(await minify('<p title="&copy b &#169 c">x</p>', options), '<p title="© b © c">x</p>');
+    assert.strictEqual(await minify('<a href="?a&copy=1&copyb">x</a>', options), '<a href="?a&copy=1&copyb">x</a>');
+  });
+
   test('Keeps carriage returns encoded with `decodeEntities`, which HTML reads as line feeds when raw', async () => {
     const options = { decodeEntities: true };
     assert.strictEqual(await minify('<p title="a&#13;b">x&#13;y</p>', options), '<p title="a&#13;b">x&#13;y</p>');
@@ -6783,6 +6809,11 @@ describe('HTML', () => {
     // `&lt;` in text round-trips instead of becoming a tag
     input = '<iframe srcdoc="&lt;p&gt;1 &amp;lt; 2&lt;/p&gt;"></iframe>';
     output = '<iframe srcdoc="<p>1 &amp;lt; 2</p>"></iframe>';
+    assert.strictEqual(await minify(input, { collapseWhitespace: true }), output);
+
+    // A no-break space round-trips as `&nbsp;`
+    input = '<iframe srcdoc="&lt;p&gt;a&amp;nbsp;b&nbsp;c&lt;/p&gt;"></iframe>';
+    output = '<iframe srcdoc="<p>a&amp;nbsp;b&nbsp;c</p>"></iframe>';
     assert.strictEqual(await minify(input, { collapseWhitespace: true }), output);
 
     // A value carrying both quote characters keeps its delimiters intact
