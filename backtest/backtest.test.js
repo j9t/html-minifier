@@ -1,4 +1,4 @@
-import { describe, test } from 'node:test';
+import { after, describe, test } from 'node:test';
 import assert from 'node:assert';
 import { spawn } from 'child_process';
 import fs from 'fs/promises';
@@ -112,7 +112,8 @@ describe('Backtest', () => {
   });
 });
 
-describe('Git walk', () => {
+// Concurrent, as each test uses its own repository and mostly waits on processes
+describe('Git walk', { concurrency: true }, () => {
   const dirBacktest = path.dirname(fileURLToPath(import.meta.url));
   const inputs = { alpha: '<p>Alpha</p>', beta: '<p>Beta</p>' };
 
@@ -164,12 +165,19 @@ ${failOn ? `  if (html.includes('${failOn}')) throw new Error('Stub failure');\n
     return await git(dir, 'rev-parse', '--short', 'HEAD');
   }
 
+  async function createDir() {
+    return await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'hm-backtest-')));
+  }
+
+  function remove(dir) {
+    return fs.rm(dir, { recursive: true, force: true });
+  }
+
   // A repository of three commits, with the real backtest.js copied in and
   // everything it would fetch stubbed: the oldest commit names its config
   // the old way and fails on beta, the middle one adds a file HEAD lacks
-  async function createFixture(t) {
-    const dir = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'hm-backtest-')));
-    t.after(() => fs.rm(dir, { recursive: true, force: true }));
+  async function createTemplate() {
+    const dir = await createDir();
     await git(dir, 'init', '-q');
     // In the repository’s config, so the backtest’s own Git calls use it, too (Windows
     // runners enable `autocrlf`)
@@ -210,6 +218,21 @@ ${failOn ? `  if (html.includes('${failOn}')) throw new Error('Stub failure');\n
     await fs.chmod(path.join(dir, 'bin/npm'), 0o755);
     await write(dir, 'bin/npm.cmd', '@echo %*> "%~dp0npm-args.txt"\r\n@echo npm stub failure 1>&2\r\n@exit /b 1\r\n');
 
+    return { dir, hashes };
+  }
+
+  // Built once and copied per test, as creating it takes many slow Git calls
+  let template;
+  after(async () => {
+    if (template) await remove((await template).dir);
+  });
+
+  async function createFixture(t) {
+    template ??= createTemplate();
+    const { dir: dirTemplate, hashes } = await template;
+    const dir = await createDir();
+    t.after(() => remove(dir));
+    await fs.cp(dirTemplate, dir, { recursive: true });
     return { dir, hashes };
   }
 
