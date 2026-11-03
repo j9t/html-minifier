@@ -1,8 +1,8 @@
 {
   "author": "Jens Oliver Meiert",
   "bin": {
-    "html-minifier": "./cli.js",
-    "hm": "./cli.js"
+    "html-minifier": "cli.js",
+    "hm": "cli.js"
   },
   "bugs": "https://github.com/j9t/html-minifier/issues",
   "dependencies": {

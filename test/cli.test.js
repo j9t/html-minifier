@@ -1258,7 +1258,7 @@ describe('CLI', { concurrency: os.availableParallelism() }, () => {
   test('Exposes the CLI as `html-minifier` and `hm` in the package', () => {
     const { bin } = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../package.json'), 'utf8'));
 
-    assert.deepStrictEqual(bin, { 'html-minifier': './cli.js', hm: './cli.js' });
+    assert.deepStrictEqual(bin, { 'html-minifier': 'cli.js', hm: 'cli.js' });
   });
 
   test('Does not show the progress indicator in a non-TTY environment', async () => {
