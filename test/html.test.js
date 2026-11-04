@@ -5044,6 +5044,12 @@ describe('HTML', () => {
     output = '<p>Text with <abbr>abbr</abbr> and <b>bold</b> and <i>italic</i> and <u>underline</u> and <s>strike</s> and <small>small</small> elements.</p>';
     assert.strictEqual(await minify(input, { collapseWhitespace: true, collapseInlineTagWhitespace: true }), output);
 
+    // Edit elements: `del` and `ins`
+    input = '<p><em>Hi</em> I <del>hate</del> <ins>love</ins> cake.</p>';
+    output = '<p><em>Hi</em> I <del>hate</del> <ins>love</ins> cake.</p>';
+    assert.strictEqual(await minify(input, { collapseWhitespace: true }), output);
+    assert.strictEqual(await minify(input, { collapseWhitespace: true, collapseInlineTagWhitespace: true }), output);
+
     // With “comprehensive” preset
     input = '<div>That’s not <a href="../">the whole story</a>!</div>';
     output = '<div>That’s not <a href=../>the whole story</a>!</div>';
