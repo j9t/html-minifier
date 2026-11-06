@@ -600,7 +600,7 @@ The CLI’s `--verbose` and `--dry` modes print the same information to STDERR a
 
 ## Minification comparison
 
-Please see [**the Minifier Benchmarks project**](https://j9t.github.io/minifier-benchmarks/) for details on how HTML Minifier compares to other minifiers. (The benchmarks are currently maintained by the author of HTML Minifier. Contributions, including from other minifier authors, are welcome.)
+Please see [**the Minifier Benchmarks Project**](https://j9t.github.io/minifier-benchmarks/) for details on how HTML Minifier compares to other minifiers. (The benchmarks are currently maintained by the author of HTML Minifier. Contributions, including from other minifier authors, are welcome.)
 
 ## Examples
 
@@ -842,7 +842,7 @@ npm i;
 npm run backtest
 ```
 
-The backtest tool tracks minification performance—output size (raw, Gzip, and Brotli) and processing time—across Git history. Results are saved in the backtest folder (results.json).
+The backtest tool tracks minification performance—output size (raw, Gzip, and Brotli) and processing time—across Git history. Results are saved in the backtest folder (results.json). The corpus (backtest/sites.json) is shared with [the Minifier Benchmarks Project](https://github.com/j9t/minifier-benchmarks)—changing sites requires changing them in both repositories.
 
 Parameters:
 

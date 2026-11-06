@@ -1,3 +1,10 @@
 #!/usr/bin/env sh
 
+# The backtest corpus is shared with Minifier Benchmarks; checked only where both are checked out side by side
+fileSitesBenchmarks=../minifier-benchmarks/sites.json
+if [ -f "$fileSitesBenchmarks" ] && ! git show :backtest/sites.json | cmp -s - "$fileSitesBenchmarks"; then
+  echo "backtest/sites.json (as staged) differs from ${fileSitesBenchmarks}—sync both before committing" >&2
+  exit 1
+fi
+
 npm run lint && npm test
