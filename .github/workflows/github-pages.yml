@@ -5,10 +5,10 @@ on:
     branches: main
     # Skip changes that don’t affect the site
     paths-ignore:
-      - "**.md"
       - ".github/**"
       - "backtest/**"
       - "test/**"
+      - "**.md"
 
 permissions:
   contents: read
