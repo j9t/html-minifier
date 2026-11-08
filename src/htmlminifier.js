@@ -1267,9 +1267,10 @@ async function minifyHTML(value, options, partialMarkup) {
 
         /**
          * @param {(text: string, ...args: any[]) => any} fn
+         * @param {boolean} isJS
          * @returns {any}
          */
-        const wrapCodeMinifier = (fn) => (/** @type {string} */ text, /** @type {any[]} */ ...args) => {
+        const wrapCodeMinifier = (fn, isJS) => (/** @type {string} */ text, /** @type {any[]} */ ...args) => {
           const source = text.replace(/** @type {RegExp} */ (uidPattern), function (/** @type {string} */ _match, /** @type {string} */ _prefix, /** @type {string} */ index) {
             const chunks = ignoredCustomMarkupChunks[+index];
             customMarkupInCode.add(+index);
@@ -1277,14 +1278,14 @@ async function minifyHTML(value, options, partialMarkup) {
           });
 
           return Promise.resolve(fn(source, ...args)).then((/** @type {string} */ output) => {
-            if (typeof output !== 'string' || isMinifiedCodeSafe(source, output, uidPlaceholderPattern)) return output;
-            options.log('Keeping CSS or JavaScript as written, as a custom fragment starts a rule or statement');
+            if (isMinifiedCodeSafe(source, output, uidPlaceholderPattern, isJS)) return output;
+            options.log('Keeping CSS or JavaScript as written, as minifying could break or lose a custom fragment');
             return source;
           });
         };
 
-        if (options.minifyCSS !== identity) options.minifyCSS = wrapCodeMinifier(options.minifyCSS);
-        if (options.minifyJS !== identity) options.minifyJS = wrapCodeMinifier(options.minifyJS);
+        if (options.minifyCSS !== identity) options.minifyCSS = wrapCodeMinifier(options.minifyCSS, false);
+        if (options.minifyJS !== identity) options.minifyJS = wrapCodeMinifier(options.minifyJS, true);
       }
 
       const token = uidAttr + ignoredCustomMarkupChunks.length + uidAttr;

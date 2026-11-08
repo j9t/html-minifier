@@ -1,6 +1,6 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert';
-import { toDelimitedFragment, toFragment, replaceCustomFragments } from '../src/lib/fragments.js';
+import { toDelimitedFragment, toFragment, replaceCustomFragments, isMinifiedCodeSafe } from '../src/lib/fragments.js';
 
 describe('Fragments', () => {
   describe('`toDelimitedFragment`', () => {
@@ -151,6 +151,41 @@ describe('Fragments', () => {
       // `String.replace` spreads an empty match over every position; skipping it is saner
       assert.strictEqual(replaceCustomFragments('abc', prepare([/x*/]), marker), 'abc');
       assert.strictEqual(replaceCustomFragments('abxc', prepare([/x*/]), marker), 'ab["x"]c');
+    });
+  });
+
+  describe('`isMinifiedCodeSafe`', () => {
+    const placeholder = /U\d+U/g;
+
+    test('Passes through non-string results', () => {
+      assert.strictEqual(isMinifiedCodeSafe('a\nU0U', /** @type {any} */ ({}), placeholder), true);
+      assert.strictEqual(isMinifiedCodeSafe('l: U0U', /** @type {any} */ (undefined), placeholder, true), true);
+    });
+
+    test('Reads colons as statement starts only in JavaScript', () => {
+      assert.strictEqual(isMinifiedCodeSafe('a { top: 0; b: U0U }', 'a{top:0;b:U0U}', placeholder), true);
+      assert.strictEqual(isMinifiedCodeSafe('a; b: U0U', 'a;b:U0U', placeholder, true), false);
+    });
+
+    test('Scans long inputs in linear time', () => {
+      const count = 50000;
+      const sources = [
+        ['case '.repeat(count) + ': U0U', true],
+        ['l: U0U '.repeat(count), true],
+        ['{ '.repeat(count) + 'l: U0U', true],
+        ['"'.repeat(count * 2 + 1) + 'U0U', true],
+        ['/*'.repeat(count) + 'U0U', true],
+        ['a ? '.repeat(count) + 'b : U0U', true],
+        [' '.repeat(count * 4) + ': U0U', true],
+        ['@import U0U;'.repeat(count), false],
+        ['@import '.repeat(count) + 'U0U', false],
+        ['/*'.repeat(count) + '@import U0U', false]
+      ];
+      for (const [source, isJS] of /** @type {[string, boolean][]} */ (sources)) {
+        const start = performance.now();
+        isMinifiedCodeSafe(source, 'x', placeholder, isJS);
+        assert.ok(performance.now() - start < 1000, source.slice(0, 20));
+      }
     });
   });
 });

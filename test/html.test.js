@@ -4005,10 +4005,52 @@ describe('HTML', () => {
       '<script>b();\n<?php echo 1; ?></script>',
       '<script>if (a) <?= $b ?>;\nc();</script>',
       '<script>while (a) <?= $b ?>;\nc();</script>',
-      '<script>if (a) b(); else <?= $c ?>;\nd();</script>'
+      '<script>if (a) b(); else <?= $c ?>;\nd();</script>',
+      '<script>b(); /* c */ <?= $x ?>; c();</script>'
     ];
     for (const input of inputs) {
       assert.strictEqual(await minify(input, { minifyJS: true }), input);
+    }
+  });
+
+  test('Keeps scripts as written where a custom fragment follows a `case` clause or label', async () => {
+    const inputs = [
+      '<script>switch (a) { case 1: <?= $x ?> }</script>',
+      '<script>switch (a) { case "x:y": <?= $x ?> }</script>',
+      '<script>switch (a) { case b ? c : d: <?= $x ?> }</script>',
+      '<script>switch (a) { case <?= $b ?>: <?= $x ?> }</script>',
+      '<script>switch (a) { case 1: case 2: <?= $x ?> }</script>',
+      '<script>switch (a) { default: <?= $x ?> }</script>',
+      '<script>switch (a) { case 1: default: <?= $x ?> }</script>',
+      '<script>l: <?= $x ?>;</script>',
+      '<script>a(); l: <?= $x ?>;</script>',
+      '<script>function f() { l: <?= $x ?> }</script>',
+      '<script>{ l: <?= $x ?> }</script>'
+    ];
+    for (const input of inputs) {
+      assert.strictEqual(await minify(input, { minifyJS: true }), input);
+    }
+  });
+
+  test('Minifies scripts with custom fragments within values', async () => {
+    const cases = [
+      ['var a = <?= $x ?>;', 'var a= <?= $x ?>'],
+      ['a ? b : <?= $x ?>;', 'a?b: <?= $x ?>'],
+      ['a ? b ? c : d : <?= $x ?>;', 'a?b?c:d: <?= $x ?>'],
+      ['switch (a) { case 1: b = c ? d : <?= $x ?>; }', 'if(1===a)b=c?d: <?= $x ?>'],
+      ['({ a: <?= $x ?> })', ' <?= $x ?> '],
+      ['var o = { a: <?= $x ?> }', 'var o={a: <?= $x ?> }'],
+      ['var o = { default: <?= $x ?> }', 'var o={default: <?= $x ?> }'],
+      ['var o = { case: <?= $x ?> }', 'var o={case: <?= $x ?> }'],
+      ['var o = { a: 1, b: <?= $x ?> }', 'var o={a:1,b: <?= $x ?> }'],
+      ['var a = "case 1: <?= $x ?>";', 'var a="case 1: <?= $x ?>"'],
+      ['var a = "; l: <?= $x ?>";', 'var a="; l: <?= $x ?>"'],
+      ['/* <?= $x ?> */ a()', 'a()'],
+      ['/* case 1: <?= $x ?> */ a()', 'a()'],
+      ['if (0) { var b = <?= $x ?>; }', 'var b']
+    ];
+    for (const [source, output] of cases) {
+      assert.strictEqual(await minify('<script>' + source + '</script>', { minifyJS: true }), '<script>' + output + '</script>');
     }
   });
 
@@ -4433,7 +4475,8 @@ describe('HTML', () => {
       '<style>a { top: 0 }\n<?php echo 1; ?>\nb { top: 0 }</style>',
       '<style>a { top: 0 } <?php echo 1; ?> b { top: 0 }</style>',
       '<style>\n<?php if (1): ?>\nb { top: 0 }\n<?php endif; ?>\n</style>',
-      '<style>p {\n  margin: 0;\n  <?= $x ?>\n}</style>'
+      '<style>p {\n  margin: 0;\n  <?= $x ?>\n}</style>',
+      '<style>a { top: 0 } /* c */ <?= $rules ?> b { top: 0 }</style>'
     ];
     for (const input of inputs) {
       assert.strictEqual(await minify(input, { minifyCSS: true }), input);
@@ -4444,6 +4487,50 @@ describe('HTML', () => {
     assert.strictEqual(await minify('<style>a { color: <?= $c ?>; top: 0 }</style>', { minifyCSS: true }), '<style>a{color: <?= $c ?>;top:0}</style>');
     assert.strictEqual(await minify('<style>a { font-family: myelse <?= $f ?> }</style>', { minifyCSS: true }), '<style>a{font-family:myelse <?= $f ?> }</style>');
     assert.strictEqual(await minify('<style>a { font-family: my-else <?= $f ?> }</style>', { minifyCSS: true }), '<style>a{font-family:my-else <?= $f ?> }</style>');
+  });
+
+  test('Keeps `style` elements as written where an at-rule would lose its custom fragment', async () => {
+    const inputs = [
+      '<style>@import <?= $u ?>; a { top: 0 }</style>',
+      '<style>@IMPORT <?= $u ?>; a { top: 0 }</style>',
+      '<style>@charset <?= $c ?>; a { top: 0 }</style>',
+      '<style>@charset "<?= $c ?>"; a { top: 0 }</style>',
+      '<style>@namespace <?= $n ?>; a { top: 0 }</style>',
+      '<style>@namespace svg <?= $u ?>; a { top: 0 }</style>',
+      '<style>@import <?= $u ?></style>'
+    ];
+    for (const input of inputs) {
+      assert.strictEqual(await minify(input, { minifyCSS: true }), input);
+    }
+  });
+
+  test('Minifies `style` elements whose at-rules keep their custom fragments', async () => {
+    const cases = [
+      ['@import "<?= $u ?>"; a { top: 0 }', '@import "<?= $u ?>";a{top:0}'],
+      ['@import url(<?= $u ?>); a { top: 0 }', '@import "<?= $u ?>";a{top:0}'],
+      ['@import "a" <?= $m ?>; a { top: 0 }', '@import "a" <?= $m ?>;a{top:0}'],
+      ['@media <?= $q ?> { a { top: 0 } }', '@media <?= $q ?> {a{top:0}}'],
+      ['@layer <?= $l ?>; a { top: 0 }', '@layer <?= $l ?>;a{top:0}'],
+      ['@font-face { src: url(<?= $u ?>) }', '@font-face{src:url(<?= $u ?>)}'],
+      ['a { top: 0; color: <?= $c ?> }', 'a{color: <?= $c ?> ;top:0}'],
+      ['a:not(.b) { color: <?= $c ?> }', 'a:not(.b){color: <?= $c ?> }']
+    ];
+    for (const [source, output] of cases) {
+      assert.strictEqual(await minify('<style>' + source + '</style>', { minifyCSS: true }), '<style>' + output + '</style>');
+    }
+  });
+
+  test('Minifies `style` elements where only a comment or unused rule held a custom fragment', async () => {
+    assert.strictEqual(await minify('<style>/* <?= $c ?> */ a { top: 0 }</style>', { minifyCSS: true }), '<style>a{top:0}</style>');
+    assert.strictEqual(await minify('<style>/* @import <?= $c ?>; */ a { top: 0 }</style>', { minifyCSS: true }), '<style>a{top:0}</style>');
+    assert.strictEqual(
+      await minify('<style>a { top: 0 } .gone { color: <?= $c ?> }</style><a></a>', { minifyCSS: true, removeUnusedCSS: true }),
+      '<style>a{top:0}</style><a></a>'
+    );
+    assert.strictEqual(
+      await minify('<style>a { top: 0 } .gone::after { content: "@import <?= $c ?>;" }</style><a></a>', { minifyCSS: true, removeUnusedCSS: true }),
+      '<style>a{top:0}</style><a></a>'
+    );
   });
 
   test('Minifies URL attributes', async () => {
