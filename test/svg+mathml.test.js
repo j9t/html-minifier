@@ -306,10 +306,18 @@ describe('SVG and MathML', () => {
       '<svg open="x"></svg>',
       '<svg><path open="x"/></svg>',
       '<math open="x"><mi>x</mi></math>',
-      '<math><mfenced open="[" close="]"><mi>x</mi></mfenced></math>'
+      '<math><mfenced open="[" close="]"><mi>x</mi></mfenced></math>',
+      '<svg><foreignObject open="x"></foreignObject></svg>',
+      '<math><annotation-xml encoding="text/html" open="x"></annotation-xml></math>'
     ]) {
       assert.strictEqual(await minify(input, { collapseBooleanAttributes: true }), input);
     }
+
+    // The HTML within is HTML all the same
+    assert.strictEqual(
+      await minify('<svg><foreignObject open="x"><input checked="checked"></foreignObject></svg>', { collapseBooleanAttributes: true }),
+      '<svg><foreignObject open="x"><input checked></foreignObject></svg>'
+    );
   });
 
   test('Keeps whitespace that separates words in SVG text', async () => {
