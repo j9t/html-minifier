@@ -323,6 +323,22 @@ describe('SVG and MathML', () => {
     assert.strictEqual(await minify('<svg><text>a  <TSPAN>b</TSPAN>  c</text></svg>', options), '<svg><text>a <TSPAN>b</TSPAN> c</text></svg>');
   });
 
+  test('Reads whitespace in foreign content alike in any letter case', async () => {
+    const options = { collapseWhitespace: true };
+
+    for (const [lower, upper] of [
+      ['<svg><script>//a\nb()</script></svg>', '<svg><SCRIPT>//a\nb()</SCRIPT></svg>'],
+      ['<svg><style>  a  b  </style></svg>', '<svg><STYLE>  a  b  </STYLE></svg>'],
+      ['<svg><textarea>  a  b  </textarea></svg>', '<svg><TEXTAREA>  a  b  </TEXTAREA></svg>'],
+      ['<svg><text>a  <style></style>  b</text></svg>', '<svg><text>a  <STYLE></STYLE>  b</text></svg>'],
+      ['<svg><text>a  <script></script>  b</text></svg>', '<svg><text>a  <SCRIPT></SCRIPT>  b</text></svg>'],
+      ['<svg><textarea>a  </textarea>  <tspan>b</tspan>  </svg>', '<svg><TEXTAREA>a  </TEXTAREA>  <tspan>b</tspan>  </svg>']
+    ]) {
+      const output = await minify(lower, options);
+      assert.strictEqual((await minify(upper, options)).toLowerCase(), output.toLowerCase());
+    }
+  });
+
   test('Options that write markup no XML parser accepts stop at an SVG SVGO reads', async () => {
     // A valueless attribute is invalid XML, and costs the graphic its optimization
     assert.strictEqual(

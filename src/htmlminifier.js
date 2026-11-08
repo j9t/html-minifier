@@ -1617,7 +1617,7 @@ async function minifyHTML(value, options, partialMarkup) {
     // Nothing to the left of the text is in play here, so only its trailing run can
     // change—unless preserved line breaks bring the leading run into play, too
     const trailingOnly = !options.preserveLineBreaks;
-    for (let prevTag = ''; index > noTrimEndIndex && canTrimWhitespace(namesAsWritten ? prevTag.toLowerCase() : prevTag, prevTag, emptyAttrs); index--) {
+    for (let prevTag = ''; index > noTrimEndIndex && canTrimWhitespace(prevTag.toLowerCase(), prevTag, emptyAttrs); index--) {
       const str = buffer[index] ?? '';
       const endTagName = matchPlainEndTag(str);
       if (endTagName !== null) {
@@ -2375,15 +2375,16 @@ async function minifyHTML(value, options, partialMarkup) {
       if (options.collapseWhitespace && !stackNoTrimWhitespace.length) {
         squashTrailingWhitespace(lowerTag || tag);
       }
-      if (options.collapseWhitespace && !unary && inlineElementsTransparent.has(tag)) {
+      if (options.collapseWhitespace && !unary && inlineElementsTransparent.has(lowerTag || tag)) {
         transparentDepth++;
       }
       if (!unary) {
-        if (!canTrimWhitespace(tag, tagOut, attrs) || stackNoTrimWhitespace.length) {
+        const tagLower = lowerTag || tag;
+        if (!canTrimWhitespace(tagLower, tagOut, attrs) || stackNoTrimWhitespace.length) {
           stackNoTrimWhitespace.push(tag);
-          if (tag === 'pre' || tag === 'textarea') preTextareaDepth++;
+          if (tagLower === 'pre' || tagLower === 'textarea') preTextareaDepth++;
         }
-        if (options.collapseWhitespace && (!canCollapseWhitespace(tag, tagOut, attrs) || stackNoCollapseWhitespace.length)) {
+        if (options.collapseWhitespace && (!canCollapseWhitespace(tagLower, tagOut, attrs) || stackNoCollapseWhitespace.length)) {
           stackNoCollapseWhitespace.push(tag);
         }
       }
@@ -2503,14 +2504,15 @@ async function minifyHTML(value, options, partialMarkup) {
       let closesNoTrim = false;
       if (stackNoTrimWhitespace.length) {
         if (tag === stackNoTrimWhitespace[stackNoTrimWhitespace.length - 1]) {
-          if (tag === 'pre' || tag === 'textarea') preTextareaDepth--;
+          const tagLower = lowerTag || tag;
+          if (tagLower === 'pre' || tagLower === 'textarea') preTextareaDepth--;
           stackNoTrimWhitespace.pop();
           closesNoTrim = !stackNoTrimWhitespace.length;
         }
       } else if (options.collapseWhitespace) {
         squashTrailingWhitespace('/' + (lowerTag || tag));
       }
-      if (transparentDepth && inlineElementsTransparent.has(tag)) {
+      if (transparentDepth && inlineElementsTransparent.has(lowerTag || tag)) {
         transparentDepth--;
       }
       let closesNoCollapse = false;

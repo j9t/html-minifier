@@ -16,6 +16,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 * Fixed `collapseBooleanAttributes` removing `hidden` and `draggable` values that hold a custom fragment or a character reference, where only rendering or decoding shows the state (e.g., `draggable="<?= $d ?>"`)
 * Fixed `collapseBooleanAttributes` removing the loop count of `marquee` elements (`<marquee loop="3">` became `<marquee loop>`, which loops forever) and the values of attributes in SVG and MathML, where HTML’s Boolean attributes don’t apply (e.g., `<mfenced open="[">` lost its delimiter)
 * Fixed `collapseWhitespace` removing spaces around and within SVG `tspan` and `textPath` elements, which joined words (e.g., `a <tspan>b</tspan>` became `a<tspan>b</tspan>`)
+* Fixed `collapseWhitespace` collapsing whitespace within SVG `script` and `style` elements written in uppercase, which could break their code (e.g., a line comment in `<svg><SCRIPT>` swallowed the next line)
 * Fixed `collapseBooleanAttributes` not collapsing `alpha`, `headingreset`, `nomodule`, `playsinline`, `shadowrootclonable`, `shadowrootcustomelementregistry`, `shadowrootdelegatesfocus`, and `shadowrootserializable`
 * Fixed `collapseBooleanAttributes` removing the values of `defaultchecked`, `defaultmuted`, `defaultselected`, `enabled`, `indeterminate`, `pauseonexit`, and `visible`, none of which are HTML attributes (e.g., `<my-widget visible="false">` became `<my-widget visible>`)
 
