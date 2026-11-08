@@ -537,7 +537,7 @@ function isCodeStart(source, index, colons) {
  * @returns {boolean}
  */
 function isMinifiedCodeSafe(source, output, placeholder, isJS = false) {
-  if (typeof output !== 'string') return true;
+  if (typeof output !== 'string' || output === source) return true;
 
   const matches = [...source.matchAll(placeholder)];
   if (!matches.length) return true;
@@ -548,7 +548,7 @@ function isMinifiedCodeSafe(source, output, placeholder, isJS = false) {
 
   // Output of nothing but fragments only holds up where no label or `case` went with the code
   if (starts.length && (colons.size || output.replace(placeholder, '').trim() || !starts.every(match => kept.has(match[0])))) return false;
-  return isJS || findDroppableAtRulePlaceholders(source, placeholder).every(token => kept.has(token));
+  return isJS || !source.includes('@') || findDroppableAtRulePlaceholders(source, placeholder).every(token => kept.has(token));
 }
 
 export {

@@ -342,21 +342,25 @@ function isStyleElement(tag, attrs) {
 }
 
 /**
- * Whether an attribute collapses to its name; takes name and value as written, lower-casing
- * the value only for the few names that depend on it
+ * Whether an attribute collapses to its name; lower-cases the value only for the few names
+ * that depend on it
  *
- * @param {string} attrName
+ * @param {string} attrName - In lowercase
  * @param {string} attrValue
  * @param {string} tag
  * @param {string | undefined} uidAttr
  */
 function collapsesToBooleanName(attrName, attrValue, tag, uidAttr) {
-  const name = attrName.toLowerCase();
+  const name = attrName;
+  const simple = isSimpleBoolean.has(name);
+  if (!simple && name !== 'hidden' && name !== 'draggable' && !collapsibleValues.has(name)) {
+    return false;
+  }
   // Custom elements define what their attributes mean, and `marquee` counts its loops
   if (tag.includes('-') || (name === 'loop' && tag.toLowerCase() === 'marquee')) {
     return false;
   }
-  if (isSimpleBoolean.has(name)) {
+  if (simple) {
     return true;
   }
   const values = collapsibleValues.get(name);
@@ -1060,19 +1064,19 @@ function normalizeAttrFinish(attrName, attrNameOut, attrValue, attr, tag, tagOut
   return {
     attr,
     name: attrNameOut,
-    value: attrValue,
-    tag
+    value: attrValue
   };
 }
 
 /**
- * @param {{name: string, value: string | undefined, attr: HTMLAttribute, tag: string}} normalized
+ * @param {{name: string, value: string | undefined, attr: HTMLAttribute}} normalized
+ * @param {string} tag
  * @param {string | boolean | undefined} hasUnarySlash
  * @param {ProcessedOptions} options
  * @param {boolean} isLast
  * @param {string | undefined} uidAttr
  */
-function buildAttr(normalized, hasUnarySlash, options, isLast, uidAttr) {
+function buildAttr(normalized, tag, hasUnarySlash, options, isLast, uidAttr) {
   const attrName = normalized.name;
   let attrValue = normalized.value;
   const attr = normalized.attr;
@@ -1086,7 +1090,7 @@ function buildAttr(normalized, hasUnarySlash, options, isLast, uidAttr) {
 
   // An attribute written as its name alone skips the quoting work below
   if (typeof attrValue === 'undefined' ||
-      (options.collapseBooleanAttributes && !options.insideForeignContent && collapsesToBooleanName(attrName, attrValue ?? '', normalized.tag, uidAttr)) ||
+      (options.collapseBooleanAttributes && !options.insideForeignContent && collapsesToBooleanName(options.namesAsWritten ? attrName.toLowerCase() : attrName, attrValue ?? '', tag, uidAttr)) ||
       (options.collapseEmptyAttributes && attrValue === '' && (attr.customAssign ?? '=') === '=')) {
     return attr.customOpen + attrName + (isLast ? '' : ' ') + attr.customClose;
   }
