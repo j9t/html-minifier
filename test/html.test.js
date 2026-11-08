@@ -2518,26 +2518,60 @@ describe('HTML', () => {
     assert.strictEqual(await minify(input, { collapseBooleanAttributes: true }), '<input multiple>');
 
     input = '<div Allowfullscreen=foo Async=foo Autofocus=foo Autoplay=foo Checked=foo Compact=foo Controls=foo ' +
-      'Declare=foo Default=foo Defaultchecked=foo Defaultmuted=foo Defaultselected=foo Defer=foo Disabled=foo ' +
-      'Enabled=foo Formnovalidate=foo Hidden=foo Indeterminate=foo Inert=foo Ismap=foo Itemscope=foo ' +
+      'Declare=foo Default=foo Defer=foo Disabled=foo ' +
+      'Formnovalidate=foo Hidden=foo Inert=foo Ismap=foo Itemscope=foo ' +
       'Loop=foo Multiple=foo Muted=foo Nohref=foo Noresize=foo Noshade=foo Novalidate=foo Nowrap=foo Open=foo ' +
-      'Pauseonexit=foo Readonly=foo Required=foo Reversed=foo Scoped=foo Seamless=foo Selected=foo Sortable=foo ' +
-      'Truespeed=foo Typemustmatch=foo Visible=foo></div>';
-    output = '<div allowfullscreen async autofocus autoplay checked compact controls declare default defaultchecked ' +
-      'defaultmuted defaultselected defer disabled enabled formnovalidate hidden indeterminate inert ' +
-      'ismap itemscope loop multiple muted nohref noresize noshade novalidate nowrap open pauseonexit readonly ' +
-      'required reversed scoped seamless selected sortable truespeed typemustmatch visible></div>';
+      'Readonly=foo Required=foo Reversed=foo Scoped=foo Seamless=foo Selected=foo Sortable=foo ' +
+      'Truespeed=foo Typemustmatch=foo></div>';
+    output = '<div allowfullscreen async autofocus autoplay checked compact controls declare default ' +
+      'defer disabled formnovalidate hidden inert ' +
+      'ismap itemscope loop multiple muted nohref noresize noshade novalidate nowrap open readonly ' +
+      'required reversed scoped seamless selected sortable truespeed typemustmatch></div>';
     assert.strictEqual(await minify(input, { collapseBooleanAttributes: true }), output);
-    output = '<div Allowfullscreen Async Autofocus Autoplay Checked Compact Controls Declare Default Defaultchecked ' +
-      'Defaultmuted Defaultselected Defer Disabled Enabled Formnovalidate Hidden Indeterminate Inert ' +
-      'Ismap Itemscope Loop Multiple Muted Nohref Noresize Noshade Novalidate Nowrap Open Pauseonexit Readonly ' +
-      'Required Reversed Scoped Seamless Selected Sortable Truespeed Typemustmatch Visible></div>';
+    output = '<div Allowfullscreen Async Autofocus Autoplay Checked Compact Controls Declare Default ' +
+      'Defer Disabled Formnovalidate Hidden Inert ' +
+      'Ismap Itemscope Loop Multiple Muted Nohref Noresize Noshade Novalidate Nowrap Open Readonly ' +
+      'Required Reversed Scoped Seamless Selected Sortable Truespeed Typemustmatch></div>';
     assert.strictEqual(await minify(input, { collapseBooleanAttributes: true, caseSensitive: true }), output);
 
     // Without the option, boolean attributes keep their values or lack thereof
     assert.strictEqual(await minify('<input disabled="disabled">'), '<input disabled="disabled">');
     assert.strictEqual(await minify('<input disabled checked readonly><script defer src="x.js"></script>'), '<input disabled checked readonly><script defer src="x.js"></script>');
     assert.strictEqual(await minify('<select multiple><option selected>a</option></select>'), '<select multiple><option selected>a</option></select>');
+  });
+
+  test('Collapses current boolean attributes', async () => {
+    const options = { collapseBooleanAttributes: true };
+
+    assert.strictEqual(await minify('<script nomodule="nomodule" src="a.js"></script>', options), '<script nomodule src="a.js"></script>');
+    assert.strictEqual(await minify('<script nomodule="" src="a.js"></script>', options), '<script nomodule src="a.js"></script>');
+    assert.strictEqual(await minify('<video playsinline="playsinline"></video>', options), '<video playsinline></video>');
+    assert.strictEqual(await minify('<h1 headingreset="headingreset">a</h1>', options), '<h1 headingreset>a</h1>');
+    assert.strictEqual(await minify('<template shadowrootmode="open" shadowrootcustomelementregistry=""></template>', options), '<template shadowrootmode="open" shadowrootcustomelementregistry></template>');
+    assert.strictEqual(await minify('<input type="color" alpha="alpha">', options), '<input type="color" alpha>');
+    assert.strictEqual(await minify('<input type="color" alpha="">', options), '<input type="color" alpha>');
+    assert.strictEqual(await minify('<INPUT type="color" ALPHA="alpha">', options), '<input type="color" alpha>');
+    assert.strictEqual(await minify('<img alpha="1" src="a.png">', options), '<img alpha="1" src="a.png">');
+    assert.strictEqual(
+      await minify('<template shadowrootmode="open" shadowrootclonable="shadowrootclonable" shadowrootdelegatesfocus="" shadowrootserializable="shadowrootserializable"></template>', options),
+      '<template shadowrootmode="open" shadowrootclonable shadowrootdelegatesfocus shadowrootserializable></template>'
+    );
+  });
+
+  test('Keeps values of names that are not HTML attributes', async () => {
+    for (const name of ['defaultchecked', 'defaultmuted', 'defaultselected', 'enabled', 'indeterminate', 'pauseonexit', 'visible']) {
+      const input = `<my-widget ${name}="false"></my-widget>`;
+      assert.strictEqual(await minify(input, { collapseBooleanAttributes: true }), input);
+    }
+  });
+
+  test('Keeps `hidden="until-found"`', async () => {
+    const options = { collapseBooleanAttributes: true };
+
+    assert.strictEqual(await minify('<div hidden="until-found">a</div>', options), '<div hidden="until-found">a</div>');
+    assert.strictEqual(await minify('<div hidden="UNTIL-FOUND">a</div>', options), '<div hidden="UNTIL-FOUND">a</div>');
+    assert.strictEqual(await minify('<div hidden="hidden">a</div>', options), '<div hidden>a</div>');
+    assert.strictEqual(await minify('<div hidden="">a</div>', options), '<div hidden>a</div>');
   });
 
   test('Collapses enumerated attributes', async () => {
@@ -3911,6 +3945,28 @@ describe('HTML', () => {
     assert.strictEqual(await minify(input, { collapseWhitespace: true, minifyJS: true }), output);
   });
 
+  test('Keeps scripts as written where a custom fragment starts a statement', async () => {
+    const inputs = [
+      '<script>b();\n<?php echo 1; ?>\nc();</script>',
+      '<script>b()\n<?php if (x): ?>\nc()\n<?php endif; ?>\nd()</script>',
+      '<script>if (a) {\n<?php echo 1; ?>\n}</script>',
+      '<script>if (0) {\n<?php echo 1; ?>\n}</script>',
+      '<script>b();\n<?php echo 1; ?></script>',
+      '<script>if (a) <?= $b ?>;\nc();</script>',
+      '<script>while (a) <?= $b ?>;\nc();</script>',
+      '<script>if (a) b(); else <?= $c ?>;\nd();</script>'
+    ];
+    for (const input of inputs) {
+      assert.strictEqual(await minify(input, { minifyJS: true }), input);
+    }
+  });
+
+  test('Logs where a custom fragment keeps code as written', async () => {
+    const logged = [];
+    await minify('<script>b();\n<?php echo 1; ?>\nc();</script>', { minifyJS: true, log: message => logged.push(String(message)) });
+    assert.ok(logged.some(message => message.includes('custom fragment')), logged.join('\n'));
+  });
+
   test('Minifies event attributes', async () => {
     let input, output;
 
@@ -4173,7 +4229,7 @@ describe('HTML', () => {
   });
 
   test('Minifies `style` elements with custom fragments', async () => {
-    let input, output;
+    let input;
 
     // Lightning CSS with `errorRecovery` removes invalid CSS fragments and
     // returns empty or partial CSS
@@ -4294,8 +4350,7 @@ describe('HTML', () => {
 
     input = '<style>body{color:red}<?=foo?></style>';
     assert.strictEqual(await minify(input), input);
-    output = '<style>body{color:red}</style>'; // Lightning CSS keeps valid CSS, removes custom fragment
-    assert.strictEqual(await minify(input, { minifyCSS: true }), output);
+    assert.strictEqual(await minify(input, { minifyCSS: true }), input);
     await assert.doesNotReject(minify(input, { continueOnMinifyError: false }));
     await assert.rejects(
       minify(input, { continueOnMinifyError: false, minifyCSS: true }),
@@ -4304,13 +4359,30 @@ describe('HTML', () => {
 
     input = '<style>body{color:red}\t<?=foo?>\t</style>';
     assert.strictEqual(await minify(input), input);
-    output = '<style>body{color:red}</style>'; // Lightning CSS keeps valid CSS, removes custom fragment
-    assert.strictEqual(await minify(input, { minifyCSS: true }), output);
+    assert.strictEqual(await minify(input, { minifyCSS: true }), input);
     await assert.doesNotReject(minify(input, { continueOnMinifyError: false }));
     await assert.rejects(
       minify(input, { continueOnMinifyError: false, minifyCSS: true }),
       { message: /Unexpected end of input/ }
     );
+  });
+
+  test('Keeps `style` elements as written where a custom fragment starts a rule', async () => {
+    const inputs = [
+      '<style>b { top: 0 }\n<?php echo 1; ?></style>',
+      '<style>b { top: 0 }\n<%= x %>\n</style>',
+      '<style>a { top: 0 }\n<?php echo 1; ?>\nb { top: 0 }</style>',
+      '<style>a { top: 0 } <?php echo 1; ?> b { top: 0 }</style>',
+      '<style>\n<?php if (1): ?>\nb { top: 0 }\n<?php endif; ?>\n</style>',
+      '<style>p {\n  margin: 0;\n  <?= $x ?>\n}</style>'
+    ];
+    for (const input of inputs) {
+      assert.strictEqual(await minify(input, { minifyCSS: true }), input);
+    }
+  });
+
+  test('Minifies `style` elements with custom fragments within values', async () => {
+    assert.strictEqual(await minify('<style>a { color: <?= $c ?>; top: 0 }</style>', { minifyCSS: true }), '<style>a{color: <?= $c ?>;top:0}</style>');
   });
 
   test('Minifies URL attributes', async () => {

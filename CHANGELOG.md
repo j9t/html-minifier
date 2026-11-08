@@ -4,6 +4,22 @@ As of version 5.0.0, all notable changes to HTML Minifier (HM) are documented in
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.0.2] - 2026-11-08
+
+### Fixed
+
+* Fixed `minifyCSS` and `minifyJS` deleting or breaking custom fragments that start a rule or statement—CSS and JavaScript with such a fragment are now kept as written:
+  - `<style>b { top: 0 }\n<?php echo 1; ?></style>` lost the PHP block
+  - `<style>a { top: 0 }\n<?php echo 1; ?>\nb { top: 0 }</style>` had its rules merged across the fragment
+  - `<script>b()\n<?php if (x): ?>\nc()\n<?php endif; ?>\nd()</script>` became a syntax error when the condition was false
+* Fixed `collapseBooleanAttributes` turning `hidden="until-found"` into `hidden`, which made the content unfindable
+* Fixed `collapseBooleanAttributes` not collapsing `alpha` (on `input` elements), `headingreset`, `nomodule`, `playsinline`, `shadowrootclonable`, `shadowrootcustomelementregistry`, `shadowrootdelegatesfocus`, and `shadowrootserializable`
+* Fixed `collapseBooleanAttributes` removing the values of `defaultchecked`, `defaultmuted`, `defaultselected`, `enabled`, `indeterminate`, `pauseonexit`, and `visible`, none of which are HTML attributes (e.g., `<my-widget visible="false">` became `<my-widget visible>`)
+
+### Changed
+
+* Made the CLI show the help when run in a terminal without any arguments, rather than waiting for input
+
 ## [5.0.1] - 2026-11-03
 
 ### Fixed

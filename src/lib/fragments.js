@@ -333,8 +333,43 @@ function replaceCustomFragments(value, fragments, replacer) {
   return copied === 0 ? value : out + value.slice(copied);
 }
 
+/**
+ * Whether what comes before an index allows a statement or rule to start there
+ * @param {string} source
+ * @param {number} index
+ * @returns {boolean}
+ */
+function isCodeStart(source, index) {
+  let position = index;
+  while (position > 0) {
+    const char = source[--position] ?? '';
+    if (char === '\n' || char === '\r' || char === ';' || char === '{' || char === '}') return true;
+    if (!RE_WHITESPACE.test(char)) return char === ')' || source.startsWith('else', position - 3);
+  }
+  return true;
+}
+
+/**
+ * Whether minified CSS or JavaScript can stand in for its source. A fragment starting a
+ * statement or rule can render as anything, or as nothing, while engines read it as an
+ * identifier or selector and join it with the code around it, or drop it
+ * @param {string} source
+ * @param {string} output
+ * @param {RegExp} placeholder - Global pattern matching one fragment placeholder
+ * @returns {boolean}
+ */
+function isMinifiedCodeSafe(source, output, placeholder) {
+  const placeholders = [];
+  for (const match of source.matchAll(placeholder)) {
+    if (isCodeStart(source, match.index)) placeholders.push(match[0]);
+  }
+  return !placeholders.length ||
+    (!output.replace(placeholder, '').trim() && placeholders.every(token => output.includes(token)));
+}
+
 export {
   toDelimitedFragment,
   toFragment,
-  replaceCustomFragments
+  replaceCustomFragments,
+  isMinifiedCodeSafe
 };

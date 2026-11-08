@@ -347,15 +347,24 @@ function isStyleElement(tag, attrs) {
  *
  * @param {string} attrName
  * @param {string} attrValue
+ * @param {string} tag
  */
-function collapsesToBooleanName(attrName, attrValue) {
+function collapsesToBooleanName(attrName, attrValue, tag) {
   const name = attrName.toLowerCase();
   if (isSimpleBoolean.has(name)) {
     return true;
   }
+  // Boolean on this element only, while a common name elsewhere
+  if (name === 'alpha') {
+    return tag === 'input';
+  }
   const values = collapsibleValues.get(name);
   if (values) {
     return values.has(attrValue.toLowerCase());
+  }
+  // Any other value means the hidden state, which the bare attribute does, too
+  if (name === 'hidden') {
+    return attrValue.toLowerCase() !== 'until-found';
   }
   return name === 'draggable' && !isBooleanValue.has(attrValue.toLowerCase());
 }
@@ -1045,12 +1054,13 @@ function normalizeAttrFinish(attrName, attrNameOut, attrValue, attr, tag, tagOut
   return {
     attr,
     name: attrNameOut,
-    value: attrValue
+    value: attrValue,
+    tag
   };
 }
 
 /**
- * @param {{name: string, value: string | undefined, attr: HTMLAttribute}} normalized
+ * @param {{name: string, value: string | undefined, attr: HTMLAttribute, tag: string}} normalized
  * @param {string | boolean | undefined} hasUnarySlash
  * @param {ProcessedOptions} options
  * @param {boolean} isLast
@@ -1070,7 +1080,7 @@ function buildAttr(normalized, hasUnarySlash, options, isLast, uidAttr) {
 
   // An attribute written as its name alone skips the quoting work below
   if (typeof attrValue === 'undefined' ||
-      (options.collapseBooleanAttributes && collapsesToBooleanName(attrName, attrValue ?? '')) ||
+      (options.collapseBooleanAttributes && collapsesToBooleanName(attrName, attrValue ?? '', normalized.tag)) ||
       (options.collapseEmptyAttributes && attrValue === '' && (attr.customAssign ?? '=') === '=')) {
     return attr.customOpen + attrName + (isLast ? '' : ' ') + attr.customClose;
   }

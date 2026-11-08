@@ -1083,6 +1083,8 @@ program.helpOption('-h, --help', 'Display help for command');
     await reportAndWrite(capturedFiles.join(', '), originals.join(''), outputs.join(''));
     process.exit(0);
   } else { // Minifying input coming from STDIN
+    if (process.stdin.isTTY && process.argv.length === 2) program.help();
+
     content = '';
     process.stdin.setEncoding('utf8');
     process.stdin.on('data', function (/** @type {string} */ data) {
