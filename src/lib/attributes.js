@@ -345,13 +345,12 @@ function isStyleElement(tag, attrs) {
  * Whether an attribute collapses to its name; lower-cases the value only for the few names
  * that depend on it
  *
- * @param {string} attrName - In lowercase
+ * @param {string} name - In lowercase
  * @param {string} attrValue
  * @param {string} tag
  * @param {string | undefined} uidAttr
  */
-function collapsesToBooleanName(attrName, attrValue, tag, uidAttr) {
-  const name = attrName;
+function collapsesToBooleanName(name, attrValue, tag, uidAttr) {
   const simple = isSimpleBoolean.has(name);
   if (!simple && name !== 'hidden' && name !== 'draggable' && !collapsibleValues.has(name)) {
     return false;
