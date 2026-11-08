@@ -6,7 +6,7 @@
   },
   "bugs": "https://github.com/j9t/html-minifier/issues",
   "dependencies": {
-    "commander": "^15.0.0",
+    "commander": "^15.1.0",
     "entities": "^9.0.0",
     "lightningcss": "^1.33.0",
     "svgo": "^4.1.0",
@@ -15,12 +15,12 @@
   "description": "Highly effective, super-configurable, well-tested web page minifier",
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "@swc/core": "^1.16.21",
+    "@swc/core": "^1.16.22",
     "@types/node": "^26.6.6",
     "eslint": "^10.14.0",
     "globals": "^17.14.0",
     "typescript": "^7.0.2",
-    "vite": "^8.3.5"
+    "vite": "^8.3.6"
   },
   "engines": {
     "node": ">=22.13"
