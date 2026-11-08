@@ -2574,6 +2574,20 @@ describe('HTML', () => {
     assert.strictEqual(await minify('<div hidden="">a</div>', options), '<div hidden>a</div>');
   });
 
+  test('Keeps `hidden` and `draggable` values that only rendering or decoding resolves', async () => {
+    const options = { collapseBooleanAttributes: true };
+    const inputs = [
+      '<div hidden="<?= $a ?>">a</div>',
+      '<div hidden="until&#45;found">a</div>',
+      '<div draggable="<?= $a ?>">a</div>',
+      '<div draggable="tr&#117;e">a</div>'
+    ];
+    for (const input of inputs) {
+      assert.strictEqual(await minify(input, options), input);
+    }
+    assert.strictEqual(await minify('<div hidden="until&#45;found">a</div>', { ...options, decodeEntities: true }), '<div hidden="until-found">a</div>');
+  });
+
   test('Collapses enumerated attributes', async () => {
     assert.strictEqual(await minify('<div draggable="auto"></div>', { collapseBooleanAttributes: true }), '<div draggable></div>');
     assert.strictEqual(await minify('<div draggable="true"></div>', { collapseBooleanAttributes: true }), '<div draggable="true"></div>');
@@ -3961,6 +3975,14 @@ describe('HTML', () => {
     }
   });
 
+  test('Treats non-string results of custom minifiers alike with and without custom fragments', async () => {
+    const options = { minifyCSS: () => ({}) };
+    assert.strictEqual(
+      await minify('<style>\n<?= $a ?>\nb{top:0}</style>', options),
+      await minify('<style>b{top:0}</style>', options)
+    );
+  });
+
   test('Logs where a custom fragment keeps code as written', async () => {
     const logged = [];
     await minify('<script>b();\n<?php echo 1; ?>\nc();</script>', { minifyJS: true, log: message => logged.push(String(message)) });
@@ -4383,6 +4405,8 @@ describe('HTML', () => {
 
   test('Minifies `style` elements with custom fragments within values', async () => {
     assert.strictEqual(await minify('<style>a { color: <?= $c ?>; top: 0 }</style>', { minifyCSS: true }), '<style>a{color: <?= $c ?>;top:0}</style>');
+    assert.strictEqual(await minify('<style>a { font-family: myelse <?= $f ?> }</style>', { minifyCSS: true }), '<style>a{font-family:myelse <?= $f ?> }</style>');
+    assert.strictEqual(await minify('<style>a { font-family: my-else <?= $f ?> }</style>', { minifyCSS: true }), '<style>a{font-family:my-else <?= $f ?> }</style>');
   });
 
   test('Minifies URL attributes', async () => {

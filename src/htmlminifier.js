@@ -1277,7 +1277,7 @@ async function minifyHTML(value, options, partialMarkup) {
           });
 
           return Promise.resolve(fn(source, ...args)).then((/** @type {string} */ output) => {
-            if (isMinifiedCodeSafe(source, output, uidPlaceholderPattern)) return output;
+            if (typeof output !== 'string' || isMinifiedCodeSafe(source, output, uidPlaceholderPattern)) return output;
             options.log('Keeping CSS or JavaScript as written, as a custom fragment starts a rule or statement');
             return source;
           });

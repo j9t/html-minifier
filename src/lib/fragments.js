@@ -11,6 +11,7 @@
  */
 
 const RE_WHITESPACE = /\s/;
+const RE_NAME_CHAR = /[\w$-]/;
 
 // Any-character and negated-class bodies; without the `s` flag, `.` is itself a
 // negated class, excluding line terminators
@@ -344,7 +345,9 @@ function isCodeStart(source, index) {
   while (position > 0) {
     const char = source[--position] ?? '';
     if (char === '\n' || char === '\r' || char === ';' || char === '{' || char === '}') return true;
-    if (!RE_WHITESPACE.test(char)) return char === ')' || source.startsWith('else', position - 3);
+    if (!RE_WHITESPACE.test(char)) {
+      return char === ')' || (source.startsWith('else', position - 3) && !RE_NAME_CHAR.test(source[position - 4] ?? ''));
+    }
   }
   return true;
 }

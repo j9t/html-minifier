@@ -348,8 +348,9 @@ function isStyleElement(tag, attrs) {
  * @param {string} attrName
  * @param {string} attrValue
  * @param {string} tag
+ * @param {string | undefined} uidAttr
  */
-function collapsesToBooleanName(attrName, attrValue, tag) {
+function collapsesToBooleanName(attrName, attrValue, tag, uidAttr) {
   const name = attrName.toLowerCase();
   if (isSimpleBoolean.has(name)) {
     return true;
@@ -361,6 +362,11 @@ function collapsesToBooleanName(attrName, attrValue, tag) {
   const values = collapsibleValues.get(name);
   if (values) {
     return values.has(attrValue.toLowerCase());
+  }
+  // What a fragment renders or a reference decodes to, the value as written doesn’t show
+  if ((name === 'hidden' || name === 'draggable') &&
+      (attrValue.indexOf('&') !== -1 || (uidAttr && attrValue.indexOf(uidAttr) !== -1))) {
+    return false;
   }
   // Any other value means the hidden state, which the bare attribute does, too
   if (name === 'hidden') {
@@ -1080,7 +1086,7 @@ function buildAttr(normalized, hasUnarySlash, options, isLast, uidAttr) {
 
   // An attribute written as its name alone skips the quoting work below
   if (typeof attrValue === 'undefined' ||
-      (options.collapseBooleanAttributes && collapsesToBooleanName(attrName, attrValue ?? '', normalized.tag)) ||
+      (options.collapseBooleanAttributes && collapsesToBooleanName(attrName, attrValue ?? '', normalized.tag, uidAttr)) ||
       (options.collapseEmptyAttributes && attrValue === '' && (attr.customAssign ?? '=') === '=')) {
     return attr.customOpen + attrName + (isLast ? '' : ' ') + attr.customClose;
   }
