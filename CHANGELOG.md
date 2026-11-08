@@ -14,11 +14,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   - `<script>b()\n<?php if (x): ?>\nc()\n<?php endif; ?>\nd()</script>` became a syntax error when the condition was false
 * Fixed `collapseBooleanAttributes` turning `hidden="until-found"` into `hidden`, which made the content unfindable
 * Fixed `collapseBooleanAttributes` removing `hidden` and `draggable` values that hold a custom fragment or a character reference, where only rendering or decoding shows the state (e.g., `draggable="<?= $d ?>"`)
-* Fixed `collapseBooleanAttributes` not collapsing `alpha` (on `input` elements), `headingreset`, `nomodule`, `playsinline`, `shadowrootclonable`, `shadowrootcustomelementregistry`, `shadowrootdelegatesfocus`, and `shadowrootserializable`
+* Fixed `collapseBooleanAttributes` removing the loop count of `marquee` elements (`<marquee loop="3">` became `<marquee loop>`, which loops forever) and the values of attributes in SVG and MathML, where HTML’s Boolean attributes don’t apply (e.g., `<mfenced open="[">` lost its delimiter)
+* Fixed `collapseWhitespace` removing spaces around and within SVG `tspan` and `textPath` elements, which joined words (e.g., `a <tspan>b</tspan>` became `a<tspan>b</tspan>`)
+* Fixed `collapseBooleanAttributes` not collapsing `alpha`, `headingreset`, `nomodule`, `playsinline`, `shadowrootclonable`, `shadowrootcustomelementregistry`, `shadowrootdelegatesfocus`, and `shadowrootserializable`
 * Fixed `collapseBooleanAttributes` removing the values of `defaultchecked`, `defaultmuted`, `defaultselected`, `enabled`, `indeterminate`, `pauseonexit`, and `visible`, none of which are HTML attributes (e.g., `<my-widget visible="false">` became `<my-widget visible>`)
 
 ### Changed
 
+* Made `collapseBooleanAttributes` leave custom elements alone, as these define what their attributes mean (e.g., `<my-toggle checked="false">` keeps its value)
 * Made the CLI show the help when run in a terminal without any arguments, rather than waiting for input
 
 ## [5.0.1] - 2026-11-03

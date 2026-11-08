@@ -301,6 +301,28 @@ describe('SVG and MathML', () => {
     );
   });
 
+  test('Keeps attribute values in SVG and MathML with `collapseBooleanAttributes`', async () => {
+    for (const input of [
+      '<svg open="x"></svg>',
+      '<svg><path open="x"/></svg>',
+      '<math open="x"><mi>x</mi></math>',
+      '<math><mfenced open="[" close="]"><mi>x</mi></mfenced></math>'
+    ]) {
+      assert.strictEqual(await minify(input, { collapseBooleanAttributes: true }), input);
+    }
+  });
+
+  test('Keeps whitespace that separates words in SVG text', async () => {
+    const options = { collapseWhitespace: true };
+
+    assert.strictEqual(await minify('<svg><text>a   <tspan>b</tspan>  c</text></svg>', options), '<svg><text>a <tspan>b</tspan> c</text></svg>');
+    assert.strictEqual(await minify('<svg><text>a<tspan> b </tspan>c</text></svg>', options), '<svg><text>a<tspan> b </tspan>c</text></svg>');
+    assert.strictEqual(await minify('<svg><text><tspan>a</tspan> <tspan>b</tspan></text></svg>', options), '<svg><text><tspan>a</tspan> <tspan>b</tspan></text></svg>');
+    assert.strictEqual(await minify('<svg><text>a  <textPath href="#p">b</textPath>  c</text></svg>', options), '<svg><text>a <textPath href="#p">b</textPath> c</text></svg>');
+    assert.strictEqual(await minify('<svg><text>a  <textpath href="#p">b</textpath>  c</text></svg>', options), '<svg><text>a <textpath href="#p">b</textpath> c</text></svg>');
+    assert.strictEqual(await minify('<svg><text>a  <TSPAN>b</TSPAN>  c</text></svg>', options), '<svg><text>a <TSPAN>b</TSPAN> c</text></svg>');
+  });
+
   test('Options that write markup no XML parser accepts stop at an SVG SVGO reads', async () => {
     // A valueless attribute is invalid XML, and costs the graphic its optimization
     assert.strictEqual(

@@ -352,12 +352,12 @@ function isStyleElement(tag, attrs) {
  */
 function collapsesToBooleanName(attrName, attrValue, tag, uidAttr) {
   const name = attrName.toLowerCase();
+  // Custom elements define what their attributes mean, and `marquee` counts its loops
+  if (tag.includes('-') || (name === 'loop' && tag.toLowerCase() === 'marquee')) {
+    return false;
+  }
   if (isSimpleBoolean.has(name)) {
     return true;
-  }
-  // Boolean on this element only, while a common name elsewhere
-  if (name === 'alpha') {
-    return tag === 'input';
   }
   const values = collapsibleValues.get(name);
   if (values) {
@@ -1086,7 +1086,7 @@ function buildAttr(normalized, hasUnarySlash, options, isLast, uidAttr) {
 
   // An attribute written as its name alone skips the quoting work below
   if (typeof attrValue === 'undefined' ||
-      (options.collapseBooleanAttributes && collapsesToBooleanName(attrName, attrValue ?? '', normalized.tag, uidAttr)) ||
+      (options.collapseBooleanAttributes && !options.insideForeignContent && collapsesToBooleanName(attrName, attrValue ?? '', normalized.tag, uidAttr)) ||
       (options.collapseEmptyAttributes && attrValue === '' && (attr.customAssign ?? '=') === '=')) {
     return attr.customOpen + attrName + (isLast ? '' : ' ') + attr.customClose;
   }

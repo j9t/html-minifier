@@ -2335,7 +2335,7 @@ async function minifyHTML(value, options, partialMarkup) {
       }
       currentTag = tag;
       charsPrevTag = tag;
-      if (!inlineTextSet.has(tag)) {
+      if (!inlineTextSet.has(lowerTag || tag)) {
         currentChars = '';
       }
       hasChars = false;
@@ -2373,7 +2373,7 @@ async function minifyHTML(value, options, partialMarkup) {
       // Set whitespace flags for nested tags (e.g., `<code>` within a `<pre>`); verbatim
       // whitespace is tracked without `collapseWhitespace` too, as `removeWhitespaceLine` spares it
       if (options.collapseWhitespace && !stackNoTrimWhitespace.length) {
-        squashTrailingWhitespace(tag);
+        squashTrailingWhitespace(lowerTag || tag);
       }
       if (options.collapseWhitespace && !unary && inlineElementsTransparent.has(tag)) {
         transparentDepth++;
@@ -2508,7 +2508,7 @@ async function minifyHTML(value, options, partialMarkup) {
           closesNoTrim = !stackNoTrimWhitespace.length;
         }
       } else if (options.collapseWhitespace) {
-        squashTrailingWhitespace('/' + tag);
+        squashTrailingWhitespace('/' + (lowerTag || tag));
       }
       if (transparentDepth && inlineElementsTransparent.has(tag)) {
         transparentDepth--;
@@ -2581,7 +2581,7 @@ async function minifyHTML(value, options, partialMarkup) {
             bufferPush(endTagText, true);
           }
           charsPrevTag = '/' + tag;
-          if (!inlineElements.has(tag)) {
+          if (!inlineElements.has(lowerTag || tag)) {
             currentChars = '';
           } else if (isElementEmpty) {
             currentChars += '|';
@@ -2594,7 +2594,7 @@ async function minifyHTML(value, options, partialMarkup) {
           bufferPush(endTagText, true);
         }
         charsPrevTag = '/' + tag;
-        if (!inlineElements.has(tag)) {
+        if (!inlineElements.has(lowerTag || tag)) {
           currentChars = '';
         } else if (isElementEmpty) {
           currentChars += '|';

@@ -2551,16 +2551,53 @@ describe('HTML', () => {
     assert.strictEqual(await minify('<input type="color" alpha="alpha">', options), '<input type="color" alpha>');
     assert.strictEqual(await minify('<input type="color" alpha="">', options), '<input type="color" alpha>');
     assert.strictEqual(await minify('<INPUT type="color" ALPHA="alpha">', options), '<input type="color" alpha>');
-    assert.strictEqual(await minify('<img alpha="1" src="a.png">', options), '<img alpha="1" src="a.png">');
     assert.strictEqual(
       await minify('<template shadowrootmode="open" shadowrootclonable="shadowrootclonable" shadowrootdelegatesfocus="" shadowrootserializable="shadowrootserializable"></template>', options),
       '<template shadowrootmode="open" shadowrootclonable shadowrootdelegatesfocus shadowrootserializable></template>'
     );
   });
 
+  test('Keeps attribute values on custom elements', async () => {
+    const options = { collapseBooleanAttributes: true };
+
+    for (const input of [
+      '<my-toggle checked="false"></my-toggle>',
+      '<my-toggle disabled="disabled"></my-toggle>',
+      '<my-player playsinline="false"></my-player>',
+      '<my-color alpha="0.5"></my-color>',
+      '<my-panel hidden="hidden"></my-panel>',
+      '<my-panel draggable="draggable"></my-panel>',
+      '<my-panel crossorigin="anonymous"></my-panel>',
+      '<my-panel contenteditable=""></my-panel>'
+    ]) {
+      assert.strictEqual(await minify(input, options), input);
+    }
+    assert.strictEqual(await minify('<My-Toggle checked="false"></My-Toggle>', { ...options, caseSensitive: true }), '<My-Toggle checked="false"></My-Toggle>');
+  });
+
+  test('Keeps the loop count of `marquee` elements', async () => {
+    const options = { collapseBooleanAttributes: true };
+
+    assert.strictEqual(await minify('<marquee loop="3">a</marquee>', options), '<marquee loop="3">a</marquee>');
+    assert.strictEqual(await minify('<MARQUEE LOOP="3">a</MARQUEE>', options), '<marquee loop="3">a</marquee>');
+    assert.strictEqual(await minify('<MARQUEE loop="3">a</MARQUEE>', { ...options, caseSensitive: true }), '<MARQUEE loop="3">a</MARQUEE>');
+    assert.strictEqual(await minify('<marquee truespeed="truespeed">a</marquee>', options), '<marquee truespeed>a</marquee>');
+    assert.strictEqual(await minify('<video loop="loop"></video>', options), '<video loop></video>');
+  });
+
+  test('Collapses boolean attributes on any element but custom ones', async () => {
+    const options = { collapseBooleanAttributes: true };
+
+    assert.strictEqual(await minify('<img alpha="1" src="a.png">', options), '<img alpha src="a.png">');
+    assert.strictEqual(await minify('<input type="text" alpha="x">', options), '<input type="text" alpha>');
+    assert.strictEqual(await minify('<audio playsinline="false"></audio>', options), '<audio playsinline></audio>');
+    assert.strictEqual(await minify('<div shadowrootclonable="false"></div>', options), '<div shadowrootclonable></div>');
+    assert.strictEqual(await minify('<INPUT TYPE="color" ALPHA="x">', { ...options, caseSensitive: true }), '<INPUT TYPE="color" ALPHA>');
+  });
+
   test('Keeps values of names that are not HTML attributes', async () => {
     for (const name of ['defaultchecked', 'defaultmuted', 'defaultselected', 'enabled', 'indeterminate', 'pauseonexit', 'visible']) {
-      const input = `<my-widget ${name}="false"></my-widget>`;
+      const input = `<div ${name}="false"></div>`;
       assert.strictEqual(await minify(input, { collapseBooleanAttributes: true }), input);
     }
   });
@@ -7815,7 +7852,7 @@ describe('HTML', () => {
       // Closing slash and optional attribute quotes removed by minifier, but not by PHPTAL
       // Attribute ordering differences between minifier and PHPTAL
       ['<img alt=x height=5 src=foo width=10>', '<img width="10" height="5" src="foo" alt="x" />'],
-      ['<img alpha=1 beta=2 gamma=3>', '<img gamma="3" alpha="1" beta="2" />'],
+      ['<img aleph=1 beta=2 gamma=3>', '<img gamma="3" aleph="1" beta="2" />'],
       ['<pre>\n\n\ntest</pre>', '<pre>\n\n\ntest</pre>'],
       /* single line-break preceding <pre> is redundant, assuming <pre> is block element
       ['<pre>test</pre>', '<pre>\ntest</pre>'], */
