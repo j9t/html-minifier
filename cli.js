@@ -80,12 +80,15 @@ const MARK_RESET = process.stderr.isTTY ? '\x1b[0m' : '';
 const program = new Command();
 program.name(pkg.name);
 
+// Only the first line, which says what failed, is marked, leaving the reason below it plain
+const printError = (/** @type {string} */ message) => console.error(message.replace(/^.*/, `${MARK_ERROR}$&${MARK_RESET}`));
+
 /**
  * @param {string} message
  * @returns {never}
  */
 function fatal(message) {
-  console.error(`${MARK_ERROR}${message}${MARK_RESET}`);
+  printError(message);
   process.exit(1);
 }
 
@@ -93,12 +96,22 @@ function fatal(message) {
 /** @param {unknown} err */
 const errorMessage = (err) => err instanceof Error ? err.message : String(err);
 
+/**
+ * What the CLI tried, with the reason it failed indented below, where there is one
+ * @param {string} action
+ * @param {unknown} err
+ */
+const describeFailure = (action, err) => {
+  const reason = errorMessage(err);
+  return reason.trim() ? `${action}:\n${reason.replace(/^/gm, '  ')}` : action;
+};
+
 // Handle broken pipe (e.g., when piping to `head`)
 process.stdout.on('error', (/** @type {NodeJS.ErrnoException} */ err) => {
   if (err && err.code === 'EPIPE') {
     process.exit(0);
   }
-  fatal('STDOUT error\n' + (err && err.message ? err.message : String(err)));
+  fatal(describeFailure('STDOUT error', err));
 });
 
 /**
@@ -229,7 +242,7 @@ function readFile(file) {
   try {
     return fs.readFileSync(file, { encoding: 'utf8' });
   } catch (err) {
-    fatal('Cannot read ' + file + '\n' + errorMessage(err));
+    fatal(describeFailure('Cannot read ' + file, err));
   }
 }
 
@@ -417,10 +430,11 @@ program.helpOption('-h, --help', 'Display help for command');
       programOptions.preset = 'comprehensive';
 
       const inputDirResolved = await fs.promises.realpath(cwd).catch(() => cwd);
-      const stats = await processDirectory(cwd, cwd, EXTENSIONS_DEFAULT, false, false, undefined, Boolean(process.stderr.isTTY), ['node_modules'], inputDirResolved);
+      const { stats, failed } = await processDirectory(cwd, cwd, EXTENSIONS_DEFAULT, false, false, undefined, Boolean(process.stderr.isTTY), ['node_modules'], inputDirResolved);
       reportProcessed(stats.length);
+      reportFailed(failed);
 
-      process.exit(0);
+      process.exit();
     }
   }
 
@@ -553,6 +567,18 @@ program.helpOption('-h, --help', 'Display help for command');
   }
 
   /**
+   * Ends a directory run on what failed; each failure was reported as it happened, with
+   * its reason, so that this needs only name the files
+   * @param {string[]} files
+   */
+  function reportFailed(files) {
+    if (!files.length) return;
+    process.exitCode = 1;
+    console.error(`${MARK_ERROR}Could not process ${files.length.toLocaleString()} file${files.length === 1 ? '' : 's'}:${MARK_RESET}`);
+    files.forEach(file => console.error(`  ${file}`));
+  }
+
+  /**
    * Reports a single-output run and writes its result to `--output` or STDOUT; a dry
    * run reports only
    * @param {string} inputSource
@@ -581,7 +607,7 @@ program.helpOption('-h, --help', 'Display help for command');
         await fs.promises.mkdir(path.dirname(programOptions.output), { recursive: true });
         await writeFileAtomic(programOptions.output, minified);
       } catch (err) {
-        fatal('Cannot write ' + programOptions.output + '\n' + errorMessage(err));
+        fatal(describeFailure('Cannot write ' + programOptions.output, err));
       }
       return;
     }
@@ -697,6 +723,7 @@ program.helpOption('-h, --help', 'Display help for command');
   }
 
   /**
+   * Rejects with a message fit to show as is, leaving it to the run what to do about it
    * @param {string} inputFile
    * @param {string} outputFile
    * @param {boolean} [isDryRun]
@@ -704,7 +731,7 @@ program.helpOption('-h, --help', 'Display help for command');
    */
   async function processFile(inputFile, outputFile, isDryRun = false, isVerbose = false) {
     const data = await fs.promises.readFile(inputFile, { encoding: 'utf8' }).catch(err => {
-      fatal('Cannot read ' + inputFile + '\n' + errorMessage(err));
+      throw new Error(describeFailure('Cannot read ' + inputFile, err));
     });
 
     let minified;
@@ -716,7 +743,7 @@ program.helpOption('-h, --help', 'Display help for command');
       }
       minified = await minify(data, fileOptions);
     } catch (err) {
-      fatal('Minification error on ' + inputFile + '\n' + errorMessage(err));
+      throw new Error(describeFailure('Minification error on ' + inputFile, err), { cause: err });
     }
 
     const stats = calculateStats(data, minified);
@@ -727,7 +754,7 @@ program.helpOption('-h, --help', 'Display help for command');
 
     if (!isDryRun) {
       await writeFileAtomic(outputFile, minified).catch(err => {
-        fatal('Cannot write ' + outputFile + '\n' + errorMessage(err));
+        throw new Error(describeFailure('Cannot write ' + outputFile, err));
       });
     }
 
@@ -884,25 +911,37 @@ program.helpOption('-h, --help', 'Display help for command');
    * @param {boolean} showProgress
    * @param {string[]} ignorePatterns
    * @param {string} baseDir
+   * @returns {Promise<{stats: {originalSize: number, minifiedSize: number, saved: number}[], failed: string[]}>}
    */
   async function processDirectory(inputDir, outputDir, extensions, isDryRun, isVerbose, skipRootAbs, showProgress, ignorePatterns, baseDir) {
     // Collect all files first for bounded parallel processing
     const list = await collectFiles(inputDir, extensions, skipRootAbs, ignorePatterns, baseDir);
     const allStats = new Array(list.length);
-
-    const prepareOutDir = async (/** @type {string} */ inputFile) => {
-      const outFile = path.join(outputDir, path.relative(inputDir, inputFile));
-      if (!isDryRun) {
-        await fs.promises.mkdir(path.dirname(outFile), { recursive: true }).catch(err => {
-          fatal('Cannot create directory ' + path.dirname(outFile) + '\n' + errorMessage(err));
-        });
-      }
-      return outFile;
-    };
+    const allFailed = new Array(list.length);
 
     let done = 0;
     const advanceProgress = () => {
       if (showProgress) updateProgress(++done, list.length);
+    };
+
+    const failFile = (/** @type {string} */ inputFile, /** @type {number} */ idx, /** @type {string} */ message) => {
+      if (showProgress) clearProgress();
+      printError(message);
+      allFailed[idx] = inputFile;
+      advanceProgress();
+    };
+
+    // The output path, or `null` for a file that just failed for want of its folder
+    const prepareOutDir = async (/** @type {string} */ inputFile, /** @type {number} */ idx) => {
+      const outFile = path.join(outputDir, path.relative(inputDir, inputFile));
+      if (isDryRun) return outFile;
+      try {
+        await fs.promises.mkdir(path.dirname(outFile), { recursive: true });
+        return outFile;
+      } catch (err) {
+        failFile(inputFile, idx, describeFailure('Cannot create directory ' + path.dirname(outFile), err));
+        return null;
+      }
     };
 
     const pool = await createPool(list);
@@ -911,18 +950,29 @@ program.helpOption('-h, --help', 'Display help for command');
         const { orderLargestFirst } = await import('./src/lib/file-pool.js');
         const [fileSizes, tasks] = await Promise.all([
           getFileSizes(list),
-          Promise.all(list.map(async (inputFile, idx) => ({ inputFile, outFile: await prepareOutDir(inputFile), idx })))
+          Promise.all(list.map(async (inputFile, idx) => ({ inputFile, outFile: await prepareOutDir(inputFile, idx), idx })))
         ]);
         // `run()` queues synchronously, so the files reach the pool in exactly this order
         await Promise.all(orderLargestFirst(tasks, fileSizes).map(async ({ inputFile, outFile, idx }) => {
+          if (outFile === null) return;
           const sizes = await pool.run({ inputFile, outputFile: outFile, dryRun: isDryRun })
             .catch(err => {
+              // Only a pool that lost a worker names no step, which no file is to blame
+              // for and which leaves nothing to run the remaining files on
+              if (!err?.stage) {
+                if (showProgress) clearProgress();
+                reportFailed(allFailed.filter(Boolean));
+                fatal(describeFailure('Worker thread failure, stopping the run', err));
+              }
               // A worker names the step it failed at, so the wording matches what this
               // file would have got had it been minified in this process
-              if (err?.stage === 'read') fatal('Cannot read ' + inputFile + '\n' + errorMessage(err));
-              if (err?.stage === 'write') fatal('Cannot write ' + outFile + '\n' + errorMessage(err));
-              fatal('Minification error on ' + inputFile + '\n' + errorMessage(err));
+              const action = err.stage === 'read' ? 'Cannot read ' + inputFile
+                : err.stage === 'write' ? 'Cannot write ' + outFile
+                : 'Minification error on ' + inputFile;
+              failFile(inputFile, idx, describeFailure(action, err));
+              return null;
             });
+          if (!sizes) return;
           const stats = calculateSizeStats(sizes.originalSize, sizes.minifiedSize);
           if (isDryRun || isVerbose) {
             reportFileStats(path.relative(process.cwd(), inputFile), stats);
@@ -935,13 +985,18 @@ program.helpOption('-h, --help', 'Display help for command');
       }
     } else {
       await runWithConcurrency(list, CONCURRENCY_IN_PROCESS, async (inputFile, idx) => {
-        const outFile = await prepareOutDir(inputFile);
-        allStats[idx] = await processFile(inputFile, outFile, isDryRun, isVerbose);
-        advanceProgress();
+        const outFile = await prepareOutDir(inputFile, idx);
+        if (outFile === null) return;
+        try {
+          allStats[idx] = await processFile(inputFile, outFile, isDryRun, isVerbose);
+          advanceProgress();
+        } catch (err) {
+          failFile(inputFile, idx, errorMessage(err));
+        }
       });
     }
     if (showProgress) clearProgress();
-    return allStats.filter(Boolean);
+    return { stats: allStats.filter(Boolean), failed: allFailed.filter(Boolean) };
   }
 
   const writeMinify = async () => {
@@ -957,7 +1012,7 @@ program.helpOption('-h, --help', 'Display help for command');
       const minify = await getMinify();
       minified = await minify(content, minifierOptions);
     } catch (err) {
-      fatal('Minification error:\n' + errorMessage(err));
+      fatal(describeFailure('Minification error', err));
     }
 
     await reportAndWrite(program.args.length > 0 ? program.args.join(', ') : 'STDIN', content, minified);
@@ -1025,13 +1080,13 @@ program.helpOption('-h, --help', 'Display help for command');
           fatal(`${inputDir} is not a directory—to minify a single file, use \`--input\`/\`--output\`: html-minifier [options] -i ${inputDir} -o <output-file>`);
         }
       } catch (err) {
-        fatal('Cannot read directory ' + inputDir + '\n' + errorMessage(err));
+        fatal(describeFailure('Cannot read directory ' + inputDir, err));
       }
 
       // Resolve base directory for consistent path comparisons
       const inputDirResolved = inputReal || inputDir;
 
-      const stats = await processDirectory(inputDir, outputDir, extList, Boolean(programOptions.dry), Boolean(isVerbose), skipRootAbs, showProgress, ignorePatterns, inputDirResolved);
+      const { stats, failed } = await processDirectory(inputDir, outputDir, extList, Boolean(programOptions.dry), Boolean(isVerbose), skipRootAbs, showProgress, ignorePatterns, inputDirResolved);
 
       if (showProgress) {
         reportProcessed(stats.length);
@@ -1047,6 +1102,8 @@ program.helpOption('-h, --help', 'Display help for command');
       if (isVerbose) {
         await printCacheStats();
       }
+
+      reportFailed(failed);
     })();
   } else if (filesProvided) { // Minifying one or more files specified on the command line
     // Process each file independently, then concatenate outputs
@@ -1068,13 +1125,13 @@ program.helpOption('-h, --help', 'Display help for command');
     const outputs = new Array(inputs.length);
 
     await runWithConcurrency(inputs, CONCURRENCY_IN_PROCESS, async (file, idx) => {
-      const data = await fs.promises.readFile(file, 'utf8').catch(err => fatal('Cannot read ' + file + '\n' + errorMessage(err)));
+      const data = await fs.promises.readFile(file, 'utf8').catch(err => fatal(describeFailure('Cannot read ' + file, err)));
       const minify = await getMinify();
       let out;
       try {
         out = await minify(data, minifierOptions);
       } catch (err) {
-        fatal('Minification error on ' + file + '\n' + errorMessage(err));
+        fatal(describeFailure('Minification error on ' + file, err));
       }
       originals[idx] = data;
       outputs[idx] = out;

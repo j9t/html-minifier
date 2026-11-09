@@ -4,6 +4,12 @@ As of version 5.0.0, all notable changes to HTML Minifier (HM) are documented in
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+* Made CLI directory runs (`--input-dir`, `--zero`) skip and report a file that fails rather than stop at it; a run with failures ends by listing the files and exits with code `1`
+
 ## [5.0.2] - 2026-11-09
 
 ### Fixed
