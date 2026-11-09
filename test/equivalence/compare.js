@@ -17,7 +17,7 @@ const RE_WS_END = /[ \t\n\r\f]+$/;
 const RE_VALUELESS_STYLE = /^(?:[a-z-]+:[;\s]*)+$/i;
 const RE_JSON_TYPE = /^(?:application\/(?:[\w.-]+\+)?json|importmap|speculationrules)$/;
 const RE_JS_COMMENTS = /<!--.*|-->.*|\/\/.*|\/\*[\s\S]*?\*\//g;
-const RE_LITERALS_ONLY = /^(?:\s|;|"[^"]*"|'[^']*'|`[^`]*`|\d+)*$/;
+const RE_LITERALS_ONLY = /^(?:\s|;|"[^"]*"|'[^']*'|`[^`]*`|\d)*$/;
 const RE_EMPTY_ATTRIBUTE = /^(?:class|dir|id|lang|style|title)$/;
 
 // Marks a replaced element in rendered text
