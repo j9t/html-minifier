@@ -210,6 +210,11 @@ function findSelectedAttributes(source) {
   if (!RE_STYLE_ELEMENT.test(source)) {
     return names;
   }
+  const addSelected = (/** @type {number} */ start, /** @type {number} */ end) => {
+    for (const selector of source.slice(start, end).toLowerCase().matchAll(RE_ATTR_SELECTOR)) {
+      names.add(/** @type {string} */ (selector[1]));
+    }
+  };
   // Scanned rather than matched, as a lazy pattern is quadratic on `style` tags left open
   let start = -1;
   RE_STYLE_TAG.lastIndex = 0;
@@ -217,10 +222,15 @@ function findSelectedAttributes(source) {
     if (match[0][1] !== '/') {
       if (start === -1) start = match.index;
     } else if (start !== -1) {
-      for (const selector of source.slice(start, match.index).toLowerCase().matchAll(RE_ATTR_SELECTOR)) {
-        names.add(/** @type {string} */ (selector[1]));
-      }
+      addSelected(start, match.index);
       start = -1;
+    }
+  }
+  // Browsers apply a `style` element the document ends in, but not one that is script text
+  if (start !== -1) {
+    const before = source.slice(0, start).toLowerCase();
+    if (before.lastIndexOf('<script') <= before.lastIndexOf('</script')) {
+      addSelected(start, source.length);
     }
   }
   return names;

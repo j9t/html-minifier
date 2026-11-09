@@ -8678,6 +8678,10 @@ describe('HTML', () => {
     assert.strictEqual(await minify('<style>a{color:red}</style><style>[type]{color:red}</style><input type=text>', options), '<style>a{color:red}</style><style>[type]{color:red}</style><input type=text>');
     assert.strictEqual(await minify('<style>a{color:red}</style>[type]<style>b{color:red}</style><input type=text>', options), '<style>a{color:red}</style>[type]<style>b{color:red}</style><input>');
     assert.strictEqual(await minify('</style>[type]<style>a{color:red}</style><input type=text>', options), '[type]<style>a{color:red}</style><input>');
+    assert.strictEqual(await minify('<input type=text><style>[type]{color:red}', options), '<input type=text><style>[type]{color:red}');
+    assert.strictEqual(await minify('<script>a</script><input type=text><style>[type]{color:red}', options), '<script>a</script><input type=text><style>[type]{color:red}');
+    assert.strictEqual(await minify('<input type=text><script>a="<style>[type]{color:red}<\\/style>"</script>', options), '<input><script>a="<style>[type]{color:red}<\\/style>"</script>');
+    assert.strictEqual(await minify('<input type=text><SCRIPT>a="<style>[type]{color:red}<\\/style>"</SCRIPT>', options), '<input><script>a="<style>[type]{color:red}<\\/style>"</script>');
   });
 
   test('Removes only what is empty with `removeEmptyElements` and `removeOptionalTags` together', async () => {
