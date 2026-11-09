@@ -2233,6 +2233,214 @@ describe('Parallel multi-file processing', { concurrency: Math.max(1, Math.floor
   });
 });
 
+describe('Failing files', { concurrency: Math.max(1, Math.floor(os.availableParallelism() / 2)) }, () => {
+  const MARKUP_MALFORMED = '<meta content="a" x"y="">';
+  const MARKUP_INPUT = '<p   class="x"  >Text</p>';
+  const MARKUP_MINIFIED = '<p class="x">Text</p>';
+
+  const FLOWS = [
+    { flow: 'in-process', flags: ['--workers=1', '--verbose'], poolLine: /Worker threads: none/ },
+    { flow: 'workers', flags: ['--workers=2', '--verbose'], poolLine: /Worker threads: 2/ }
+  ];
+
+  /**
+   * @param {string} name
+   * @param {Record<string, string>} files - Content by path, relative to the new folder
+   * @returns {string} The folder, relative to the sandbox
+   */
+  const buildDir = (name, files) => {
+    const dir = path.join('tmp', name);
+    for (const [file, content] of Object.entries(files)) {
+      const filePath = path.resolve(dirSandbox(), dir, file);
+      fs.mkdirSync(path.dirname(filePath), { recursive: true });
+      fs.writeFileSync(filePath, content);
+    }
+    return dir;
+  };
+
+  const readSandbox = (/** @type {string[]} */ ...segments) => fs.readFileSync(path.resolve(dirSandbox(), ...segments), 'utf8');
+
+  for (const { flow, flags, poolLine } of FLOWS) {
+    test(`Skips a malformed file, minifies the rest in place, and exits with 1 (${flow})`, async () => {
+      const dir = buildDir(`inplace-${flow}`, { 'a.html': MARKUP_INPUT, 'bad.html': MARKUP_MALFORMED, 'z.html': MARKUP_INPUT });
+
+      const { stderr, exitCode } = await execCliWithStderr([`--input-dir=${dir}`, `--output-dir=${dir}`, '--collapse-whitespace', ...flags]);
+
+      assert.strictEqual(exitCode, 1, stderr);
+      assert.match(stderr, poolLine, 'Without this the test may cover the other path');
+      assert.strictEqual(readSandbox(dir, 'a.html'), MARKUP_MINIFIED);
+      assert.strictEqual(readSandbox(dir, 'z.html'), MARKUP_MINIFIED);
+      assert.strictEqual(readSandbox(dir, 'bad.html'), MARKUP_MALFORMED, 'The failing file stays as it was');
+      assert.ok(stderr.includes(`Minification error on ${path.join(dir, 'bad.html')}:\n  Parse error at line 1, column 1:\n  ${MARKUP_MALFORMED}`), stderr);
+      assert.ok(stderr.endsWith(`Could not process 1 file:\n  ${path.join(dir, 'bad.html')}`), stderr);
+    });
+
+    test(`Lists every failing file in discovery order, and writes no output for them (${flow})`, async () => {
+      const dir = buildDir(`several-${flow}`, { 'a.html': MARKUP_MALFORMED, 'b.html': MARKUP_INPUT, 'c/d.html': MARKUP_MALFORMED });
+      const dirOutput = path.join('tmp', `several-${flow}-out`);
+
+      const { stderr, exitCode } = await execCliWithStderr([`--input-dir=${dir}`, `--output-dir=${dirOutput}`, '--collapse-whitespace', ...flags]);
+
+      assert.strictEqual(exitCode, 1, stderr);
+      assert.strictEqual(readSandbox(dirOutput, 'b.html'), MARKUP_MINIFIED);
+      assert.ok(!existsFixture(path.join(dirOutput, 'a.html')));
+      assert.ok(!existsFixture(path.join(dirOutput, 'c/d.html')));
+      assert.ok(stderr.endsWith(`Could not process 2 files:\n  ${path.join(dir, 'a.html')}\n  ${path.join(dir, 'c/d.html')}`), stderr);
+    });
+
+    test(`Skips a file it cannot write and continues (${flow})`, async () => {
+      const dir = buildDir(`write-${flow}`, { 'a.html': MARKUP_INPUT, 'b.html': MARKUP_INPUT });
+      const dirOutput = path.join('tmp', `write-${flow}-out`);
+      fs.mkdirSync(path.resolve(dirSandbox(), dirOutput, 'a.html'), { recursive: true });
+
+      const { stderr, exitCode } = await execCliWithStderr([`--input-dir=${dir}`, `--output-dir=${dirOutput}`, '--collapse-whitespace', ...flags]);
+
+      assert.strictEqual(exitCode, 1, stderr);
+      assert.ok(stderr.includes(`Cannot write ${path.join(dirOutput, 'a.html')}:\n  `), stderr);
+      assert.strictEqual(readSandbox(dirOutput, 'b.html'), MARKUP_MINIFIED);
+      assert.ok(stderr.endsWith(`Could not process 1 file:\n  ${path.join(dir, 'a.html')}`), stderr);
+    });
+
+    test(`Skips a file whose output folder cannot be created and continues (${flow})`, async () => {
+      const dir = buildDir(`mkdir-${flow}`, { 'b.html': MARKUP_INPUT, 'sub/a.html': MARKUP_INPUT });
+      const dirOutput = buildDir(`mkdir-${flow}-out`, { sub: 'A file where the folder would go' });
+
+      const { stderr, exitCode } = await execCliWithStderr([`--input-dir=${dir}`, `--output-dir=${dirOutput}`, '--collapse-whitespace', ...flags]);
+
+      assert.strictEqual(exitCode, 1, stderr);
+      assert.ok(stderr.includes(`Cannot create directory ${path.join(dirOutput, 'sub')}:\n  `), stderr);
+      assert.strictEqual(readSandbox(dirOutput, 'b.html'), MARKUP_MINIFIED);
+      assert.ok(stderr.endsWith(`Could not process 1 file:\n  ${path.join(dir, 'sub/a.html')}`), stderr);
+    });
+
+    test(`Reports failures on a dry run without writing anything (${flow})`, async () => {
+      const dir = buildDir(`dry-${flow}`, { 'a.html': MARKUP_INPUT, 'bad.html': MARKUP_MALFORMED });
+
+      const { stderr, exitCode } = await execCliWithStderr([`--input-dir=${dir}`, `--output-dir=${dir}`, '--collapse-whitespace', '--dry', ...flags]);
+
+      assert.strictEqual(exitCode, 1, stderr);
+      assert.strictEqual(readSandbox(dir, 'a.html'), MARKUP_INPUT);
+      assert.ok(stderr.endsWith(`Could not process 1 file:\n  ${path.join(dir, 'bad.html')}`), stderr);
+    });
+
+    test(`Treats a file recovered by \`continueOnParseError\` as a success (${flow})`, async () => {
+      const dir = buildDir(`lenient-${flow}`, { 'a.html': MARKUP_INPUT, 'bad.html': `${MARKUP_MALFORMED}\n${MARKUP_INPUT}` });
+
+      const { stderr, exitCode } = await execCliWithStderr([`--input-dir=${dir}`, `--output-dir=${dir}`, '--collapse-whitespace', '--continue-on-parse-error', ...flags]);
+
+      assert.strictEqual(exitCode, 0, stderr);
+      assert.strictEqual(readSandbox(dir, 'bad.html'), MARKUP_MALFORMED + MARKUP_MINIFIED, 'What can’t be parsed stays, the rest is minified');
+      assert.match(stderr, /Warning: Parse error at line 1/);
+      assert.doesNotMatch(stderr, /Could not process/);
+    });
+  }
+
+  test('Stops the run when the worker pool fails, without blaming the files', async () => {
+    const dir = buildDir('pool-death', { 'a.html': MARKUP_INPUT, 'b.html': MARKUP_INPUT, 'c.html': MARKUP_INPUT });
+    const preload = 'data:text/javascript,' + encodeURIComponent(
+      'import wt from "node:worker_threads"; import { syncBuiltinESMExports } from "node:module";' +
+      'const { Worker } = wt; wt.Worker = class extends Worker { constructor(...args) { super(...args); setTimeout(() => this.terminate(), 0); } };' +
+      'syncBuiltinESMExports();'
+    );
+
+    const { stderr, status } = await spawnAsync('node', ['--import', preload, cliPath, `--input-dir=${dir}`, `--output-dir=${dir}`, '--collapse-whitespace', '--workers=2']);
+    const stderrStr = stderr.toString();
+
+    assert.strictEqual(status, 1, stderrStr);
+    assert.match(stderrStr, /Worker thread failure, stopping the run:\n {2}Worker stopped unexpectedly/);
+    assert.doesNotMatch(stderrStr, /Minification error on/);
+    assert.doesNotMatch(stderrStr, /Could not process/);
+  });
+
+  test('Exits with 1 and lists the failing file in `--zero` mode', async () => {
+    const dir = buildDir('zero', { 'a.html': MARKUP_INPUT, 'bad.html': MARKUP_MALFORMED });
+    const cwd = path.resolve(dirSandbox(), dir);
+
+    const { stderr, status } = await spawnCli(['--zero'], { cwd, input: 'y\n' });
+    const stderrStr = stderr.toString();
+
+    assert.strictEqual(status, 1, stderrStr);
+    assert.notStrictEqual(readSandbox(dir, 'a.html'), MARKUP_INPUT, 'The other file is minified');
+    assert.strictEqual(readSandbox(dir, 'bad.html'), MARKUP_MALFORMED);
+    assert.ok(stderrStr.trimEnd().endsWith(`Could not process 1 file:\n  ${path.join(cwd, 'bad.html')}`), stderrStr);
+  });
+
+  test('Lists a failing file by the path it was given, however far from the working directory', async () => {
+    const dir = buildDir('absolute', { 'a.html': MARKUP_INPUT, 'bad.html': MARKUP_MALFORMED });
+    const dirAbsolute = path.resolve(dirSandbox(), dir);
+
+    const { stderr, status } = await spawnCli([`--input-dir=${dirAbsolute}`, `--output-dir=${dirAbsolute}`, '--collapse-whitespace'], { cwd: os.tmpdir() });
+    const stderrStr = stderr.toString();
+
+    assert.strictEqual(status, 1, stderrStr);
+    assert.ok(stderrStr.trimEnd().endsWith(`Could not process 1 file:\n  ${path.join(dirAbsolute, 'bad.html')}`), stderrStr);
+  });
+
+  test('Leaves out the colon when an error comes without a description', async () => {
+    const dir = buildDir('no-reason', { 'a.html': MARKUP_INPUT, 'bad.html': '<script>a</script>' });
+    const dirConfig = buildDir('no-reason-config', {
+      'hm.config.mjs': 'export default { minifyJS: () => { throw new Error(""); }, continueOnMinifyError: false };'
+    });
+
+    const { stderr, exitCode } = await execCliWithStderr([`--config-file=${path.join(dirConfig, 'hm.config.mjs')}`, `--input-dir=${dir}`, `--output-dir=${dir}`, '--workers=1']);
+
+    assert.strictEqual(exitCode, 1, stderr);
+    assert.strictEqual(stderr, `Minification error on ${path.join(dir, 'bad.html')}\nCould not process 1 file:\n  ${path.join(dir, 'bad.html')}`);
+  });
+
+  test('Marks only the first line of an error in a terminal', async () => {
+    const dir = buildDir('marks', { 'a.html': MARKUP_INPUT, 'bad.html': MARKUP_MALFORMED });
+    const asTerminal = 'data:text/javascript,process.stderr.isTTY = true;';
+    const args = ['--import', asTerminal, cliPath, '--collapse-whitespace'];
+    const headerExpected = `\x1b[31mMinification error on ${path.join(dir, 'bad.html')}:\x1b[0m\n  Parse error at line 1, column 1:\n  ${MARKUP_MALFORMED}\n`;
+
+    const inDirectory = await spawnAsync('node', [...args, `--input-dir=${dir}`, `--output-dir=${dir}`, '--verbose']);
+    assert.ok(inDirectory.stderr.toString().includes(headerExpected), inDirectory.stderr.toString());
+
+    const onSingleFile = await spawnAsync('node', [...args, path.join(dir, 'bad.html')]);
+    assert.ok(onSingleFile.stderr.toString().includes(headerExpected), onSingleFile.stderr.toString());
+  });
+
+  test('Prints no summary when no file fails', async () => {
+    const dir = buildDir('clean', { 'a.html': MARKUP_INPUT, 'b.html': MARKUP_INPUT });
+
+    const { stderr, exitCode } = await execCliWithStderr([`--input-dir=${dir}`, `--output-dir=${dir}`, '--collapse-whitespace']);
+
+    assert.strictEqual(exitCode, 0, stderr);
+    assert.doesNotMatch(stderr, /Could not process/);
+  });
+
+  test('Fails at once on a malformed single file, without writing output', async () => {
+    const dir = buildDir('single', { 'bad.html': MARKUP_MALFORMED });
+    const fileOutput = path.join(dir, 'out.html');
+
+    const { stderr, exitCode } = await execCliWithStderr(['-i', path.join(dir, 'bad.html'), '-o', fileOutput, '--collapse-whitespace']);
+
+    assert.strictEqual(exitCode, 1, stderr);
+    assert.ok(stderr.includes(`Minification error on ${path.join(dir, 'bad.html')}:\n  Parse error`), stderr);
+    assert.doesNotMatch(stderr, /Could not process/);
+    assert.ok(!existsFixture(fileOutput));
+  });
+
+  test('Fails rather than concatenating a partial result from several input files', async () => {
+    const dir = buildDir('positional', { 'a.html': MARKUP_INPUT, 'bad.html': MARKUP_MALFORMED });
+
+    const { stdout, stderr, exitCode } = await execCliWithStderr([path.join(dir, 'a.html'), path.join(dir, 'bad.html'), '--collapse-whitespace']);
+
+    assert.strictEqual(exitCode, 1, stderr);
+    assert.strictEqual(stdout.trim(), '', 'Output missing one of its inputs would pass for the whole');
+    assert.doesNotMatch(stderr, /Could not process/);
+  });
+
+  test('Fails at once on malformed input from STDIN', async () => {
+    const { stdout, stderr, status } = await spawnCli(['--collapse-whitespace'], { input: MARKUP_MALFORMED });
+
+    assert.strictEqual(status, 1, stderr.toString());
+    assert.strictEqual(stdout.toString(), '');
+    assert.match(stderr.toString(), /Minification error:\n {2}Parse error/);
+  });
+});
+
 // Sequential, as some tests here stand in for `fs.promises.open` in this process
 describe('Output file integrity', () => {
   // An abrupt exit (a native crash, an OOM kill) gives no chance to clean up, so
