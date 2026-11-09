@@ -16,6 +16,12 @@ const RE_NAME_CHAR = /[\w$-]/;
 // Run on at most the eight characters ending in the word
 const RE_BLOCK_KEYWORD = /(?:^|[^\w$.])(?:do|else|finally|try)$/;
 
+// The last character before a `/` that starts a regular expression, not a division
+const RE_BEFORE_REGEX = /[(,=:[!&|?{};+*%<>~^}-]/;
+
+// Run on at most the eleven characters ending in the word
+const RE_BEFORE_REGEX_KEYWORD = /(?:^|[^\w$.])(?:await|case|delete|do|else|in|instanceof|new|of|return|throw|typeof|void|yield)$/;
+
 // Run on at most the eleven characters from the `@`
 const RE_DROPPABLE_AT_RULE = /^@(?:charset|import|namespace)(?![\w-])/i;
 
@@ -341,11 +347,30 @@ function replaceCustomFragments(value, fragments, replacer) {
 }
 
 /**
- * Index past the comment or string starting at an index
+ * Index past the regular expression starting at the `/` at an index
+ * @param {string} source
+ * @param {number} index
+ * @returns {number} The index itself when the line ends before the expression does
+ */
+function skipRegex(source, index) {
+  let inClass = false;
+  for (let position = index + 1; position < source.length; position++) {
+    const current = source[position];
+    if (current === '\n' || current === '\r') return index;
+    if (current === '\\') position++;
+    else if (current === '[') inClass = true;
+    else if (current === ']') inClass = false;
+    else if (current === '/' && !inClass) return position + 1;
+  }
+  return index;
+}
+
+/**
+ * Index past the comment, string, or regular expression starting at an index
  * @param {string} source
  * @param {number} index
  * @param {boolean} isJS
- * @returns {number} The index itself when neither starts there
+ * @returns {number} The index itself when none starts there
  */
 function skipCommentOrString(source, index, isJS) {
   const char = source[index];
@@ -359,6 +384,7 @@ function skipCommentOrString(source, index, isJS) {
     const end = source.indexOf('\n', index + 2);
     return end === -1 ? source.length : end;
   }
+  if (isJS && char === '/') return isRegexStart(source, index) ? skipRegex(source, index) : index;
   if (char !== '"' && char !== '\'' && !(isJS && char === '`')) return index;
 
   for (let position = index + 1; position < source.length; position++) {
@@ -383,6 +409,33 @@ function findPreviousToken(source, index) {
 }
 
 /**
+ * Whether a `/` starts a regular expression rather than a division, going by what precedes
+ * it; after a `)`, which `if (a) /b/.test(c)` leaves open, it’s read as a division
+ * @param {string} source
+ * @param {number} slash
+ * @returns {boolean}
+ */
+function isRegexStart(source, slash) {
+  const before = findPreviousToken(source, slash);
+  if (before === -1) return true;
+
+  const char = source[before] ?? '';
+  // `++` and `--` can only end an operand here, as a literal cannot be incremented
+  if ((char === '+' || char === '-') && source[before - 1] === char) return false;
+  return RE_BEFORE_REGEX.test(char) || RE_BEFORE_REGEX_KEYWORD.test(source.slice(Math.max(before - 10, 0), before + 1));
+}
+
+/**
+ * Whether a block keyword ends at an index
+ * @param {string} source
+ * @param {number} index
+ * @returns {boolean}
+ */
+function isBlockKeywordEnd(source, index) {
+  return RE_BLOCK_KEYWORD.test(source.slice(Math.max(index - 7, 0), index + 1));
+}
+
+/**
  * Whether a `{` opens a block rather than an object literal
  * @param {string} source
  * @param {number} brace
@@ -395,7 +448,7 @@ function isBlockBrace(source, brace) {
   const char = source[before] ?? '';
   if (char === ';' || char === '{' || char === '}' || char === ')') return true;
   if (char === '>') return source[before - 1] === '=';
-  return RE_BLOCK_KEYWORD.test(source.slice(Math.max(before - 7, 0), before + 1));
+  return isBlockKeywordEnd(source, before);
 }
 
 /**
@@ -511,15 +564,16 @@ function findDroppableAtRulePlaceholders(source, placeholder) {
  * @param {string} source
  * @param {number} index
  * @param {Set<number>} colons - Colons after which a statement starts
+ * @param {boolean} isJS
  * @returns {boolean}
  */
-function isCodeStart(source, index, colons) {
+function isCodeStart(source, index, colons, isJS) {
   let position = index;
   while (position > 0) {
     const char = source[--position] ?? '';
     if (char === '\n' || char === '\r' || char === ';' || char === '{' || char === '}') return true;
     if (!RE_WHITESPACE.test(char)) {
-      return char === ')' || (char === '/' && source[position - 1] === '*') || colons.has(position) || (source.startsWith('else', position - 3) && !RE_NAME_CHAR.test(source[position - 4] ?? ''));
+      return char === ')' || (char === '/' && source[position - 1] === '*') || colons.has(position) || (isJS && isBlockKeywordEnd(source, position));
     }
   }
   return true;
@@ -543,7 +597,7 @@ function isMinifiedCodeSafe(source, output, placeholder, isJS = false) {
   if (!matches.length) return true;
 
   const colons = isJS ? findStatementColons(source) : new Set();
-  const starts = matches.filter(match => isCodeStart(source, match.index, colons));
+  const starts = matches.filter(match => isCodeStart(source, match.index, colons, isJS));
   const kept = new Set(Array.from(output.matchAll(placeholder), match => match[0]));
 
   // Output of nothing but fragments only holds up where no label or `case` went with the code

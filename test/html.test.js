@@ -4006,6 +4006,7 @@ describe('HTML', () => {
       '<script>if (a) <?= $b ?>;\nc();</script>',
       '<script>while (a) <?= $b ?>;\nc();</script>',
       '<script>if (a) b(); else <?= $c ?>;\nd();</script>',
+      '<script>do <?= $b ?>; while (a);</script>',
       '<script>b(); /* c */ <?= $x ?>; c();</script>'
     ];
     for (const input of inputs) {
@@ -4025,7 +4026,12 @@ describe('HTML', () => {
       '<script>l: <?= $x ?>;</script>',
       '<script>a(); l: <?= $x ?>;</script>',
       '<script>function f() { l: <?= $x ?> }</script>',
-      '<script>{ l: <?= $x ?> }</script>'
+      '<script>{ l: <?= $x ?> }</script>',
+      '<script>switch (a) { case /[/*]/: <?= $x ?> }</script>',
+      '<script>var r = /["\']/; l: <?= $x ?>;</script>',
+      '<script>var r = /\\/*/; l: <?= $x ?>;</script>',
+      '<script>function f() { return /[/*]/; l: <?= $x ?> }</script>',
+      '<script>a++ / 2; l: <?= $x ?>; b / 2</script>'
     ];
     for (const input of inputs) {
       assert.strictEqual(await minify(input, { minifyJS: true }), input);
@@ -4045,6 +4051,7 @@ describe('HTML', () => {
       ['var o = { a: 1, b: <?= $x ?> }', 'var o={a:1,b: <?= $x ?> }'],
       ['var a = "case 1: <?= $x ?>";', 'var a="case 1: <?= $x ?>"'],
       ['var a = "; l: <?= $x ?>";', 'var a="; l: <?= $x ?>"'],
+      ['var a = /[:]/.test(b) ? c : <?= $x ?>;', 'var a=/[:]/.test(b)?c: <?= $x ?>'],
       ['/* <?= $x ?> */ a()', 'a()'],
       ['/* case 1: <?= $x ?> */ a()', 'a()'],
       ['if (0) { var b = <?= $x ?>; }', 'var b']
@@ -4487,6 +4494,7 @@ describe('HTML', () => {
     assert.strictEqual(await minify('<style>a { color: <?= $c ?>; top: 0 }</style>', { minifyCSS: true }), '<style>a{color: <?= $c ?>;top:0}</style>');
     assert.strictEqual(await minify('<style>a { font-family: myelse <?= $f ?> }</style>', { minifyCSS: true }), '<style>a{font-family:myelse <?= $f ?> }</style>');
     assert.strictEqual(await minify('<style>a { font-family: my-else <?= $f ?> }</style>', { minifyCSS: true }), '<style>a{font-family:my-else <?= $f ?> }</style>');
+    assert.strictEqual(await minify('<style>a { font-family: do <?= $f ?> }</style>', { minifyCSS: true }), '<style>a{font-family:do <?= $f ?> }</style>');
   });
 
   test('Keeps `style` elements as written where an at-rule would lose its custom fragment', async () => {
