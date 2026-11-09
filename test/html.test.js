@@ -1472,8 +1472,27 @@ describe('HTML', () => {
     input = '<a name="foo">blah</a>';
     assert.strictEqual(await minify(input, { removeRedundantAttributes: true }), input);
 
+    // Browsers match fragments against both values as written
     input = '<a href="…" name="  bar  " id="bar" >blah</a>';
-    assert.strictEqual(await minify(input, { removeRedundantAttributes: true }), '<a href="…" id="bar">blah</a>');
+    assert.strictEqual(await minify(input, { removeRedundantAttributes: true }), '<a href="…" name="  bar  " id="bar">blah</a>');
+
+    input = '<a id=" foo" name="foo">blah</a>';
+    assert.strictEqual(await minify(input, { removeRedundantAttributes: true }), input);
+
+    input = '<a id name="">blah</a>';
+    assert.strictEqual(await minify(input, { removeRedundantAttributes: true }), '<a id>blah</a>');
+
+    // Compared as they’ll be written
+    const collapsing = { collapseAttributeWhitespace: true, removeRedundantAttributes: true };
+    assert.strictEqual(await minify('<a id=" foo" name="foo">blah</a>', collapsing), '<a id="foo">blah</a>');
+    assert.strictEqual(await minify('<a name="  bar  " id="bar">blah</a>', collapsing), '<a id="bar">blah</a>');
+    assert.strictEqual(await minify('<a id="a  b" name="a b">blah</a>', collapsing), '<a id="a b">blah</a>');
+    assert.strictEqual(await minify('<a id="foo" name="bar">blah</a>', collapsing), '<a id="foo" name="bar">blah</a>');
+    assert.strictEqual(await minify('<a id="foo" name=" FOO">blah</a>', collapsing), '<a id="foo" name="FOO">blah</a>');
+
+    const decoding = { decodeEntities: true, removeRedundantAttributes: true };
+    assert.strictEqual(await minify('<a id="a&amp;b" name="a&amp;amp;b">blah</a>', decoding), '<a id="a&b" name="a&amp;amp;b">blah</a>');
+    assert.strictEqual(await minify('<a id="a&amp;b" name="a&amp;b">blah</a>', { removeRedundantAttributes: true }), '<a id="a&amp;b">blah</a>');
   });
 
   test('Removes redundant attributes: `<script src="…" charset="…">`', async () => {
@@ -8753,6 +8772,9 @@ describe('HTML', () => {
     assert.strictEqual(await minify('<script>a</script><input type=text><style>[type]{color:red}', options), '<script>a</script><input type=text><style>[type]{color:red}');
     assert.strictEqual(await minify('<input type=text><script>a="<style>[type]{color:red}<\\/style>"</script>', options), '<input><script>a="<style>[type]{color:red}<\\/style>"</script>');
     assert.strictEqual(await minify('<input type=text><SCRIPT>a="<style>[type]{color:red}<\\/style>"</SCRIPT>', options), '<input><script>a="<style>[type]{color:red}<\\/style>"</script>');
+    assert.strictEqual(await minify('<a title="<script">b</a><input type=text><style>[type]{color:red}', options), '<a title="<script">b</a><input type=text><style>[type]{color:red}');
+    assert.strictEqual(await minify('<!-- <script --><input type=text><style>[type]{color:red}', options), '<!-- <script --><input type=text><style>[type]{color:red}');
+    assert.strictEqual(await minify('<title><script</title><input type=text><style>[type]{color:red}', options), '<title><script</title><input type=text><style>[type]{color:red}');
   });
 
   test('Removes only what is empty with `removeEmptyElements` and `removeOptionalTags` together', async () => {

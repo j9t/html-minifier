@@ -28,12 +28,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   - End tags of table parts reached outside their own table
   - End tags of formatting elements closed block elements inside them (e.g., `<a><div></a>x</div>`), and weren’t ignored from within a table when the element is outside it
   - End tags of ordinary elements weren’t ignored with a block element open inside them (e.g., `<span><div></span>x</div>`)
+* Fixed whitespace handling and `removeEmptyElements` losing track of what is open after the end tag of a formatting element with a block element open inside it (e.g., `<pre><b><p></b>a</p></pre>` kept whitespace after it, and `<b><p></b></p>x` lost `</b>`)
+* Fixed whitespace being collapsed within doctype identifiers, which changed them and could change the document mode (e.g., `PUBLIC "a  b"`)
+* Fixed doctypes that browsers ignore after a tag or another doctype staying in the output, where `removeOptionalTags` could leave one first and have it set the document mode (e.g., `<body></body><!doctype html>`)
 * Fixed `removeOptionalTags` omitting the `body` start tag before `base`, `basefont`, `bgsound`, `noframes`, and `title` elements, which moved them to the `head`
 * Fixed `continueOnParseError` turning tags with quotes in attribute names into text (e.g., `<img alt="a "b" c">`, with `decodeEntities`, became `&lt;img…`)
 * Fixed CDATA sections directly in `svg` and `math` elements being read as comments, `svg` elements in `annotation-xml` being read as MathML, and `isindex` being read as a void element
-* Fixed whitespace being collapsed within doctype identifiers, which changed them and could change the document mode (e.g., `PUBLIC "a  b"`)
-* Fixed doctypes that browsers ignore after a tag or another doctype staying in the output, where `removeOptionalTags` could leave one first and have it set the document mode (e.g., `<body></body><!doctype html>`)
-* Fixed whitespace handling and `removeEmptyElements` losing track of what is open after the end tag of a formatting element with a block element open inside it (e.g., `<pre><b><p></b>a</p></pre>` kept whitespace after it, and `<b><p></b></p>x` lost `</b>`)
 
 ### Added
 

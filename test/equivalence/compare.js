@@ -164,7 +164,7 @@ function canonicalizeSrcset(/** @type {string} */ value, /** @type {any} */ opti
   return candidates.join(', ');
 }
 
-function isRedundant(/** @type {any} */ node, /** @type {string} */ name, /** @type {string} */ value, /** @type {any} */ context) {
+function isRedundant(/** @type {any} */ node, /** @type {string} */ name, /** @type {string} */ value, /** @type {any} */ options, /** @type {any} */ context) {
   const tag = node.tagName;
   const valueLower = trim(value.toLowerCase());
   if (name === 'xmlns' || name === 'xmlns:xlink') return true;
@@ -180,7 +180,10 @@ function isRedundant(/** @type {any} */ node, /** @type {string} */ name, /** @t
   if (tag === 'ol' && name === 'start') return valueLower === '1' && attrValue(node, 'reversed') === undefined;
   if (tag === 'script' && name === 'language') return valueLower === 'javascript';
   if (tag === 'script' && name === 'charset') return attrValue(node, 'src') === undefined;
-  if (tag === 'a' && name === 'name') return trim(attrValue(node, 'id') ?? '\0') === trim(value);
+  if (tag === 'a' && name === 'name') {
+    const asWritten = (/** @type {string} */ text) => options.collapseAttributeWhitespace ? trim(text).replace(RE_WS_RUN, ' ') : text;
+    return asWritten(attrValue(node, 'id') ?? '\0') === asWritten(value);
+  }
   return false;
 }
 
@@ -188,7 +191,7 @@ function isRemovedAttribute(/** @type {any} */ node, /** @type {string} */ name,
   const tag = node.tagName;
   if (context.selected.has(name)) return false;
   if (options.removeEmptyAttributes && (isWsOnly(value) || (name === 'style' && RE_VALUELESS_STYLE.test(trim(value)))) && (RE_EMPTY_ATTRIBUTE.test(name) || isEventAttribute(name) || (tag === 'input' && name === 'value'))) return true;
-  if (options.removeRedundantAttributes && isRedundant(node, name, value, context)) return true;
+  if (options.removeRedundantAttributes && isRedundant(node, name, value, options, context)) return true;
   if (options.removeDefaultTypeAttributes && (isHTML(node) || tag === 'style') && name === 'type') {
     const type = trim(value.split(';', 1)[0] ?? '').toLowerCase();
     return tag === 'script' ? SCRIPT_TYPES_JS.has(type) : (tag === 'style' || tag === 'link') && (type === '' || type === 'text/css');

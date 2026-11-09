@@ -226,10 +226,11 @@ function findSelectedAttributes(source) {
       start = -1;
     }
   }
-  // Browsers apply a `style` element the document ends in, but not one that is script text
+  // Browsers apply a `style` element the document ends in, but not one that is script text,
+  // with a script’s end tag after it (without, `<script` before it is text of some other kind)
   if (start !== -1) {
     const before = source.slice(0, start).toLowerCase();
-    if (before.lastIndexOf('<script') <= before.lastIndexOf('</script')) {
+    if (before.lastIndexOf('<script') <= before.lastIndexOf('</script') || !source.slice(start).toLowerCase().includes('</script')) {
       addSelected(start, source.length);
     }
   }
@@ -317,10 +318,15 @@ function isAttributeRedundant(tag, attrName, attrValue, attrs, options) {
     : undefined;
   const tagDefault = tagAttrDefaults && Object.hasOwn(tagAttrDefaults, attrName) ? tagAttrDefaults[attrName] : undefined;
 
-  // As written, for browsers match fragments case-sensitively
+  // As written, for browsers match fragments case-sensitively and without trimming
   if (tag === 'a' && attrName === 'name') {
     const id = attrs.find(attr => attr.name.toLowerCase() === 'id');
-    return id !== undefined && trimWhitespace(id.value ?? '') === trimWhitespace(attrValue);
+    const idValue = id?.value ?? '';
+    // With `decodeEntities`, the name is decoded by now, the ID isn’t
+    if (id === undefined || (options.decodeEntities && idValue.indexOf('&') !== -1)) {
+      return false;
+    }
+    return options.collapseAttributeWhitespace ? collapseAttributeValue(idValue) === collapseAttributeValue(attrValue) : idValue === attrValue;
   }
 
   const isLegacyAttr = tag === 'script' && (attrName === 'language' || attrName === 'charset');
@@ -711,6 +717,15 @@ const collapseAttributeWhitespaceExempt = new Set(['pattern', 'placeholder', 'ti
 const valueWhitespaceExemptElements = new Set(['button', 'data', 'input', 'option', 'param']);
 
 /**
+ * @param {string} value
+ * @returns {string}
+ */
+function collapseAttributeValue(value) {
+  // Fast path: Only process if whitespace exists (avoids regex overhead on clean values)
+  return RE_ATTR_WS_CHECK.test(value) ? trimWhitespace(value).replace(RE_ATTR_WS_COLLAPSE, ' ') : value;
+}
+
+/**
  * Drop repeated names from a whitespace-separated class list, keeping the first of each.
  * @param {string} value
  * @returns {string}
@@ -742,10 +757,7 @@ function cleanAttributeValue(tag, attrName, attrValue, options, attrs, minifyHTM
   // Special spaces (no-break space, hair space, etc.) stay, for consistency
   // with `collapseWhitespace`
   if (options.collapseAttributeWhitespace && !collapseAttributeWhitespaceExempt.has(attrName) && !(attrName === 'value' && valueWhitespaceExemptElements.has(tag)) && !isEventAttr) {
-    // Fast path: Only process if whitespace exists (avoids regex overhead on clean values)
-    if (RE_ATTR_WS_CHECK.test(attrValue)) {
-      attrValue = trimWhitespace(attrValue).replace(RE_ATTR_WS_COLLAPSE, ' ');
-    }
+    attrValue = collapseAttributeValue(attrValue);
   }
 
   if (isEventAttr) {
