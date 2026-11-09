@@ -7,6 +7,8 @@ import { equivalenceCases } from './equivalence/cases.js';
 import { check, reduce, signatureOf, signatureOfThrown } from './equivalence/runner.js';
 
 const fileKnownIssues = new URL('./equivalence/known-issues.json', import.meta.url);
+const BASELINE_REDUCTION_STEPS = 400;
+const BASELINE_INPUT_MAX = 200;
 
 const keyOf = (/** @type {string} */ html, /** @type {Record<string, unknown>} */ options) =>
   crypto.createHash('sha256').update(html + JSON.stringify(options)).digest('base64url').slice(0, 16);
@@ -63,14 +65,22 @@ describe('Equivalence', () => {
     }
   });
 
-  // Each known issue is one case in `known-issues.json`, so that only a change fails: a new or
-  // different result, or one that no longer occurs. They are malformed markup past what the
-  // parser models (e.g., content after a stray `</body>`, or a `body` start tag within the body),
-  // obsolete elements, SVGO’s handling of unclosed SVG, and markup that fails to parse.
+  test('Reduces markup that fails to parse, as long as it does', async () => {
+    const html = '<p>a</p><a "b="c">d</a><p>e</p>';
+    const reduced = await reduce(html, {}, 'thrown:Parse error at line 1, column 9:');
+    assert.ok(reduced.html.length < html.length, reduced.html);
+    assert.notStrictEqual((await check(reduced.html, {})).thrown, undefined, reduced.html);
+  });
+
+  // Each known issue is one case in `known-issues.json`, with a reduced input to audit it by,
+  // so that only a change fails: a new or different result, or one that no longer occurs. They
+  // are malformed markup past what the parser models (e.g., content after a stray `</body>`, or
+  // a `body` start tag within the body), obsolete elements, SVGO’s handling of unclosed SVG, and
+  // markup that fails to parse.
   // Run with `UPDATE_EQUIVALENCE_BASELINE=1` to rewrite the list, after reviewing what changed.
   test('Finds output equivalent to its source across options and markup', async () => {
-    const known = /** @type {Record<string, string>} */ (JSON.parse(fs.readFileSync(fileKnownIssues, 'utf8')));
-    /** @type {Record<string, string>} */
+    const known = /** @type {Record<string, {signature: string}>} */ (JSON.parse(fs.readFileSync(fileKnownIssues, 'utf8')));
+    /** @type {Record<string, {html: string, options: Record<string, unknown>, signature: string}>} */
     const seen = {};
     const failures = [];
     let compared = 0;
@@ -81,11 +91,17 @@ describe('Equivalence', () => {
       if (thrown === undefined && !first) continue;
       const signature = thrown === undefined ? signatureOf(/** @type {NonNullable<typeof first>} */ (first)) : signatureOfThrown(thrown);
       const key = keyOf(html, options);
-      seen[key] = signature;
-      if (known[key] !== signature) failures.push({ html, options, signature, isThrown: thrown !== undefined });
+      seen[key] = { html, options, signature };
+      if (known[key]?.signature !== signature) failures.push({ html, options, signature, isThrown: thrown !== undefined });
     }
     if (process.env.UPDATE_EQUIVALENCE_BASELINE) {
-      fs.writeFileSync(fileKnownIssues, JSON.stringify(Object.fromEntries(Object.entries(seen).sort()), null, 2));
+      const lines = [];
+      for (const [key, { html, options, signature }] of Object.entries(seen).sort(([keyA], [keyB]) => keyA < keyB ? -1 : 1)) {
+        const reduced = await reduce(html, options, signature, BASELINE_REDUCTION_STEPS);
+        const entry = { signature, input: reduced.html.slice(0, BASELINE_INPUT_MAX), ...(Object.keys(reduced.options).length ? { options: reduced.options } : {}) };
+        lines.push(`  ${JSON.stringify(key)}: ${JSON.stringify(entry)}`);
+      }
+      fs.writeFileSync(fileKnownIssues, `{\n${lines.join(',\n')}\n}`);
       return;
     }
     assert.ok(compared > 5000, `Compared only ${compared} cases`);

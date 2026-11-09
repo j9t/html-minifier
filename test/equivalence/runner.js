@@ -111,8 +111,9 @@ export async function reduce(html, options, signature, steps = REDUCTION_STEPS) 
     for (const code of parseErrorsOf(candidate)) {
       if (!parseErrors.has(code)) return false;
     }
-    const { differences } = await check(candidate, candidateOptions);
-    return differences.some(difference => signatureOf(difference) === signature);
+    const { differences, thrown } = await check(candidate, candidateOptions);
+    // The position moves along with what is removed
+    return signature.startsWith('thrown:') ? thrown !== undefined : differences.some(difference => signatureOf(difference) === signature);
   };
 
   let optionsReduced = { ...options };
