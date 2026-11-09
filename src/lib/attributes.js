@@ -342,20 +342,41 @@ function isStyleElement(tag, attrs) {
 }
 
 /**
- * Whether an attribute collapses to its name; takes name and value as written, lower-casing
- * the value only for the few names that depend on it
+ * Whether an attribute collapses to its name; lower-cases the value only for the few names
+ * that depend on it
  *
- * @param {string} attrName
+ * @param {string} name - In lowercase
  * @param {string} attrValue
+ * @param {string} tag
+ * @param {string[]} markers - What custom fragment and `htmlmin:ignore` placeholders hold
  */
-function collapsesToBooleanName(attrName, attrValue) {
-  const name = attrName.toLowerCase();
-  if (isSimpleBoolean.has(name)) {
+function collapsesToBooleanName(name, attrValue, tag, markers) {
+  const simple = isSimpleBoolean.has(name);
+  if (!simple && name !== 'hidden' && name !== 'draggable' && !collapsibleValues.has(name)) {
+    return false;
+  }
+  // Custom elements define what their attributes mean, and `marquee` counts its loops
+  if (tag.includes('-') || (name === 'loop' && tag.toLowerCase() === 'marquee')) {
+    return false;
+  }
+  // Template code and ignored markup are not the minifier’s to remove
+  if (markers.some(marker => attrValue.indexOf(marker) !== -1)) {
+    return false;
+  }
+  if (simple) {
     return true;
   }
   const values = collapsibleValues.get(name);
   if (values) {
     return values.has(attrValue.toLowerCase());
+  }
+  // What a reference decodes to, the value as written doesn’t show
+  if ((name === 'hidden' || name === 'draggable') && attrValue.indexOf('&') !== -1) {
+    return false;
+  }
+  // Any other value means the hidden state, which the bare attribute does, too
+  if (name === 'hidden') {
+    return attrValue.toLowerCase() !== 'until-found';
   }
   return name === 'draggable' && !isBooleanValue.has(attrValue.toLowerCase());
 }
@@ -1051,12 +1072,14 @@ function normalizeAttrFinish(attrName, attrNameOut, attrValue, attr, tag, tagOut
 
 /**
  * @param {{name: string, value: string | undefined, attr: HTMLAttribute}} normalized
+ * @param {string} tag
  * @param {string | boolean | undefined} hasUnarySlash
  * @param {ProcessedOptions} options
  * @param {boolean} isLast
  * @param {string | undefined} uidAttr
+ * @param {string[]} markers - What custom fragment and `htmlmin:ignore` placeholders hold
  */
-function buildAttr(normalized, hasUnarySlash, options, isLast, uidAttr) {
+function buildAttr(normalized, tag, hasUnarySlash, options, isLast, uidAttr, markers) {
   const attrName = normalized.name;
   let attrValue = normalized.value;
   const attr = normalized.attr;
@@ -1070,7 +1093,7 @@ function buildAttr(normalized, hasUnarySlash, options, isLast, uidAttr) {
 
   // An attribute written as its name alone skips the quoting work below
   if (typeof attrValue === 'undefined' ||
-      (options.collapseBooleanAttributes && collapsesToBooleanName(attrName, attrValue ?? '')) ||
+      (options.collapseBooleanAttributes && !options.insideForeignContent && collapsesToBooleanName(options.namesAsWritten ? attrName.toLowerCase() : attrName, attrValue ?? '', tag, markers)) ||
       (options.collapseEmptyAttributes && attrValue === '' && (attr.customAssign ?? '=') === '=')) {
     return attr.customOpen + attrName + (isLast ? '' : ' ') + attr.customClose;
   }

@@ -78,7 +78,7 @@ import {
 } from './lib/content.js';
 
 import { processOptions } from './lib/options.js';
-import { toFragment, replaceCustomFragments } from './lib/fragments.js';
+import { toFragment, replaceCustomFragments, isMinifiedCodeSafe } from './lib/fragments.js';
 
 /** @import { ProcessedOptions } from './lib/options.js' */
 
@@ -1263,31 +1263,32 @@ async function minifyHTML(value, options, partialMarkup) {
         uidAttrLeadingPattern = new RegExp('^\\s*' + uidAttr + '(\\d+)' + uidAttr);
         uidAttrExactPattern = new RegExp('^' + uidAttr + '(\\d+)' + uidAttr + '$');
 
-        if (options.minifyCSS !== identity) {
-          options.minifyCSS = (function (/** @type {ProcessedOptions['minifyCSS']} */ fn) {
-            return function (/** @type {string} */ text, /** @type {string | undefined} */ type, /** @type {ProcessedOptions['cssContext']} */ context) {
-              text = text.replace(/** @type {RegExp} */ (uidPattern), function (/** @type {string} */ _match, /** @type {string} */ _prefix, /** @type {string} */ index) {
-                const chunks = ignoredCustomMarkupChunks[+index];
-                customMarkupInCode.add(+index);
-                return (chunks?.[1] ?? '') + uidAttr + index + uidAttr + (chunks?.[2] ?? '');
-              });
+        const uidPlaceholderPattern = new RegExp(uidAttr + '\\d+' + uidAttr, 'g');
 
-              return fn(text, type, context);
-            };
-          })(options.minifyCSS);
-        }
+        /**
+         * @param {(text: string, ...args: any[]) => any} fn
+         * @param {boolean} isJS
+         * @returns {any}
+         */
+        const wrapCodeMinifier = (fn, isJS) => (/** @type {string} */ text, /** @type {any[]} */ ...args) => {
+          if (!text.includes(/** @type {string} */ (uidAttr))) return fn(text, ...args);
 
-        if (options.minifyJS !== identity) {
-          options.minifyJS = (function (/** @type {ProcessedOptions['minifyJS']} */ fn) {
-            return function (/** @type {string} */ text, /** @type {boolean | undefined} */ inline, /** @type {boolean | undefined} */ isModule) {
-              return fn(text.replace(/** @type {RegExp} */ (uidPattern), function (/** @type {string} */ _match, /** @type {string} */ _prefix, /** @type {string} */ index) {
-                const chunks = ignoredCustomMarkupChunks[+index];
-                customMarkupInCode.add(+index);
-                return (chunks?.[1] ?? '') + uidAttr + index + uidAttr + (chunks?.[2] ?? '');
-              }), inline, isModule);
-            };
-          })(options.minifyJS);
-        }
+          const source = text.replace(/** @type {RegExp} */ (uidPattern), function (/** @type {string} */ _match, /** @type {string} */ _prefix, /** @type {string} */ index) {
+            const chunks = ignoredCustomMarkupChunks[+index];
+            customMarkupInCode.add(+index);
+            return (chunks?.[1] ?? '') + uidAttr + index + uidAttr + (chunks?.[2] ?? '');
+          });
+          const result = fn(source, ...args);
+          const finish = (/** @type {string} */ output) => {
+            if (isMinifiedCodeSafe(source, output, uidPlaceholderPattern, isJS)) return output;
+            options.log('Keeping CSS or JavaScript as written, as minifying could break or lose a custom fragment');
+            return source;
+          };
+          return isThenable(result) ? Promise.resolve(result).then(finish) : finish(result);
+        };
+
+        if (options.minifyCSS !== identity) options.minifyCSS = wrapCodeMinifier(options.minifyCSS, false);
+        if (options.minifyJS !== identity) options.minifyJS = wrapCodeMinifier(options.minifyJS, true);
       }
 
       const token = uidAttr + ignoredCustomMarkupChunks.length + uidAttr;
@@ -1620,11 +1621,14 @@ async function minifyHTML(value, options, partialMarkup) {
     // Nothing to the left of the text is in play here, so only its trailing run can
     // change—unless preserved line breaks bring the leading run into play, too
     const trailingOnly = !options.preserveLineBreaks;
-    for (let prevTag = ''; index > noTrimEndIndex && canTrimWhitespace(namesAsWritten ? prevTag.toLowerCase() : prevTag, prevTag, emptyAttrs); index--) {
+    let prevTag = '';
+    let prevTagLower = '';
+    for (; index > noTrimEndIndex && canTrimWhitespace(prevTagLower, prevTag, emptyAttrs); index--) {
       const str = buffer[index] ?? '';
       const endTagName = matchPlainEndTag(str);
       if (endTagName !== null) {
         prevTag = endTagName;
+        prevTagLower = prevTag.toLowerCase();
         continue;
       }
       // A tag ends the search, and so does text that survives collapsing. Text with no
@@ -2146,8 +2150,9 @@ async function minifyHTML(value, options, partialMarkup) {
    * @param {string | boolean | undefined} hasUnarySlash
    * @param {boolean | undefined} optional
    * @param {ProcessedOptions | null} restoreOptions - Context a unary tag pushed, or null
+   * @param {ProcessedOptions} optionsTag - Context the element’s own attributes are in
    */
-  function emitStartTag(normalizedAttrs, tag, unary, autoGenerated, fragmentJoinsTag, hasUnarySlash, optional, restoreOptions) {
+  function emitStartTag(normalizedAttrs, tag, unary, autoGenerated, fragmentJoinsTag, hasUnarySlash, optional, restoreOptions, optionsTag) {
     // Find the last kept attribute, then emit in order, with no intermediate array
     let lastKeptIndex = -1;
     for (let i = normalizedAttrs.length - 1; i >= 0; i--) {
@@ -2169,7 +2174,7 @@ async function minifyHTML(value, options, partialMarkup) {
             if (uidAttr && normalizedAttr.name.includes(uidAttr)) {
               markTagFragments(normalizedAttr.name);
             }
-            tagText += buildAttr(normalizedAttr, hasUnarySlash, options, i === lastKeptIndex, uidAttr);
+            tagText += buildAttr(normalizedAttr, tag, hasUnarySlash, optionsTag, i === lastKeptIndex, uidAttr, markers);
           }
         }
       } else {
@@ -2182,7 +2187,7 @@ async function minifyHTML(value, options, partialMarkup) {
             if (uidAttr && normalizedAttr.name.includes(uidAttr)) {
               markTagFragments(normalizedAttr.name);
             }
-            const builtAttr = buildAttr(normalizedAttr, hasUnarySlash, options, i === lastKeptIndex, uidAttr);
+            const builtAttr = buildAttr(normalizedAttr, tag, hasUnarySlash, optionsTag, i === lastKeptIndex, uidAttr, markers);
             // One entry with the tag name, so that no line break can come between them
             if (i === 0 && fragmentJoinsTag) {
               buffer[buffer.length - 1] += builtAttr;
@@ -2338,7 +2343,7 @@ async function minifyHTML(value, options, partialMarkup) {
       }
       currentTag = tag;
       charsPrevTag = tag;
-      if (!inlineTextSet.has(tag)) {
+      if (!inlineTextSet.has(lowerTag || tag)) {
         currentChars = '';
       }
       hasChars = false;
@@ -2376,17 +2381,18 @@ async function minifyHTML(value, options, partialMarkup) {
       // Set whitespace flags for nested tags (e.g., `<code>` within a `<pre>`); verbatim
       // whitespace is tracked without `collapseWhitespace` too, as `removeWhitespaceLine` spares it
       if (options.collapseWhitespace && !stackNoTrimWhitespace.length) {
-        squashTrailingWhitespace(tag);
+        squashTrailingWhitespace(lowerTag || tag);
       }
-      if (options.collapseWhitespace && !unary && inlineElementsTransparent.has(tag)) {
+      if (options.collapseWhitespace && !unary && inlineElementsTransparent.has(lowerTag || tag)) {
         transparentDepth++;
       }
       if (!unary) {
-        if (!canTrimWhitespace(tag, tagOut, attrs) || stackNoTrimWhitespace.length) {
+        const tagLower = lowerTag || tag;
+        if (!canTrimWhitespace(tagLower, tagOut, attrs) || stackNoTrimWhitespace.length) {
           stackNoTrimWhitespace.push(tag);
-          if (tag === 'pre' || tag === 'textarea') preTextareaDepth++;
+          if (tagLower === 'pre' || tagLower === 'textarea') preTextareaDepth++;
         }
-        if (options.collapseWhitespace && (!canCollapseWhitespace(tag, tagOut, attrs) || stackNoCollapseWhitespace.length)) {
+        if (options.collapseWhitespace && (!canCollapseWhitespace(tagLower, tagOut, attrs) || stackNoCollapseWhitespace.length)) {
           stackNoCollapseWhitespace.push(tag);
         }
       }
@@ -2403,7 +2409,9 @@ async function minifyHTML(value, options, partialMarkup) {
       // SVGO reads the whole SVG block as XML, where an element closes itself or not, so
       // every unary element in there is written with a slash
       const needsXMLSlash = unary && Boolean(options.insideSVG) && Boolean(options.minifySVG);
-      const hasUnarySlash = needsXMLSlash || (unarySlash && (useNameParentForTag ? optionsParent : options).keepClosingSlash);
+      // `foreignObject` and `annotation-xml` hold HTML, but are foreign elements themselves
+      const optionsTag = useNameParentForTag ? optionsParent : options;
+      const hasUnarySlash = needsXMLSlash || (unarySlash && optionsTag.keepClosingSlash);
 
       bufferPush(openTag, true);
 
@@ -2450,10 +2458,10 @@ async function minifyHTML(value, options, partialMarkup) {
       const restoreOptions = unary && pushedContext ? optionsParent : null;
       if (anyThenable) {
         return Promise.all(attrResults).then(resolved => {
-          emitStartTag(resolved, tag, unary, autoGenerated, fragmentJoinsTag, hasUnarySlash, optional, restoreOptions);
+          emitStartTag(resolved, tag, unary, autoGenerated, fragmentJoinsTag, hasUnarySlash, optional, restoreOptions, optionsTag);
         });
       }
-      emitStartTag(/** @type {Array<{name: string, value: string | undefined, attr: HTMLAttribute} | undefined>} */ (attrResults), tag, unary, autoGenerated, fragmentJoinsTag, hasUnarySlash, optional, restoreOptions);
+      emitStartTag(/** @type {Array<{name: string, value: string | undefined, attr: HTMLAttribute} | undefined>} */ (attrResults), tag, unary, autoGenerated, fragmentJoinsTag, hasUnarySlash, optional, restoreOptions, optionsTag);
       return undefined;
     },
     end: function (/** @type {string} */ tag, /** @type {HTMLAttribute[]} */ attrs, /** @type {boolean} */ autoGenerated, /** @type {string | undefined} */ rest, /** @type {boolean | undefined} */ holdsTable) {
@@ -2506,14 +2514,15 @@ async function minifyHTML(value, options, partialMarkup) {
       let closesNoTrim = false;
       if (stackNoTrimWhitespace.length) {
         if (tag === stackNoTrimWhitespace[stackNoTrimWhitespace.length - 1]) {
-          if (tag === 'pre' || tag === 'textarea') preTextareaDepth--;
+          const tagLower = lowerTag || tag;
+          if (tagLower === 'pre' || tagLower === 'textarea') preTextareaDepth--;
           stackNoTrimWhitespace.pop();
           closesNoTrim = !stackNoTrimWhitespace.length;
         }
       } else if (options.collapseWhitespace) {
-        squashTrailingWhitespace('/' + tag);
+        squashTrailingWhitespace('/' + (lowerTag || tag));
       }
-      if (transparentDepth && inlineElementsTransparent.has(tag)) {
+      if (transparentDepth && inlineElementsTransparent.has(lowerTag || tag)) {
         transparentDepth--;
       }
       let closesNoCollapse = false;
@@ -2584,7 +2593,7 @@ async function minifyHTML(value, options, partialMarkup) {
             bufferPush(endTagText, true);
           }
           charsPrevTag = '/' + tag;
-          if (!inlineElements.has(tag)) {
+          if (!inlineElements.has(lowerTag || tag)) {
             currentChars = '';
           } else if (isElementEmpty) {
             currentChars += '|';
@@ -2597,7 +2606,7 @@ async function minifyHTML(value, options, partialMarkup) {
           bufferPush(endTagText, true);
         }
         charsPrevTag = '/' + tag;
-        if (!inlineElements.has(tag)) {
+        if (!inlineElements.has(lowerTag || tag)) {
           currentChars = '';
         } else if (isElementEmpty) {
           currentChars += '|';

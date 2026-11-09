@@ -2518,26 +2518,125 @@ describe('HTML', () => {
     assert.strictEqual(await minify(input, { collapseBooleanAttributes: true }), '<input multiple>');
 
     input = '<div Allowfullscreen=foo Async=foo Autofocus=foo Autoplay=foo Checked=foo Compact=foo Controls=foo ' +
-      'Declare=foo Default=foo Defaultchecked=foo Defaultmuted=foo Defaultselected=foo Defer=foo Disabled=foo ' +
-      'Enabled=foo Formnovalidate=foo Hidden=foo Indeterminate=foo Inert=foo Ismap=foo Itemscope=foo ' +
+      'Declare=foo Default=foo Defer=foo Disabled=foo ' +
+      'Formnovalidate=foo Hidden=foo Inert=foo Ismap=foo Itemscope=foo ' +
       'Loop=foo Multiple=foo Muted=foo Nohref=foo Noresize=foo Noshade=foo Novalidate=foo Nowrap=foo Open=foo ' +
-      'Pauseonexit=foo Readonly=foo Required=foo Reversed=foo Scoped=foo Seamless=foo Selected=foo Sortable=foo ' +
-      'Truespeed=foo Typemustmatch=foo Visible=foo></div>';
-    output = '<div allowfullscreen async autofocus autoplay checked compact controls declare default defaultchecked ' +
-      'defaultmuted defaultselected defer disabled enabled formnovalidate hidden indeterminate inert ' +
-      'ismap itemscope loop multiple muted nohref noresize noshade novalidate nowrap open pauseonexit readonly ' +
-      'required reversed scoped seamless selected sortable truespeed typemustmatch visible></div>';
+      'Readonly=foo Required=foo Reversed=foo Scoped=foo Seamless=foo Selected=foo Sortable=foo ' +
+      'Truespeed=foo Typemustmatch=foo></div>';
+    output = '<div allowfullscreen async autofocus autoplay checked compact controls declare default ' +
+      'defer disabled formnovalidate hidden inert ' +
+      'ismap itemscope loop multiple muted nohref noresize noshade novalidate nowrap open readonly ' +
+      'required reversed scoped seamless selected sortable truespeed typemustmatch></div>';
     assert.strictEqual(await minify(input, { collapseBooleanAttributes: true }), output);
-    output = '<div Allowfullscreen Async Autofocus Autoplay Checked Compact Controls Declare Default Defaultchecked ' +
-      'Defaultmuted Defaultselected Defer Disabled Enabled Formnovalidate Hidden Indeterminate Inert ' +
-      'Ismap Itemscope Loop Multiple Muted Nohref Noresize Noshade Novalidate Nowrap Open Pauseonexit Readonly ' +
-      'Required Reversed Scoped Seamless Selected Sortable Truespeed Typemustmatch Visible></div>';
+    output = '<div Allowfullscreen Async Autofocus Autoplay Checked Compact Controls Declare Default ' +
+      'Defer Disabled Formnovalidate Hidden Inert ' +
+      'Ismap Itemscope Loop Multiple Muted Nohref Noresize Noshade Novalidate Nowrap Open Readonly ' +
+      'Required Reversed Scoped Seamless Selected Sortable Truespeed Typemustmatch></div>';
     assert.strictEqual(await minify(input, { collapseBooleanAttributes: true, caseSensitive: true }), output);
 
     // Without the option, boolean attributes keep their values or lack thereof
     assert.strictEqual(await minify('<input disabled="disabled">'), '<input disabled="disabled">');
     assert.strictEqual(await minify('<input disabled checked readonly><script defer src="x.js"></script>'), '<input disabled checked readonly><script defer src="x.js"></script>');
     assert.strictEqual(await minify('<select multiple><option selected>a</option></select>'), '<select multiple><option selected>a</option></select>');
+  });
+
+  test('Collapses current boolean attributes', async () => {
+    const options = { collapseBooleanAttributes: true };
+
+    assert.strictEqual(await minify('<script nomodule="nomodule" src="a.js"></script>', options), '<script nomodule src="a.js"></script>');
+    assert.strictEqual(await minify('<script nomodule="" src="a.js"></script>', options), '<script nomodule src="a.js"></script>');
+    assert.strictEqual(await minify('<video playsinline="playsinline"></video>', options), '<video playsinline></video>');
+    assert.strictEqual(await minify('<h1 headingreset="headingreset">a</h1>', options), '<h1 headingreset>a</h1>');
+    assert.strictEqual(await minify('<template shadowrootmode="open" shadowrootcustomelementregistry=""></template>', options), '<template shadowrootmode="open" shadowrootcustomelementregistry></template>');
+    assert.strictEqual(await minify('<input type="color" alpha="alpha">', options), '<input type="color" alpha>');
+    assert.strictEqual(await minify('<input type="color" alpha="">', options), '<input type="color" alpha>');
+    assert.strictEqual(await minify('<INPUT type="color" ALPHA="alpha">', options), '<input type="color" alpha>');
+    assert.strictEqual(
+      await minify('<template shadowrootmode="open" shadowrootclonable="shadowrootclonable" shadowrootdelegatesfocus="" shadowrootserializable="shadowrootserializable"></template>', options),
+      '<template shadowrootmode="open" shadowrootclonable shadowrootdelegatesfocus shadowrootserializable></template>'
+    );
+  });
+
+  test('Keeps attribute values on custom elements', async () => {
+    const options = { collapseBooleanAttributes: true };
+
+    for (const input of [
+      '<my-toggle checked="false"></my-toggle>',
+      '<my-toggle disabled="disabled"></my-toggle>',
+      '<my-player playsinline="false"></my-player>',
+      '<my-color alpha="0.5"></my-color>',
+      '<my-panel hidden="hidden"></my-panel>',
+      '<my-panel draggable="draggable"></my-panel>',
+      '<my-panel crossorigin="anonymous"></my-panel>',
+      '<my-panel contenteditable=""></my-panel>'
+    ]) {
+      assert.strictEqual(await minify(input, options), input);
+    }
+    assert.strictEqual(await minify('<My-Toggle checked="false"></My-Toggle>', { ...options, caseSensitive: true }), '<My-Toggle checked="false"></My-Toggle>');
+  });
+
+  test('Keeps the loop count of `marquee` elements', async () => {
+    const options = { collapseBooleanAttributes: true };
+
+    assert.strictEqual(await minify('<marquee loop="3">a</marquee>', options), '<marquee loop="3">a</marquee>');
+    assert.strictEqual(await minify('<MARQUEE LOOP="3">a</MARQUEE>', options), '<marquee loop="3">a</marquee>');
+    assert.strictEqual(await minify('<MARQUEE loop="3">a</MARQUEE>', { ...options, caseSensitive: true }), '<MARQUEE loop="3">a</MARQUEE>');
+    assert.strictEqual(await minify('<marquee truespeed="truespeed">a</marquee>', options), '<marquee truespeed>a</marquee>');
+    assert.strictEqual(await minify('<video loop="loop"></video>', options), '<video loop></video>');
+  });
+
+  test('Collapses boolean attributes on any element but custom ones', async () => {
+    const options = { collapseBooleanAttributes: true };
+
+    assert.strictEqual(await minify('<img alpha="1" src="a.png">', options), '<img alpha src="a.png">');
+    assert.strictEqual(await minify('<input type="text" alpha="x">', options), '<input type="text" alpha>');
+    assert.strictEqual(await minify('<audio playsinline="false"></audio>', options), '<audio playsinline></audio>');
+    assert.strictEqual(await minify('<div shadowrootclonable="false"></div>', options), '<div shadowrootclonable></div>');
+    assert.strictEqual(await minify('<INPUT TYPE="color" ALPHA="x">', { ...options, caseSensitive: true }), '<INPUT TYPE="color" ALPHA>');
+  });
+
+  test('Keeps values of names that are not HTML attributes', async () => {
+    for (const name of ['defaultchecked', 'defaultmuted', 'defaultselected', 'enabled', 'indeterminate', 'pauseonexit', 'visible']) {
+      const input = `<div ${name}="false"></div>`;
+      assert.strictEqual(await minify(input, { collapseBooleanAttributes: true }), input);
+    }
+  });
+
+  test('Keeps `hidden="until-found"`', async () => {
+    const options = { collapseBooleanAttributes: true };
+
+    assert.strictEqual(await minify('<div hidden="until-found">a</div>', options), '<div hidden="until-found">a</div>');
+    assert.strictEqual(await minify('<div hidden="UNTIL-FOUND">a</div>', options), '<div hidden="UNTIL-FOUND">a</div>');
+    assert.strictEqual(await minify('<div hidden="hidden">a</div>', options), '<div hidden>a</div>');
+    assert.strictEqual(await minify('<div hidden="">a</div>', options), '<div hidden>a</div>');
+  });
+
+  test('Keeps `hidden` and `draggable` values that only rendering or decoding resolves', async () => {
+    const options = { collapseBooleanAttributes: true };
+    const inputs = [
+      '<div hidden="<?= $a ?>">a</div>',
+      '<div hidden="until&#45;found">a</div>',
+      '<div draggable="<?= $a ?>">a</div>',
+      '<div draggable="tr&#117;e">a</div>'
+    ];
+    for (const input of inputs) {
+      assert.strictEqual(await minify(input, options), input);
+    }
+    assert.strictEqual(await minify('<div hidden="until&#45;found">a</div>', { ...options, decodeEntities: true }), '<div hidden="until-found">a</div>');
+  });
+
+  test('Keeps Boolean attribute values that hold custom fragments or ignored markup', async () => {
+    const options = { collapseBooleanAttributes: true };
+    for (const input of [
+      '<input checked="<?= $a ?>">',
+      '<input checked="checked<?= $a ?>">',
+      '<input checked="<?php if ($a): ?>checked<?php else: ?>" data-a="<?php endif; ?>">',
+      '<option selected="<?= f() ?>">a</option>'
+    ]) {
+      assert.strictEqual(await minify(input, options), input);
+    }
+    assert.strictEqual(await minify('<input checked="<!-- htmlmin:ignore -->a<!-- htmlmin:ignore -->">', options), '<input checked="a">');
+    assert.strictEqual(await minify('<input checked="checked" disabled="false">', options), '<input checked disabled>');
   });
 
   test('Collapses enumerated attributes', async () => {
@@ -3911,6 +4010,85 @@ describe('HTML', () => {
     assert.strictEqual(await minify(input, { collapseWhitespace: true, minifyJS: true }), output);
   });
 
+  test('Keeps scripts as written where a custom fragment starts a statement', async () => {
+    const inputs = [
+      '<script>b();\n<?php echo 1; ?>\nc();</script>',
+      '<script>b()\n<?php if (x): ?>\nc()\n<?php endif; ?>\nd()</script>',
+      '<script>if (a) {\n<?php echo 1; ?>\n}</script>',
+      '<script>if (0) {\n<?php echo 1; ?>\n}</script>',
+      '<script>b();\n<?php echo 1; ?></script>',
+      '<script>if (a) <?= $b ?>;\nc();</script>',
+      '<script>while (a) <?= $b ?>;\nc();</script>',
+      '<script>if (a) b(); else <?= $c ?>;\nd();</script>',
+      '<script>do <?= $b ?>; while (a);</script>',
+      '<script>b(); /* c */ <?= $x ?>; c();</script>'
+    ];
+    for (const input of inputs) {
+      assert.strictEqual(await minify(input, { minifyJS: true }), input);
+    }
+  });
+
+  test('Keeps scripts as written where a custom fragment follows a `case` clause or label', async () => {
+    const inputs = [
+      '<script>switch (a) { case 1: <?= $x ?> }</script>',
+      '<script>switch (a) { case "x:y": <?= $x ?> }</script>',
+      '<script>switch (a) { case b ? c : d: <?= $x ?> }</script>',
+      '<script>switch (a) { case <?= $b ?>: <?= $x ?> }</script>',
+      '<script>switch (a) { case 1: case 2: <?= $x ?> }</script>',
+      '<script>switch (a) { default: <?= $x ?> }</script>',
+      '<script>switch (a) { case 1: default: <?= $x ?> }</script>',
+      '<script>l: <?= $x ?>;</script>',
+      '<script>a(); l: <?= $x ?>;</script>',
+      '<script>function f() { l: <?= $x ?> }</script>',
+      '<script>{ l: <?= $x ?> }</script>',
+      '<script>switch (a) { case /[/*]/: <?= $x ?> }</script>',
+      '<script>var r = /["\']/; l: <?= $x ?>;</script>',
+      '<script>var r = /\\/*/; l: <?= $x ?>;</script>',
+      '<script>function f() { return /[/*]/; l: <?= $x ?> }</script>',
+      '<script>a++ / 2; l: <?= $x ?>; b / 2</script>'
+    ];
+    for (const input of inputs) {
+      assert.strictEqual(await minify(input, { minifyJS: true }), input);
+    }
+  });
+
+  test('Minifies scripts with custom fragments within values', async () => {
+    const cases = [
+      ['var a = <?= $x ?>;', 'var a= <?= $x ?>'],
+      ['a ? b : <?= $x ?>;', 'a?b: <?= $x ?>'],
+      ['a ? b ? c : d : <?= $x ?>;', 'a?b?c:d: <?= $x ?>'],
+      ['switch (a) { case 1: b = c ? d : <?= $x ?>; }', 'if(1===a)b=c?d: <?= $x ?>'],
+      ['({ a: <?= $x ?> })', ' <?= $x ?> '],
+      ['var o = { a: <?= $x ?> }', 'var o={a: <?= $x ?> }'],
+      ['var o = { default: <?= $x ?> }', 'var o={default: <?= $x ?> }'],
+      ['var o = { case: <?= $x ?> }', 'var o={case: <?= $x ?> }'],
+      ['var o = { a: 1, b: <?= $x ?> }', 'var o={a:1,b: <?= $x ?> }'],
+      ['var a = "case 1: <?= $x ?>";', 'var a="case 1: <?= $x ?>"'],
+      ['var a = "; l: <?= $x ?>";', 'var a="; l: <?= $x ?>"'],
+      ['var a = /[:]/.test(b) ? c : <?= $x ?>;', 'var a=/[:]/.test(b)?c: <?= $x ?>'],
+      ['/* <?= $x ?> */ a()', 'a()'],
+      ['/* case 1: <?= $x ?> */ a()', 'a()'],
+      ['if (0) { var b = <?= $x ?>; }', 'var b']
+    ];
+    for (const [source, output] of cases) {
+      assert.strictEqual(await minify('<script>' + source + '</script>', { minifyJS: true }), '<script>' + output + '</script>');
+    }
+  });
+
+  test('Treats non-string results of custom minifiers alike with and without custom fragments', async () => {
+    const options = { minifyCSS: () => ({}) };
+    assert.strictEqual(
+      await minify('<style>\n<?= $a ?>\nb{top:0}</style>', options),
+      await minify('<style>b{top:0}</style>', options)
+    );
+  });
+
+  test('Logs where a custom fragment keeps code as written', async () => {
+    const logged = [];
+    await minify('<script>b();\n<?php echo 1; ?>\nc();</script>', { minifyJS: true, log: message => logged.push(String(message)) });
+    assert.ok(logged.some(message => message.includes('custom fragment')), logged.join('\n'));
+  });
+
   test('Minifies event attributes', async () => {
     let input, output;
 
@@ -4173,7 +4351,7 @@ describe('HTML', () => {
   });
 
   test('Minifies `style` elements with custom fragments', async () => {
-    let input, output;
+    let input;
 
     // Lightning CSS with `errorRecovery` removes invalid CSS fragments and
     // returns empty or partial CSS
@@ -4294,8 +4472,7 @@ describe('HTML', () => {
 
     input = '<style>body{color:red}<?=foo?></style>';
     assert.strictEqual(await minify(input), input);
-    output = '<style>body{color:red}</style>'; // Lightning CSS keeps valid CSS, removes custom fragment
-    assert.strictEqual(await minify(input, { minifyCSS: true }), output);
+    assert.strictEqual(await minify(input, { minifyCSS: true }), input);
     await assert.doesNotReject(minify(input, { continueOnMinifyError: false }));
     await assert.rejects(
       minify(input, { continueOnMinifyError: false, minifyCSS: true }),
@@ -4304,12 +4481,77 @@ describe('HTML', () => {
 
     input = '<style>body{color:red}\t<?=foo?>\t</style>';
     assert.strictEqual(await minify(input), input);
-    output = '<style>body{color:red}</style>'; // Lightning CSS keeps valid CSS, removes custom fragment
-    assert.strictEqual(await minify(input, { minifyCSS: true }), output);
+    assert.strictEqual(await minify(input, { minifyCSS: true }), input);
     await assert.doesNotReject(minify(input, { continueOnMinifyError: false }));
     await assert.rejects(
       minify(input, { continueOnMinifyError: false, minifyCSS: true }),
       { message: /Unexpected end of input/ }
+    );
+  });
+
+  test('Keeps `style` elements as written where a custom fragment starts a rule', async () => {
+    const inputs = [
+      '<style>b { top: 0 }\n<?php echo 1; ?></style>',
+      '<style>b { top: 0 }\n<%= x %>\n</style>',
+      '<style>a { top: 0 }\n<?php echo 1; ?>\nb { top: 0 }</style>',
+      '<style>a { top: 0 } <?php echo 1; ?> b { top: 0 }</style>',
+      '<style>\n<?php if (1): ?>\nb { top: 0 }\n<?php endif; ?>\n</style>',
+      '<style>p {\n  margin: 0;\n  <?= $x ?>\n}</style>',
+      '<style>a { top: 0 } /* c */ <?= $rules ?> b { top: 0 }</style>'
+    ];
+    for (const input of inputs) {
+      assert.strictEqual(await minify(input, { minifyCSS: true }), input);
+    }
+  });
+
+  test('Minifies `style` elements with custom fragments within values', async () => {
+    assert.strictEqual(await minify('<style>a { color: <?= $c ?>; top: 0 }</style>', { minifyCSS: true }), '<style>a{color: <?= $c ?>;top:0}</style>');
+    assert.strictEqual(await minify('<style>a { font-family: myelse <?= $f ?> }</style>', { minifyCSS: true }), '<style>a{font-family:myelse <?= $f ?> }</style>');
+    assert.strictEqual(await minify('<style>a { font-family: my-else <?= $f ?> }</style>', { minifyCSS: true }), '<style>a{font-family:my-else <?= $f ?> }</style>');
+    assert.strictEqual(await minify('<style>a { font-family: do <?= $f ?> }</style>', { minifyCSS: true }), '<style>a{font-family:do <?= $f ?> }</style>');
+  });
+
+  test('Keeps `style` elements as written where an at-rule would lose its custom fragment', async () => {
+    const inputs = [
+      '<style>@import <?= $u ?>; a { top: 0 }</style>',
+      '<style>@IMPORT <?= $u ?>; a { top: 0 }</style>',
+      '<style>@charset <?= $c ?>; a { top: 0 }</style>',
+      '<style>@charset "<?= $c ?>"; a { top: 0 }</style>',
+      '<style>@namespace <?= $n ?>; a { top: 0 }</style>',
+      '<style>@namespace svg <?= $u ?>; a { top: 0 }</style>',
+      '<style>@import <?= $u ?></style>'
+    ];
+    for (const input of inputs) {
+      assert.strictEqual(await minify(input, { minifyCSS: true }), input);
+    }
+  });
+
+  test('Minifies `style` elements whose at-rules keep their custom fragments', async () => {
+    const cases = [
+      ['@import "<?= $u ?>"; a { top: 0 }', '@import "<?= $u ?>";a{top:0}'],
+      ['@import url(<?= $u ?>); a { top: 0 }', '@import "<?= $u ?>";a{top:0}'],
+      ['@import "a" <?= $m ?>; a { top: 0 }', '@import "a" <?= $m ?>;a{top:0}'],
+      ['@media <?= $q ?> { a { top: 0 } }', '@media <?= $q ?> {a{top:0}}'],
+      ['@layer <?= $l ?>; a { top: 0 }', '@layer <?= $l ?>;a{top:0}'],
+      ['@font-face { src: url(<?= $u ?>) }', '@font-face{src:url(<?= $u ?>)}'],
+      ['a { top: 0; color: <?= $c ?> }', 'a{color: <?= $c ?> ;top:0}'],
+      ['a:not(.b) { color: <?= $c ?> }', 'a:not(.b){color: <?= $c ?> }']
+    ];
+    for (const [source, output] of cases) {
+      assert.strictEqual(await minify('<style>' + source + '</style>', { minifyCSS: true }), '<style>' + output + '</style>');
+    }
+  });
+
+  test('Minifies `style` elements where only a comment or unused rule held a custom fragment', async () => {
+    assert.strictEqual(await minify('<style>/* <?= $c ?> */ a { top: 0 }</style>', { minifyCSS: true }), '<style>a{top:0}</style>');
+    assert.strictEqual(await minify('<style>/* @import <?= $c ?>; */ a { top: 0 }</style>', { minifyCSS: true }), '<style>a{top:0}</style>');
+    assert.strictEqual(
+      await minify('<style>a { top: 0 } .gone { color: <?= $c ?> }</style><a></a>', { minifyCSS: true, removeUnusedCSS: true }),
+      '<style>a{top:0}</style><a></a>'
+    );
+    assert.strictEqual(
+      await minify('<style>a { top: 0 } .gone::after { content: "@import <?= $c ?>;" }</style><a></a>', { minifyCSS: true, removeUnusedCSS: true }),
+      '<style>a{top:0}</style><a></a>'
     );
   });
 
@@ -7719,7 +7961,7 @@ describe('HTML', () => {
       // Closing slash and optional attribute quotes removed by minifier, but not by PHPTAL
       // Attribute ordering differences between minifier and PHPTAL
       ['<img alt=x height=5 src=foo width=10>', '<img width="10" height="5" src="foo" alt="x" />'],
-      ['<img alpha=1 beta=2 gamma=3>', '<img gamma="3" alpha="1" beta="2" />'],
+      ['<img aleph=1 beta=2 gamma=3>', '<img gamma="3" aleph="1" beta="2" />'],
       ['<pre>\n\n\ntest</pre>', '<pre>\n\n\ntest</pre>'],
       /* single line-break preceding <pre> is redundant, assuming <pre> is block element
       ['<pre>test</pre>', '<pre>\ntest</pre>'], */

@@ -11,6 +11,19 @@
  */
 
 const RE_WHITESPACE = /\s/;
+const RE_NAME_CHAR = /[\w$-]/;
+
+// Run on at most the eight characters ending in the word
+const RE_BLOCK_KEYWORD = /(?:^|[^\w$.])(?:do|else|finally|try)$/;
+
+// The last character before a `/` that starts a regular expression, not a division
+const RE_BEFORE_REGEX = /[(,=:[!&|?{};+*%<>~^}-]/;
+
+// Run on at most the eleven characters ending in the word
+const RE_BEFORE_REGEX_KEYWORD = /(?:^|[^\w$.])(?:await|case|delete|do|else|in|instanceof|new|of|return|throw|typeof|void|yield)$/;
+
+// Run on at most the eleven characters from the `@`
+const RE_DROPPABLE_AT_RULE = /^@(?:charset|import|namespace)(?![\w-])/i;
 
 // Any-character and negated-class bodies; without the `s` flag, `.` is itself a
 // negated class, excluding line terminators
@@ -333,8 +346,268 @@ function replaceCustomFragments(value, fragments, replacer) {
   return copied === 0 ? value : out + value.slice(copied);
 }
 
+/**
+ * Index past the regular expression starting at the `/` at an index
+ * @param {string} source
+ * @param {number} index
+ * @returns {number} The index itself when the line ends before the expression does
+ */
+function skipRegex(source, index) {
+  let inClass = false;
+  for (let position = index + 1; position < source.length; position++) {
+    const current = source[position];
+    if (current === '\n' || current === '\r') return index;
+    if (current === '\\') position++;
+    else if (current === '[') inClass = true;
+    else if (current === ']') inClass = false;
+    else if (current === '/' && !inClass) return position + 1;
+  }
+  return index;
+}
+
+/**
+ * Index past the comment, string, or regular expression starting at an index
+ * @param {string} source
+ * @param {number} index
+ * @param {boolean} isJS
+ * @returns {number} The index itself when none starts there
+ */
+function skipCommentOrString(source, index, isJS) {
+  const char = source[index];
+  const next = source[index + 1];
+
+  if (char === '/' && next === '*') {
+    const end = source.indexOf('*/', index + 2);
+    return end === -1 ? source.length : end + 2;
+  }
+  if (isJS && char === '/' && next === '/') {
+    const end = source.indexOf('\n', index + 2);
+    return end === -1 ? source.length : end;
+  }
+  if (isJS && char === '/') return isRegexStart(source, index) ? skipRegex(source, index) : index;
+  if (char !== '"' && char !== '\'' && !(isJS && char === '`')) return index;
+
+  for (let position = index + 1; position < source.length; position++) {
+    const current = source[position];
+    if (current === '\\') position++;
+    else if (current === char) return position + 1;
+    else if (current === '\n' && char !== '`') return position;
+  }
+  return source.length;
+}
+
+/**
+ * Index of the last non-whitespace character before an index
+ * @param {string} source
+ * @param {number} index
+ * @returns {number} -1 when there is none
+ */
+function findPreviousToken(source, index) {
+  let position = index - 1;
+  while (position >= 0 && RE_WHITESPACE.test(source[position] ?? '')) position--;
+  return position;
+}
+
+/**
+ * Whether a `/` starts a regular expression rather than a division, going by what precedes
+ * it; after a `)`, which `if (a) /b/.test(c)` leaves open, it’s read as a division
+ * @param {string} source
+ * @param {number} slash
+ * @returns {boolean}
+ */
+function isRegexStart(source, slash) {
+  const before = findPreviousToken(source, slash);
+  if (before === -1) return true;
+
+  const char = source[before] ?? '';
+  // `++` and `--` can only end an operand here, as a literal cannot be incremented
+  if ((char === '+' || char === '-') && source[before - 1] === char) return false;
+  return RE_BEFORE_REGEX.test(char) || RE_BEFORE_REGEX_KEYWORD.test(source.slice(Math.max(before - 10, 0), before + 1));
+}
+
+/**
+ * Whether a block keyword ends at an index
+ * @param {string} source
+ * @param {number} index
+ * @returns {boolean}
+ */
+function isBlockKeywordEnd(source, index) {
+  return RE_BLOCK_KEYWORD.test(source.slice(Math.max(index - 7, 0), index + 1));
+}
+
+/**
+ * Whether a `{` opens a block rather than an object literal
+ * @param {string} source
+ * @param {number} brace
+ * @returns {boolean}
+ */
+function isBlockBrace(source, brace) {
+  const before = findPreviousToken(source, brace);
+  if (before === -1) return true;
+
+  const char = source[before] ?? '';
+  if (char === ';' || char === '{' || char === '}' || char === ')') return true;
+  if (char === '>') return source[before - 1] === '=';
+  return isBlockKeywordEnd(source, before);
+}
+
+/**
+ * Whether a colon ends a statement label or `default`, going by what precedes the name.
+ * Two expressions cannot follow each other, so a name after one of these tokens cannot
+ * be the middle of a ternary
+ * @param {string} source
+ * @param {number} colon
+ * @returns {boolean}
+ */
+function isLabelColon(source, colon) {
+  const end = findPreviousToken(source, colon);
+  let start = end;
+  while (start >= 0 && RE_NAME_CHAR.test(source[start] ?? '')) start--;
+  if (start === end) return false;
+
+  const before = findPreviousToken(source, start + 1);
+  const char = source[before];
+  // After `:`, any other name may be a nested ternary’s branch
+  if (char === ':') return source.slice(start + 1, end + 1) === 'default';
+  return before === -1 || char === ';' || char === '}' || char === ')' || (char === '{' && isBlockBrace(source, before));
+}
+
+/**
+ * Whether the `case` keyword starts at an index, rather than a name or property holding it
+ * @param {string} source
+ * @param {number} index
+ * @returns {boolean}
+ */
+function isCaseKeyword(source, index) {
+  if (!source.startsWith('case', index) || RE_NAME_CHAR.test(source[index + 4] ?? '')) return false;
+
+  const before = source[index - 1] ?? '';
+  if (before === '.' || RE_NAME_CHAR.test(before)) return false;
+
+  let after = index + 4;
+  while (RE_WHITESPACE.test(source[after] ?? '')) after++;
+  return source[after] !== ':';
+}
+
+/**
+ * Indexes of the colons after which a JavaScript statement starts
+ * @param {string} source
+ * @returns {Set<number>}
+ */
+function findStatementColons(source) {
+  const colons = new Set();
+  // Unpaired `?` in the current `case` expression, -1 outside of one
+  let ternaries = -1;
+
+  for (let i = 0; i < source.length; i++) {
+    const end = skipCommentOrString(source, i, true);
+    if (end > i) {
+      i = end - 1;
+      continue;
+    }
+
+    const char = source[i];
+    if (ternaries === -1) {
+      if (char === ':') {
+        if (isLabelColon(source, i)) colons.add(i);
+      } else if (char === 'c' && isCaseKeyword(source, i)) {
+        ternaries = 0;
+        i += 3;
+      }
+    } else if (char === '?') {
+      // `?.` and `??` have no `:` to pair with
+      if (source[i + 1] === '.' || source[i + 1] === '?') i++;
+      else ternaries++;
+    } else if (char === ':') {
+      if (ternaries === 0) colons.add(i);
+      ternaries--;
+    } else if (char === ';' || char === '{' || char === '}') {
+      ternaries = -1;
+    }
+  }
+
+  return colons;
+}
+
+/**
+ * Placeholders within `@charset`, `@import`, and `@namespace` statements, which
+ * Lightning CSS drops whole where it cannot read them, and `@charset` always
+ * @param {string} source
+ * @param {RegExp} placeholder
+ * @returns {string[]}
+ */
+function findDroppableAtRulePlaceholders(source, placeholder) {
+  const tokens = [];
+  let start = -1;
+
+  for (let i = 0; i <= source.length; i++) {
+    const end = skipCommentOrString(source, i, false);
+    if (end > i) {
+      i = end - 1;
+      continue;
+    }
+
+    const char = source[i];
+    if (start === -1) {
+      if (char === '@' && RE_DROPPABLE_AT_RULE.test(source.slice(i, i + 11))) start = i;
+    } else if (char === ';' || char === '{' || char === '}' || char === undefined) {
+      for (const match of source.slice(start, i).matchAll(placeholder)) tokens.push(match[0]);
+      start = -1;
+    }
+  }
+
+  return tokens;
+}
+
+/**
+ * Whether what comes before an index allows a statement or rule to start there
+ * @param {string} source
+ * @param {number} index
+ * @param {Set<number>} colons - Colons after which a statement starts
+ * @param {boolean} isJS
+ * @returns {boolean}
+ */
+function isCodeStart(source, index, colons, isJS) {
+  let position = index;
+  while (position > 0) {
+    const char = source[--position] ?? '';
+    if (char === '\n' || char === '\r' || char === ';' || char === '{' || char === '}') return true;
+    if (!RE_WHITESPACE.test(char)) {
+      return char === ')' || (char === '/' && source[position - 1] === '*') || colons.has(position) || (isJS && isBlockKeywordEnd(source, position));
+    }
+  }
+  return true;
+}
+
+/**
+ * Whether minified CSS or JavaScript can stand in for its source. A fragment starting a
+ * statement or rule can render as anything, or as nothing, while engines read it as an
+ * identifier or selector and join it with the code around it, or drop it; a fragment in
+ * an at-rule Lightning CSS cannot read would go with that at-rule
+ * @param {string} source
+ * @param {unknown} output - Anything but a string, from a minifier of one’s own, passes
+ * @param {RegExp} placeholder - Global pattern matching one fragment placeholder
+ * @param {boolean} [isJS] - Whether the code is JavaScript rather than CSS
+ * @returns {boolean}
+ */
+function isMinifiedCodeSafe(source, output, placeholder, isJS = false) {
+  if (typeof output !== 'string' || output === source) return true;
+
+  const matches = [...source.matchAll(placeholder)];
+  if (!matches.length) return true;
+
+  const colons = isJS ? findStatementColons(source) : new Set();
+  const starts = matches.filter(match => isCodeStart(source, match.index, colons, isJS));
+  const kept = new Set(Array.from(output.matchAll(placeholder), match => match[0]));
+
+  // Output of nothing but fragments only holds up where no label or `case` went with the code
+  if (starts.length && (colons.size || output.replace(placeholder, '').trim() || !starts.every(match => kept.has(match[0])))) return false;
+  return isJS || !source.includes('@') || findDroppableAtRulePlaceholders(source, placeholder).every(token => kept.has(token));
+}
+
 export {
   toDelimitedFragment,
   toFragment,
-  replaceCustomFragments
+  replaceCustomFragments,
+  isMinifiedCodeSafe
 };

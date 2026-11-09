@@ -59,10 +59,10 @@ const RE_EMPTY_ATTRIBUTE = new RegExp(
 // Inline element sets for whitespace handling
 
 // Non-empty elements that will maintain whitespace around them
-const inlineElementsToKeepWhitespaceAround = new Set(['a', 'abbr', 'acronym', 'audio', 'b', 'bdi', 'bdo', 'big', 'button', 'canvas', 'cite', 'code', 'data', 'del', 'dfn', 'em', 'embed', 'font', 'i', 'iframe', 'img', 'input', 'ins', 'kbd', 'label', 'map', 'mark', 'math', 'meter', 'nobr', 'object', 'output', 'picture', 'progress', 'q', 'rb', 'rp', 'rt', 'rtc', 'ruby', 's', 'samp', 'select', 'selectedcontent', 'slot', 'small', 'span', 'strike', 'strong', 'sub', 'sup', 'svg', 'textarea', 'time', 'tt', 'u', 'var', 'video', 'wbr']);
+const inlineElementsToKeepWhitespaceAround = new Set(['a', 'abbr', 'acronym', 'audio', 'b', 'bdi', 'bdo', 'big', 'button', 'canvas', 'cite', 'code', 'data', 'del', 'dfn', 'em', 'embed', 'font', 'i', 'iframe', 'img', 'input', 'ins', 'kbd', 'label', 'map', 'mark', 'math', 'meter', 'nobr', 'object', 'output', 'picture', 'progress', 'q', 'rb', 'rp', 'rt', 'rtc', 'ruby', 's', 'samp', 'select', 'selectedcontent', 'slot', 'small', 'span', 'strike', 'strong', 'sub', 'sup', 'svg', 'textarea', 'textpath', 'time', 'tspan', 'tt', 'u', 'var', 'video', 'wbr']);
 
 // Non-empty elements that will maintain whitespace within them
-const inlineElementsToKeepWhitespaceWithin = new Set(['a', 'abbr', 'acronym', 'b', 'big', 'data', 'del', 'em', 'font', 'i', 'ins', 'kbd', 'map', 'mark', 'nobr', 's', 'samp', 'slot', 'small', 'span', 'strike', 'strong', 'sub', 'sup', 'time', 'tt', 'u', 'var']);
+const inlineElementsToKeepWhitespaceWithin = new Set(['a', 'abbr', 'acronym', 'b', 'big', 'data', 'del', 'em', 'font', 'i', 'ins', 'kbd', 'map', 'mark', 'nobr', 's', 'samp', 'slot', 'small', 'span', 'strike', 'strong', 'sub', 'sup', 'textpath', 'time', 'tspan', 'tt', 'u', 'var']);
 
 // Text-level elements that keep whitespace between them and other elements under
 // `collapseInlineTagWhitespace`
@@ -259,7 +259,7 @@ const keepScriptsMimetypes = new Set([
 
 // Boolean attribute sets
 
-const isSimpleBoolean = new Set(['allowfullscreen', 'async', 'autofocus', 'autoplay', 'checked', 'compact', 'controls', 'declare', 'default', 'defaultchecked', 'defaultmuted', 'defaultselected', 'defer', 'disabled', 'enabled', 'formnovalidate', 'hidden', 'indeterminate', 'inert', 'ismap', 'itemscope', 'loop', 'multiple', 'muted', 'nohref', 'noresize', 'noshade', 'novalidate', 'nowrap', 'open', 'pauseonexit', 'readonly', 'required', 'reversed', 'scoped', 'seamless', 'selected', 'sortable', 'truespeed', 'typemustmatch', 'visible']);
+const isSimpleBoolean = new Set(['allowfullscreen', 'alpha', 'async', 'autofocus', 'autoplay', 'checked', 'compact', 'controls', 'declare', 'default', 'defer', 'disabled', 'formnovalidate', 'headingreset', 'inert', 'ismap', 'itemscope', 'loop', 'multiple', 'muted', 'nohref', 'nomodule', 'noresize', 'noshade', 'novalidate', 'nowrap', 'open', 'playsinline', 'readonly', 'required', 'reversed', 'scoped', 'seamless', 'selected', 'shadowrootclonable', 'shadowrootcustomelementregistry', 'shadowrootdelegatesfocus', 'shadowrootserializable', 'sortable', 'truespeed', 'typemustmatch']);
 
 const isBooleanValue = new Set(['true', 'false']);
 

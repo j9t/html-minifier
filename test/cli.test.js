@@ -1255,6 +1255,31 @@ describe('CLI', { concurrency: os.availableParallelism() }, () => {
     assert.ok(result.stdout.endsWith('HTML Minifier documentation: https://meiert.com/hm'));
   });
 
+  describe('Without arguments', () => {
+    const asTerminal = 'data:text/javascript,process.stdin.isTTY=true';
+
+    test('Shows the help in a terminal', async () => {
+      const { stdout, status } = await spawnAsync('node', ['--import', asTerminal, cliPath]);
+
+      assert.strictEqual(status, 0);
+      assert.ok(stdout.toString().includes('HTML Minifier documentation: https://meiert.com/hm'));
+    });
+
+    test('Keeps reading from a terminal with options', async () => {
+      const { stdout, status } = await spawnAsync('node', ['--import', asTerminal, cliPath, '--collapse-whitespace'], { input: '<p>  a  </p>' });
+
+      assert.strictEqual(status, 0);
+      assert.strictEqual(stdout.toString(), '<p>a</p>');
+    });
+
+    test('Keeps reading piped input', async () => {
+      const { stdout, status } = await spawnCli([], { input: '<p>a</p>' });
+
+      assert.strictEqual(status, 0);
+      assert.strictEqual(stdout.toString(), '<p>a</p>');
+    });
+  });
+
   test('Exposes the CLI as `html-minifier` and `hm` in the package', () => {
     const { bin } = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../package.json'), 'utf8'));
 

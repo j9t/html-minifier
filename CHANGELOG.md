@@ -4,6 +4,30 @@ As of version 5.0.0, all notable changes to HTML Minifier (HM) are documented in
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.0.2] - 2026-11-09
+
+### Fixed
+
+* Fixed `minifyCSS` and `minifyJS` deleting or breaking custom fragments that start a rule or statement, follow a `case` clause or label, or sit in an `@charset`, `@import`, or `@namespace` statement that would be dropped with them—CSS and JavaScript with such a fragment are now kept as written:
+  - `<style>b { top: 0 }\n<?php echo 1; ?></style>` lost the PHP block
+  - `<style>a { top: 0 }\n<?php echo 1; ?>\nb { top: 0 }</style>` had its rules merged across the fragment
+  - `<script>b()\n<?php if (x): ?>\nc()\n<?php endif; ?>\nd()</script>` became a syntax error when the condition was false
+  - `<style>@import <?= $u ?>;a{top:0}</style>` lost the at-rule and the fragment
+  - `<script>switch (a) { case 1: <?= $x ?> }</script>` became `if(1===a) <?= $x ?>`, which is wrong if the fragment renders several statements
+  - `<script>l: <?= $x ?>;</script>` lost the label
+* Fixed `collapseBooleanAttributes` turning `hidden="until-found"` into `hidden`, which made the content unfindable
+* Fixed `collapseBooleanAttributes` removing values that hold a custom fragment or `htmlmin:ignore` markup, which deleted template code (e.g., `checked="<?= $c ?>"`), and `hidden` and `draggable` values that hold a character reference, where only decoding shows the state
+* Fixed `collapseBooleanAttributes` removing the loop count of `marquee` elements (`<marquee loop="3">` became `<marquee loop>`, which loops forever) and the values of attributes in SVG and MathML, where HTML’s Boolean attributes don’t apply (e.g., `<mfenced open="[">` lost its delimiter)
+* Fixed `collapseWhitespace` removing spaces around and within SVG `tspan` and `textPath` elements, which joined words (e.g., `a <tspan>b</tspan>` became `a<tspan>b</tspan>`)
+* Fixed `collapseWhitespace` collapsing whitespace within SVG `script` and `style` elements written in uppercase, which could break their code (e.g., a line comment in `<svg><SCRIPT>` swallowed the next line)
+* Fixed `collapseBooleanAttributes` not collapsing `alpha`, `headingreset`, `nomodule`, `playsinline`, `shadowrootclonable`, `shadowrootcustomelementregistry`, `shadowrootdelegatesfocus`, and `shadowrootserializable`
+* Fixed `collapseBooleanAttributes` removing the values of `defaultchecked`, `defaultmuted`, `defaultselected`, `enabled`, `indeterminate`, `pauseonexit`, and `visible`, none of which are HTML attributes (e.g., `<my-widget visible="false">` became `<my-widget visible>`)
+
+### Changed
+
+* Made `collapseBooleanAttributes` leave custom elements alone, as these define what their attributes mean (e.g., `<my-toggle checked="false">` keeps its value)
+* Made the CLI show the help when run in a terminal without any arguments, rather than waiting for input
+
 ## [5.0.1] - 2026-11-03
 
 ### Fixed
