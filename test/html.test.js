@@ -3,6 +3,7 @@ import assert from 'node:assert';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { minify, getPreset } from '../src/htmlminifier.js';
+import { HTMLParser } from '../src/htmlparser.js';
 import { trimWhitespace, collapseWhitespaceAll, collapseWhitespace } from '../src/lib/whitespace.js';
 
 describe('HTML', () => {
@@ -5240,9 +5241,9 @@ describe('HTML', () => {
 
     // Only a doctype ahead of any tag sets the mode, and only the first
     assert.strictEqual(await minify('<!-- a --><!doctype html><p>a</p><table><tr><td>b</table>', { removeOptionalTags: true }), '<!-- a --><!doctype html><p>a<table><tr><td>b</table>');
-    assert.strictEqual(await minify('<p>a</p><!doctype html><p>b</p><table><tr><td>c</table>', { removeOptionalTags: true }), '<p>a<!doctype html><p>b</p><table><tr><td>c</table>');
-    assert.strictEqual(await minify(doctypeQuirks + '<!doctype html><p>a</p><table><tr><td>b</table>', { removeOptionalTags: true }), doctypeQuirks + '<!doctype html><p>a</p><table><tr><td>b</table>');
-    assert.strictEqual(await minify('<!doctype html>' + doctypeQuirks + '<p>a</p><table><tr><td>b</table>', { removeOptionalTags: true }), '<!doctype html>' + doctypeQuirks + '<p>a<table><tr><td>b</table>');
+    assert.strictEqual(await minify('<p>a</p><!doctype html><p>b</p><table><tr><td>c</table>', { removeOptionalTags: true }), '<p>a<p>b</p><table><tr><td>c</table>');
+    assert.strictEqual(await minify(doctypeQuirks + '<!doctype html><p>a</p><table><tr><td>b</table>', { removeOptionalTags: true }), doctypeQuirks + '<p>a</p><table><tr><td>b</table>');
+    assert.strictEqual(await minify('<!doctype html>' + doctypeQuirks + '<p>a</p><table><tr><td>b</table>', { removeOptionalTags: true }), '<!doctype html><p>a<table><tr><td>b</table>');
 
     // A `p` beyond a scope boundary stays open
     assert.strictEqual(await minify('<p><button>a<div>b</div></button>c</p><p>d</p>', { removeOptionalTags: true }), '<p><button>a<div>b</div></button>c<p>d');
@@ -8671,6 +8672,76 @@ describe('HTML', () => {
     assert.strictEqual(await minify('<style>a{color:red}</style><input type=text>', { removeRedundantAttributes: true }), '<style>a{color:red}</style><input>');
   });
 
+  test('Tracks elements that a formatting element’s end tag closes around', async () => {
+    const whitespace = { collapseWhitespace: true };
+    const empty = { removeEmptyElements: true };
+
+    assert.strictEqual(await minify('<pre><b><p></b>a</p></pre>  <p>  x  </p>  <div>  y  </div>', whitespace), '<pre><b><p></b>a</p></pre><p>x</p><div>y</div>');
+    assert.strictEqual(await minify('<pre> <b> <p> </b> a </p> </pre>  z  <div>  y  </div>', whitespace), '<pre> <b> <p> </b> a </p> </pre>z<div>y</div>');
+    assert.strictEqual(await minify('<pre><B><p></B>a</p></pre>  x', { ...whitespace, caseSensitive: true }), '<pre><B><p></B>a</p></pre>x');
+    assert.strictEqual(await minify('<b><p></b></p>x', empty), '<b><p></b></p>x');
+    assert.strictEqual(await minify('<div><b><p></b></p></div>', empty), '<div><b><p></b></p></div>');
+  });
+
+  test('Keeps open elements when an implied table part’s end tag names an outer one', async () => {
+    const input = '<pre><table><tr><td><table><td>a</tr></table></td></tr></table></pre>  <div>  b  </div>';
+
+    assert.strictEqual(await minify(input, { collapseWhitespace: true }), '<pre><table><tr><td><table><td>a</tr></table></td></tr></table></pre><div>b</div>');
+  });
+
+  test('Reads a formatting end tag dropped at a scope boundary as dropped when looking ahead', async () => {
+    const nextTagAfterText = async (/** @type {string} */ html, partialMarkup = false) => {
+      /** @type {string[]} */
+      const nextTags = [];
+      await new HTMLParser(html, {
+        chars: (/** @type {string} */ text, /** @type {string} */ prevTag, /** @type {string} */ nextTag) => {
+          if (text.startsWith('x')) nextTags.push(nextTag);
+        },
+        partialMarkup,
+        wantsNextTag: true
+      }).parse();
+      return nextTags;
+    };
+
+    assert.deepStrictEqual(await nextTagAfterText('<a><table><td>x</a>y</td></table></a>'), ['']);
+    assert.deepStrictEqual(await nextTagAfterText('<b><object>x</b>y</object></b>'), ['']);
+    assert.deepStrictEqual(await nextTagAfterText('<b><object>x</b>y</object></b>', true), ['']);
+    assert.deepStrictEqual(await nextTagAfterText('<b><div>x</b>y</div>'), ['/b']);
+    assert.deepStrictEqual(await nextTagAfterText('<b>x</b>'), ['/b']);
+  });
+
+  test('Keeps whitespace in doctype identifiers', async () => {
+    assert.strictEqual(await minify('<!DOCTYPE potato PUBLIC \'go:hh   of\'>'), '<!DOCTYPE potato PUBLIC \'go:hh   of\'>');
+    assert.strictEqual(await minify('<!DOCTYPE  html   PUBLIC  "a  b"   "c\n d">'), '<!DOCTYPE html PUBLIC "a  b" "c\n d">');
+    assert.strictEqual(await minify('<!DOCTYPE\nhtml\n>'), '<!DOCTYPE html >');
+  });
+
+  test('Drops a doctype that browsers ignore after a tag or another doctype', async () => {
+    const options = { removeOptionalTags: true };
+
+    assert.strictEqual(await minify('<body></body><!DOCTYPE html>', options), '');
+    assert.strictEqual(await minify('<html><head></head><!DOCTYPE html>', options), '');
+    assert.strictEqual(await minify('<!-- a --><body></body><!DOCTYPE html>', options), '<!-- a -->');
+    assert.strictEqual(await minify('<body></body><!DOCTYPE html>'), '<body></body>');
+    assert.strictEqual(await minify('<p>a</p><!DOCTYPE html>'), '<p>a</p>');
+    assert.strictEqual(await minify('<!-- a --><p>b</p> <!DOCTYPE html>'), '<!-- a --><p>b</p>');
+    assert.strictEqual(await minify('</p><!DOCTYPE html>'), '</p>');
+    assert.strictEqual(await minify('<!DOCTYPE html><!DOCTYPE html>'), '<!DOCTYPE html>');
+  });
+
+  test('Keeps a doctype that template code may leave first', async () => {
+    const inputs = [
+      'a<!DOCTYPE html>',
+      '{% if a %}<!DOCTYPE html>{% else %}<!DOCTYPE html>{% endif %}',
+      '<?php if ($a): ?><!DOCTYPE html><?php else: ?><!DOCTYPE html><?php endif ?>',
+      '<% if (a) { %><p>b</p><% } else { %><!DOCTYPE html><% } %>'
+    ];
+    for (const input of inputs) {
+      assert.strictEqual(await minify(input), input);
+    }
+    assert.strictEqual(await minify('<?x y?><p>a</p><!DOCTYPE html>', { ignoreCustomFragments: [] }), '<?x y?><p>a</p><!DOCTYPE html>');
+  });
+
   test('Finds selected attributes in every `style` element, in any case, and nowhere else', async () => {
     const options = { removeRedundantAttributes: true };
 
@@ -8737,7 +8808,9 @@ describe('HTML', () => {
     assert.strictEqual(await minify('<span><p>a</span> b', { collapseWhitespace: true }), '<span><p>a b');
     assert.strictEqual(await minify('<span><b>a</span>b'), '<span><b>a</span>b');
     assert.strictEqual(await minify('<dialog><p>a</dialog>b'), '<dialog><p>a</dialog>b');
-    assert.strictEqual(await minify('<x-a><div></x-a>b</div>', { partialMarkup: true }), '<x-a><div></x-a>b</div>');
+    assert.strictEqual(await minify('<x-a><div></x-a>b</div>', { partialMarkup: true }), '<x-a><div>b</div>');
+    assert.strictEqual(await minify('<span><p>a</span> b', { collapseWhitespace: true, partialMarkup: true }), '<span><p>a b');
+    assert.strictEqual(await minify('<!-- htmlmin:ignore --><x-a><div></x-a>b</div><!-- htmlmin:ignore -->', { partialMarkup: true }), '<x-a><div></x-a>b</div>');
   });
 
   test('Keeps whitespace next to no-break spaces', async () => {

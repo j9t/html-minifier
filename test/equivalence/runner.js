@@ -70,6 +70,11 @@ export function signatureOf(/** @type {{kind: string, input: string, output: str
   return `${difference.kind}:${clip(difference.input)} / ${clip(difference.output)}`;
 }
 
+// The message’s first line, as the rest quotes the markup
+export function signatureOfThrown(/** @type {string} */ message) {
+  return `thrown:${message.split('\n', 1)[0]}`;
+}
+
 /**
  * @param {string} html
  * @param {Record<string, unknown>} options

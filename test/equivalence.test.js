@@ -4,7 +4,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import { compareMarkup } from './equivalence/compare.js';
 import { equivalenceCases } from './equivalence/cases.js';
-import { check, reduce, signatureOf } from './equivalence/runner.js';
+import { check, reduce, signatureOf, signatureOfThrown } from './equivalence/runner.js';
 
 const fileKnownIssues = new URL('./equivalence/known-issues.json', import.meta.url);
 
@@ -43,9 +43,10 @@ describe('Equivalence', () => {
     }
   });
 
-  // Each known issue is one case in `known-issues.json`, so that only a new difference fails.
-  // They are malformed markup past what the parser models (e.g., content after a stray `</body>`,
-  // or a `body` start tag within the body), obsolete elements, and SVGO’s handling of unclosed SVG.
+  // Each known issue is one case in `known-issues.json`, so that only a change fails: a new or
+  // different result, or one that no longer occurs. They are malformed markup past what the
+  // parser models (e.g., content after a stray `</body>`, or a `body` start tag within the body),
+  // obsolete elements, SVGO’s handling of unclosed SVG, and markup that fails to parse.
   // Run with `UPDATE_EQUIVALENCE_BASELINE=1` to rewrite the list, after reviewing what changed.
   test('Finds output equivalent to its source across options and markup', async () => {
     const known = /** @type {Record<string, string>} */ (JSON.parse(fs.readFileSync(fileKnownIssues, 'utf8')));
@@ -55,14 +56,13 @@ describe('Equivalence', () => {
     let compared = 0;
     for (const { html, options } of equivalenceCases()) {
       const { differences, thrown } = await check(html, options);
-      if (thrown) continue;
-      compared++;
-      if (!differences.length) continue;
-      const key = keyOf(html, options);
+      if (thrown === undefined) compared++;
       const [first] = differences;
-      if (!first) continue;
-      seen[key] = signatureOf(first);
-      if (!(key in known)) failures.push({ html, options, signature: signatureOf(first) });
+      if (thrown === undefined && !first) continue;
+      const signature = thrown === undefined ? signatureOf(/** @type {NonNullable<typeof first>} */ (first)) : signatureOfThrown(thrown);
+      const key = keyOf(html, options);
+      seen[key] = signature;
+      if (known[key] !== signature) failures.push({ html, options, signature, isThrown: thrown !== undefined });
     }
     if (process.env.UPDATE_EQUIVALENCE_BASELINE) {
       fs.writeFileSync(fileKnownIssues, JSON.stringify(Object.fromEntries(Object.entries(seen).sort()), null, 2));
@@ -70,11 +70,13 @@ describe('Equivalence', () => {
     }
     assert.ok(compared > 5000, `Compared only ${compared} cases`);
     const reports = [];
-    for (const { html, options, signature } of failures.slice(0, 5)) {
-      const reduced = await reduce(html, options, signature);
+    for (const { html, options, signature, isThrown } of failures.slice(0, 5)) {
+      const reduced = isThrown ? { html, options } : await reduce(html, options, signature);
       const { output } = await check(reduced.html, reduced.options);
       reports.push(`${signature}\n  options: ${JSON.stringify(reduced.options)}\n  input:   ${JSON.stringify(reduced.html)}\n  output:  ${JSON.stringify(output)}`);
     }
-    assert.strictEqual(failures.length, 0, `${failures.length} new differences, for example:\n${reports.join('\n')}`);
+    assert.strictEqual(failures.length, 0, `${failures.length} new or changed differences, for example:\n${reports.join('\n')}`);
+    const stale = Object.keys(known).filter(key => !(key in seen));
+    assert.deepStrictEqual(stale, [], `${stale.length} known issues no longer occur; rewrite the list`);
   });
 });

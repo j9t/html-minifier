@@ -48,6 +48,8 @@ const RE_HTML_ENCODING = /^(text\/html|application\/xhtml\+xml)$/i;
 // identifier precedes it, anything but `>` sets quirks mode
 // https://html.spec.whatwg.org/multipage/parsing.html#doctype-state
 const RE_DOCTYPE = /^<!doctype[ \n\r\t\f]*([^ \n\r\t\f>]+)[ \n\r\t\f]*(?:public[ \n\r\t\f]*("[^">]*"|'[^'>]*')[ \n\r\t\f]*("[^">]*"|'[^'>]*')?|system[ \n\r\t\f]*("[^">]*"|'[^'>]*'))?([^]*)$/i;
+// A doctype’s quoted identifiers (captured) and what lies between them
+const RE_DOCTYPE_SEGMENT = /("[^"]*(?:"|$)|'[^']*(?:'|$))|[^"']+/g;
 const RE_ATTR_WS_CHECK = /[ \n\r\t\f]/;
 const RE_ATTR_WS_COLLAPSE = /[ \n\r\t\f]+/g;
 const RE_WS_CHAR = /\s/;
@@ -445,6 +447,7 @@ export {
   RE_XML_ESCAPE_ATTR,
   RE_HTML_ENCODING,
   RE_DOCTYPE,
+  RE_DOCTYPE_SEGMENT,
   RE_ATTR_WS_CHECK,
   RE_ATTR_WS_COLLAPSE,
   RE_WS_CHAR,

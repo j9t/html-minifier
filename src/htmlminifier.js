@@ -18,6 +18,7 @@ import {
   RE_WS_NBSP_END,
   RE_STYLE_ELEMENT,
   RE_ENDS_COLLAPSIBLE,
+  RE_DOCTYPE_SEGMENT,
   formattingElements,
   inlineElementsToKeepWhitespace,
   inlineElementsToKeepWhitespaceAround,
@@ -1554,6 +1555,26 @@ async function minifyHTML(value, options, partialMarkup) {
     return lowerTag === 'svg' || lowerTag === 'math' || scope === undefined || scope === 'svg' || scope === 'math';
   }
 
+  // Browsers can close a formatting element with others left open inside it;
+  // any other end tag that doesn’t match the top entry of a stack is stray
+  function canCloseBelowTop(/** @type {string} */ tag, /** @type {string} */ lowerTag) {
+    return formattingElements.has((lowerTag || tag).toLowerCase());
+  }
+
+  // Returns whether `tag` was open
+  function removeClosedTag(/** @type {string[]} */ tags, /** @type {string} */ tag, /** @type {string} */ lowerTag) {
+    if (tags[tags.length - 1] === tag) {
+      tags.pop();
+      return true;
+    }
+    const index = canCloseBelowTop(tag, lowerTag) ? tags.lastIndexOf(tag) : -1;
+    if (index === -1) {
+      return false;
+    }
+    tags.splice(index, 1);
+    return true;
+  }
+
   function markOpenElementFilled() {
     // Guarded, as reading index -1 is a slow property lookup, and this runs for every text node
     if (openElements.length) {
@@ -2536,10 +2557,9 @@ async function minifyHTML(value, options, partialMarkup) {
       const insideNoTrim = stackNoTrimWhitespace.length > 0;
       let closesNoTrim = false;
       if (stackNoTrimWhitespace.length) {
-        if (tag === stackNoTrimWhitespace[stackNoTrimWhitespace.length - 1]) {
+        if (removeClosedTag(stackNoTrimWhitespace, tag, lowerTag)) {
           const tagLower = lowerTag || tag;
           if (tagLower === 'pre') preDepth--;
-          stackNoTrimWhitespace.pop();
           closesNoTrim = !stackNoTrimWhitespace.length;
         }
       } else if (options.collapseWhitespace) {
@@ -2549,9 +2569,7 @@ async function minifyHTML(value, options, partialMarkup) {
         transparentDepth--;
       }
       let closesNoCollapse = false;
-      if (stackNoCollapseWhitespace.length &&
-          tag === stackNoCollapseWhitespace[stackNoCollapseWhitespace.length - 1]) {
-        stackNoCollapseWhitespace.pop();
+      if (stackNoCollapseWhitespace.length && removeClosedTag(stackNoCollapseWhitespace, tag, lowerTag)) {
         closesNoCollapse = !stackNoCollapseWhitespace.length;
       }
 
@@ -2570,7 +2588,19 @@ async function minifyHTML(value, options, partialMarkup) {
       }
       selfCloses &&= isElementEmpty;
       // A stray end tag has no open element of its own
-      const openElement = options.removeEmptyElements && openElements[openElements.length - 1]?.tag === tag ? openElements.pop() : undefined;
+      let openElement;
+      if (options.removeEmptyElements && openElements.length) {
+        if (openElements[openElements.length - 1]?.tag === tag) {
+          openElement = openElements.pop();
+        } else if (canCloseBelowTop(tag, lowerTag)) {
+          const index = openElements.findLastIndex(entry => entry.tag === tag);
+          if (index !== -1) {
+            openElement = openElements.splice(index, 1)[0];
+            // Closed around what is open inside it, so that holds this end tag now
+            currentTag = '';
+          }
+        }
+      }
       // Emptied by removing what it held, as long as its start tag is still the last one written
       const isElementEmptied = !isElementEmpty && Boolean(openElement?.empty) && lastStartTagIndex() === openElement?.index;
 
@@ -2749,12 +2779,16 @@ async function minifyHTML(value, options, partialMarkup) {
     strayEnd: function () {
       removed = true;
     },
-    doctype: function (/** @type {string} */ doctype, /** @type {boolean} */ noQuirksMode) {
+    doctype: function (/** @type {string} */ doctype, /** @type {boolean} */ noQuirksMode, /** @type {boolean} */ isIgnored) {
       tableClosesP = noQuirksMode;
+      if (isIgnored) {
+        removed = true;
+        return;
+      }
       bufferPush(options.useShortDoctype
         ? '<!doctype' +
         (options.removeTagWhitespace ? '' : ' ') + 'html>'
-        : collapseWhitespaceAll(doctype), false);
+        : doctype.replace(RE_DOCTYPE_SEGMENT, (segment, quoted) => quoted ?? collapseWhitespaceAll(segment)), false);
     }
   });
 

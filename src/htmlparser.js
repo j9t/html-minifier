@@ -358,6 +358,10 @@ export class HTMLParser {
     /** @type {'' | 'quirks' | 'no-quirks'} */
     let docMode = '';
     let docModeSettable = true;
+    // Whether markup ended that, and whether a processing instruction came up: Unlike after text
+    // or such an instruction, which template code may be, a later doctype is sure to be ignored
+    let docStartsWithMarkup = false;
+    let docHasInstruction = false;
     // Open `p` elements a `table` started in while the mode was unknown
     /** @type {WeakSet<object>} */
     const pHoldingTable = new WeakSet();
@@ -659,12 +663,14 @@ export class HTMLParser {
             doctypeY.lastIndex = pos;
             const doctypeMatch = doctypeY.exec(fullHtml);
             if (doctypeMatch) {
-              if (docModeSettable) {
+              const setsMode = docModeSettable;
+              if (setsMode) {
                 docMode = handler.noQuirksMode || !isQuirksDoctype(doctypeMatch[0]) ? 'no-quirks' : 'quirks';
                 docModeSettable = false;
+                docStartsWithMarkup = true;
               }
               if (handler.doctype) {
-                handler.doctype(doctypeMatch[0], docMode === 'no-quirks');
+                handler.doctype(doctypeMatch[0], docMode === 'no-quirks', !setsMode && docStartsWithMarkup && !docHasInstruction);
               }
               advance(doctypeMatch[0].length);
               prevTag = '';
@@ -674,6 +680,7 @@ export class HTMLParser {
           } else if (nextCode === 63) { // `?`
             const processingInstructionEnd = matchProcessingInstruction(pos);
             if (processingInstructionEnd !== -1) {
+              docHasInstruction = true;
               if (handler.processingInstruction) {
                 handler.processingInstruction(fullHtml.substring(pos, processingInstructionEnd));
               }
@@ -1148,6 +1155,7 @@ export class HTMLParser {
       const lowerTagName = match.lowerTagName;
       let unarySlash = match.unarySlash;
 
+      docStartsWithMarkup ||= docModeSettable;
       docModeSettable = false;
       if (handler.parseError) reportUnquotedValueErrors(match);
       // A plain loop, so a tag costs no closure allocation per attribute
@@ -1334,24 +1342,33 @@ export class HTMLParser {
       parseEndTagAt(stackIndex, false);
     }
 
-    // A formatting element’s end tag leaves open the first special element in it, and is ignored
-    // from beyond a scope boundary; returns whether either applied, or `false` to close as usual
-    // https://html.spec.whatwg.org/multipage/parsing.html#adoption-agency-algorithm
-    function closeFormattingElement(/** @type {number} */ stackIndex, /** @type {string} */ rest) {
+    // What a formatting element’s end tag meets among the elements open inside it
+    function readFormattingScope(/** @type {number} */ stackIndex) {
       let hasSpecial = false;
       for (let i = stack.length - 1; i > stackIndex; i--) {
         const entry = /** @type {NonNullable<(typeof stack)[number]>} */ (stack[i]);
         if (entry.namespace) {
-          return false;
+          return 'foreign';
         }
         if (formattingScopeBoundaries.has(entry.lowerTag)) {
-          endTagDropped = true;
-          handler.strayEnd?.();
-          return true;
+          return 'boundary';
         }
         hasSpecial ||= specialElements.has(entry.lowerTag);
       }
-      if (!hasSpecial) {
+      return hasSpecial ? 'special' : '';
+    }
+
+    // A formatting element’s end tag leaves open the first special element in it, and is ignored
+    // from beyond a scope boundary; returns whether either applied, or `false` to close as usual
+    // https://html.spec.whatwg.org/multipage/parsing.html#adoption-agency-algorithm
+    function closeFormattingElement(/** @type {number} */ stackIndex, /** @type {string} */ rest) {
+      const scope = readFormattingScope(stackIndex);
+      if (scope === 'boundary') {
+        endTagDropped = true;
+        handler.strayEnd?.();
+        return true;
+      }
+      if (scope !== 'special') {
         return false;
       }
       const entry = /** @type {NonNullable<(typeof stack)[number]>} */ (stack[stackIndex]);
@@ -1414,7 +1431,13 @@ export class HTMLParser {
     function isDroppedEndTag(/** @type {string} */ lowerTagName) {
       const stackIndex = findEndTagTarget(lowerTagName);
       if (stackIndex >= 0) {
-        return !handler.partialMarkup && stackIndex !== stack.length - 1 && isBehindSpecialElement(stackIndex);
+        if (stackIndex === stack.length - 1) {
+          return false;
+        }
+        if (formattingElements.has(lowerTagName) && !stack[stackIndex]?.namespace && readFormattingScope(stackIndex) === 'boundary') {
+          return true;
+        }
+        return isBehindSpecialElement(stackIndex);
       }
       return !handler.partialMarkup && !formattingElements.has(lowerTagName) && lowerTagName !== 'br' && lowerTagName !== 'p' && !isImpliedTablePart(lowerTagName);
     }
@@ -1429,6 +1452,7 @@ export class HTMLParser {
     }
 
     function parseEndTag(/** @type {string} */ tag, /** @type {string} */ tagName) {
+      docStartsWithMarkup ||= docModeSettable;
       docModeSettable = false;
       endTagDropped = false;
       let stackIndex;
@@ -1453,7 +1477,7 @@ export class HTMLParser {
       if (tag && !closesTop && stackIndex >= 0 && formattingElements.has(lowerTagName) && !stack[stackIndex]?.namespace && closeFormattingElement(stackIndex, rest)) {
         return lowerTagName;
       }
-      if (tag && !closesTop && !handler.partialMarkup && stackIndex >= 0 && isBehindSpecialElement(stackIndex)) {
+      if (tag && !closesTop && stackIndex >= 0 && isBehindSpecialElement(stackIndex)) {
         endTagDropped = true;
         handler.strayEnd?.();
         return lowerTagName;
