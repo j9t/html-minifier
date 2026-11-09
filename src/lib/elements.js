@@ -124,9 +124,16 @@ function canRemoveElement(tag, attrs) {
   }
 
   switch (tag) {
+    // Without a `frameset`, browsers render what follows it
     case 'canvas':
+    case 'frameset':
     case 'textarea':
       return false;
+    // Browsers create them anyway, but not with their attributes
+    case 'body':
+    case 'head':
+    case 'html':
+      return attrs.length === 0;
     case 'audio':
     case 'script':
     case 'video':

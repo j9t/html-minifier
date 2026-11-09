@@ -180,7 +180,7 @@ Options can be used in config files (camelCase) or via CLI flags (kebab-case wit
 | `removeEmptyElements`<br>`--remove-empty-elements` | [Remove all elements with empty contents](#removing-empty-elements) | `false` |
 | `removeEmptyElementsExcept`<br>`--remove-empty-elements-except` | Array of elements to preserve—use with `removeEmptyElements`; accepts simple tag names (e.g., `["td"]`) or HTML-like markup with attributes (e.g., `["<i class='test'>"]`); supports double quotes, single quotes, and unquoted attribute values | `[]` |
 | `removeOptionalTags`<br>`--remove-optional-tags` | [Remove optional tags](https://perfectionkills.com/experimenting-with-html-minifier/#remove_optional_tags) | `false` |
-| `removeRedundantAttributes`<br>`--remove-redundant-attributes` | [Remove attributes when value matches default](https://meiert.com/blog/optional-html/#toc-attribute-values) or has no effect (as well as `rel` keywords and `meta` elements without effect) | `false` |
+| `removeRedundantAttributes`<br>`--remove-redundant-attributes` | [Remove attributes when value matches default](https://meiert.com/blog/optional-html/#toc-attribute-values) or has no effect (as well as `rel` keywords and `meta` elements without effect), unless a `style` element in the document selects on the attribute (external style sheets can’t be checked) | `false` |
 | `removeTagWhitespace`<br>`--remove-tag-whitespace` | Remove space between attributes whenever possible; **note that this will result in invalid HTML** | `false` |
 | `removeUnusedCSS`<br>`--remove-unused-css` | [Remove CSS from `style` elements](#unused-css-removal) that name an element, class, or ID the document doesn’t reference—use with `minifyCSS`, and `safelist` for names only external scripts use | `false` (could be `true`, `{ safelist, scripts }`) |
 | `selfCloseForeignElements`<br>`--self-close-foreign-elements` | Self-close empty SVG and MathML elements (e.g., `<path d="…"></path>` → `<path d="…"/>`) | `false` |
@@ -256,6 +256,8 @@ you get the following output (condensed, `\n` represents an actual line break):
 
 Where the modifiers disagree, the preserving one wins—`conservativeCollapse` and `preserveLineBreaks` do not let `collapseInlineTagWhitespace` remove a space or line break entirely.
 
+`collapseWhitespace` goes by the element, not by CSS, so whitespace in an element styled `white-space: pre` collapses unless you protect it with [`canCollapseWhitespace` and `canTrimWhitespace`](#api-only-options).
+
 Regardless of these options, whitespace at the start and end of the output goes, and so do lines that a removed comment or tag leaves with nothing but whitespace (blank lines of the source stay). Whitespace stays, however, where it’s kept verbatim (in `pre` or `textarea`, or in `pre`, `textarea`, or `script` content left open at the end), next to custom fragments where their handling keeps it (see `trimCustomFragments`), at either end of partial markup (cf. `partialMarkup`), and where `conservativeCollapse` or `preserveLineBreaks` keep it.
 
 Note: `preserveLineBreaks` keeps line breaks, not indentation. HTML Minifier doesn’t format: To keep the source formatting, leave `collapseWhitespace` off (as in the first row of the table above). Line breaks and indentation then stay as written, while other options still apply.
@@ -292,6 +294,7 @@ These figures were measured in October 2026 with HTML Minifier Next 8.8.1 on 61 
 
 `removeEmptyElements` removes elements without content—no text and no child elements (comments don’t count; whitespace does, unless `collapseWhitespace` removes it). It keeps:
 
+* `html`, `head`, and `body` elements with attributes (which browsers wouldn’t recreate), and `frameset` elements,
 * elements with an `id` attribute,
 * elements with a `role`, `tabindex`, or ARIA attribute (e.g., `aria-label` or `aria-hidden`), and `label`, `output`, and `template` elements with a `for` attribute (e.g., a `label` styled as a menu toggle), unless its value is empty,
 * custom elements (e.g., `<my-player></my-player>`), `canvas`, and `textarea` elements,

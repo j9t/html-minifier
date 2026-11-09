@@ -51,7 +51,7 @@ import { optionDefinitions, optionDefaults } from './option-definitions.js';
  *   removeUnusedCSS: {safelist: Array<string | RegExp>, scripts: boolean} | null,
  *   cssContext?: CSSContext,
  *   documentState?: {hasMathML: boolean},
- *   baseState?: {hasBase: boolean | undefined, source: string},
+ *   baseState?: {hasBase: boolean | undefined, selectedAttrs?: Set<string>, source: string},
  *   parallelJS?: boolean,
  *   nameParent?: (name: string) => string,
  *   namesAsWritten?: boolean,

@@ -7,6 +7,7 @@ import {
   RE_CAN_REMOVE_ATTR_QUOTES,
   RE_AMP_REFERENCE_ATTR,
   RE_CR,
+  RE_ATTR_SELECTOR,
   RE_BASE_ELEMENT,
   RE_ATTR_WS_CHECK,
   RE_ATTR_WS_COLLAPSE,
@@ -198,6 +199,43 @@ function isTargetSelfRedundant(attrValue, options) {
 }
 
 /**
+ * The attribute names `style` elements in `source` select on, in lowercase
+ * @param {string} source
+ * @returns {Set<string>}
+ */
+function findSelectedAttributes(source) {
+  /** @type {Set<string>} */
+  const names = new Set();
+  if (!RE_STYLE_ELEMENT.test(source)) {
+    return names;
+  }
+  // Scanned rather than matched, as a lazy pattern is quadratic on `style` tags left open
+  const sourceLower = source.toLowerCase();
+  let start = sourceLower.indexOf('<style');
+  while (start !== -1) {
+    const end = sourceLower.indexOf('</style', start);
+    if (end === -1) {
+      break;
+    }
+    for (const match of sourceLower.slice(start, end).matchAll(RE_ATTR_SELECTOR)) {
+      names.add(/** @type {string} */ (match[1]));
+    }
+    start = sourceLower.indexOf('<style', end);
+  }
+  return names;
+}
+
+/**
+ * Whether a style sheet of the document selects on the attribute, which removing it would break
+ * @param {string} attrName
+ * @param {ProcessedOptions} options
+ */
+function isAttributeSelected(attrName, options) {
+  const state = options.baseState;
+  return state !== undefined && (state.selectedAttrs ??= findSelectedAttributes(state.source)).has(attrName.toLowerCase());
+}
+
+/**
  * @param {string} tag - In lowercase
  * @param {string} attrName - In lowercase
  * @param {string} attrValue
@@ -268,7 +306,13 @@ function isAttributeRedundant(tag, attrName, attrValue, attrs, options) {
     : undefined;
   const tagDefault = tagAttrDefaults && Object.hasOwn(tagAttrDefaults, attrName) ? tagAttrDefaults[attrName] : undefined;
 
-  const isLegacyAttr = (tag === 'script' && (attrName === 'language' || attrName === 'charset')) || (tag === 'a' && attrName === 'name');
+  // As written, for browsers match fragments case-sensitively
+  if (tag === 'a' && attrName === 'name') {
+    const id = attrs.find(attr => attr.name.toLowerCase() === 'id');
+    return id !== undefined && trimWhitespace(id.value ?? '') === trimWhitespace(attrValue);
+  }
+
+  const isLegacyAttr = tag === 'script' && (attrName === 'language' || attrName === 'charset');
 
   // Without a default for this very attribute, nor a legacy rule, the value cannot be redundant
   if (generalDefault === undefined && tagDefault === undefined && !isLegacyAttr) {
@@ -282,9 +326,6 @@ function isAttributeRedundant(tag, attrName, attrValue, attrs, options) {
     return true;
   }
   if (tag === 'script' && attrName === 'charset' && !attributesInclude(attrs, 'src')) {
-    return true;
-  }
-  if (tag === 'a' && attrName === 'name' && attributesInclude(attrs, 'id')) {
     return true;
   }
   if (tag === 'ol' && attrName === 'start' && attributesInclude(attrs, 'reversed')) {
@@ -1016,12 +1057,12 @@ function normalizeAttr(attr, attrs, tag, tagOut, options, minifyHTML, markers) {
  * @param {string[]} [markers] - What custom fragment and `htmlmin:ignore` placeholders hold
  */
 function normalizeAttrContinue(attrName, attrNameOut, attrValue, attr, attrs, tag, tagOut, options, minifyHTML, markers) {
-  if ((options.removeRedundantAttributes &&
+  if (((options.removeRedundantAttributes &&
        isAttributeRedundant(tag, attrName, attrValue ?? '', attrs, options)) ||
       (options.removeDefaultTypeAttributes && attrName === 'type' && (
         ((tag === 'style' || tag === 'link') && isStyleLinkTypeAttribute(attrValue)) ||
         (tag === 'script' && isScriptTypeAttribute(attrValue) && !keepScriptTypeAttribute(attrValue))
-      ))) {
+      ))) && !isAttributeSelected(attrName, options)) {
     return;
   }
 
@@ -1048,7 +1089,8 @@ function normalizeAttrContinue(attrName, attrNameOut, attrValue, attr, attrs, ta
  */
 function normalizeAttrFinish(attrName, attrNameOut, attrValue, attr, tag, tagOut, options) {
   if (options.removeEmptyAttributes &&
-      canDeleteEmptyAttribute(tag, attrName, attrValue, options, tagOut, attrNameOut)) {
+      canDeleteEmptyAttribute(tag, attrName, attrValue, options, tagOut, attrNameOut) &&
+      !isAttributeSelected(attrName, options)) {
     return;
   }
 
