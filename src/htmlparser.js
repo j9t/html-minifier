@@ -218,7 +218,8 @@ function findRawTextEnd(text, tag) {
   return null;
 }
 
-// What changes the state script content is read in; a tag name ends as in `endsTagName`
+// What changes the state script content is read in; a tag name ends as in `endsTagName`,
+// and `--!>` is left out as it only ends comments, not these states
 const RE_SCRIPT_STATE = /<!--|-->|<\/?script(?=[\s/>])/gi;
 
 /**
