@@ -4,7 +4,7 @@ As of version 5.0.0, all notable changes to HTML Minifier (HM) are documented in
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [5.0.3] - 2026-11-09
+## [5.0.3] - 2026-11-10
 
 ### Fixed
 
@@ -17,6 +17,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 * Fixed `removeEmptyElements` with `removeOptionalTags` mishandling what surrounds removed elements:
   - deleting the element before an empty `body` (e.g., a `script` or `title`)
   - leaving a tag omitted because of an element that then got removed (e.g., `<a><p>b</p><footer></footer></a>` lost `</p>`, and without a `body` start tag before a removed element, a following `script` moved to the `head`)
+* Fixed `removeEmptyElements` removing an element that closes another one with no end tag, which moved what follows into that other element (e.g., `<p>a<div></div>b` became `<p>ab`)
 * Fixed `removeEmptyElements` removing empty `html`, `head`, and `body` elements with attributes, which browsers don’t recreate (e.g., `<body class="a"></body>`), and `frameset` elements, without which browsers render what follows
 * Fixed `removeRedundantAttributes`, `removeDefaultTypeAttributes`, and `removeEmptyAttributes` removing attributes that a `style` element in the document selects on (e.g., `type` given `input[type=text]`)
 * Fixed `removeRedundantAttributes` removing `name` from `a` elements with a different `id`, which broke links to the name
@@ -28,10 +29,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   - End tags of table parts reached outside their own table
   - End tags of formatting elements closed block elements inside them (e.g., `<a><div></a>x</div>`), and weren’t ignored from within a table when the element is outside it
   - End tags of ordinary elements weren’t ignored with a block element open inside them (e.g., `<span><div></span>x</div>`)
+  - End tags weren’t ignored with an element open inside that ends their scope, such as a `table` or, for `li`, a list (e.g., `<li><ul></li></ul>x` lost `</ul>`)
 * Fixed whitespace handling and `removeEmptyElements` losing track of what is open after the end tag of a formatting element with a block element open inside it (e.g., `<pre><b><p></b>a</p></pre>` kept whitespace after it, and `<b><p></b></p>x` lost `</b>`)
 * Fixed whitespace being collapsed within doctype identifiers, which changed them and could change the document mode (e.g., `PUBLIC "a  b"`)
 * Fixed doctypes that browsers ignore after a tag or another doctype staying in the output, where `removeOptionalTags` could leave one first and have it set the document mode (e.g., `<body></body><!doctype html>`)
 * Fixed `removeOptionalTags` omitting the `body` start tag before `base`, `basefont`, `bgsound`, `noframes`, and `title` elements, which moved them to the `head`
+* Fixed `minifyCSS` emptying invalid `media` queries, which made the style sheet apply (e.g., `media="only screen and 8px)"`)
+* Fixed quotes running into an attribute name being dropped with the value before them, which turned `<a href="x""target="_blank">` into a real `target` attribute—such a tag is now a parse error, and with `continueOnParseError` keeps its `"target` attribute
 * Fixed `continueOnParseError` turning tags with quotes in attribute names into text (e.g., `<img alt="a "b" c">`, with `decodeEntities`, became `&lt;img…`)
 * Fixed CDATA sections directly in `svg` and `math` elements being read as comments, `svg` elements in `annotation-xml` being read as MathML, and `isindex` being read as a void element
 
