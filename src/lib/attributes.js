@@ -348,15 +348,19 @@ function isStyleElement(tag, attrs) {
  * @param {string} name - In lowercase
  * @param {string} attrValue
  * @param {string} tag
- * @param {string | undefined} uidAttr
+ * @param {string[]} markers - What custom fragment and `htmlmin:ignore` placeholders hold
  */
-function collapsesToBooleanName(name, attrValue, tag, uidAttr) {
+function collapsesToBooleanName(name, attrValue, tag, markers) {
   const simple = isSimpleBoolean.has(name);
   if (!simple && name !== 'hidden' && name !== 'draggable' && !collapsibleValues.has(name)) {
     return false;
   }
   // Custom elements define what their attributes mean, and `marquee` counts its loops
   if (tag.includes('-') || (name === 'loop' && tag.toLowerCase() === 'marquee')) {
+    return false;
+  }
+  // Template code and ignored markup are not the minifier’s to remove
+  if (markers.some(marker => attrValue.indexOf(marker) !== -1)) {
     return false;
   }
   if (simple) {
@@ -366,9 +370,8 @@ function collapsesToBooleanName(name, attrValue, tag, uidAttr) {
   if (values) {
     return values.has(attrValue.toLowerCase());
   }
-  // What a fragment renders or a reference decodes to, the value as written doesn’t show
-  if ((name === 'hidden' || name === 'draggable') &&
-      (attrValue.indexOf('&') !== -1 || (uidAttr && attrValue.indexOf(uidAttr) !== -1))) {
+  // What a reference decodes to, the value as written doesn’t show
+  if ((name === 'hidden' || name === 'draggable') && attrValue.indexOf('&') !== -1) {
     return false;
   }
   // Any other value means the hidden state, which the bare attribute does, too
@@ -1074,8 +1077,9 @@ function normalizeAttrFinish(attrName, attrNameOut, attrValue, attr, tag, tagOut
  * @param {ProcessedOptions} options
  * @param {boolean} isLast
  * @param {string | undefined} uidAttr
+ * @param {string[]} markers - What custom fragment and `htmlmin:ignore` placeholders hold
  */
-function buildAttr(normalized, tag, hasUnarySlash, options, isLast, uidAttr) {
+function buildAttr(normalized, tag, hasUnarySlash, options, isLast, uidAttr, markers) {
   const attrName = normalized.name;
   let attrValue = normalized.value;
   const attr = normalized.attr;
@@ -1089,7 +1093,7 @@ function buildAttr(normalized, tag, hasUnarySlash, options, isLast, uidAttr) {
 
   // An attribute written as its name alone skips the quoting work below
   if (typeof attrValue === 'undefined' ||
-      (options.collapseBooleanAttributes && !options.insideForeignContent && collapsesToBooleanName(options.namesAsWritten ? attrName.toLowerCase() : attrName, attrValue ?? '', tag, uidAttr)) ||
+      (options.collapseBooleanAttributes && !options.insideForeignContent && collapsesToBooleanName(options.namesAsWritten ? attrName.toLowerCase() : attrName, attrValue ?? '', tag, markers)) ||
       (options.collapseEmptyAttributes && attrValue === '' && (attr.customAssign ?? '=') === '=')) {
     return attr.customOpen + attrName + (isLast ? '' : ' ') + attr.customClose;
   }

@@ -2625,6 +2625,20 @@ describe('HTML', () => {
     assert.strictEqual(await minify('<div hidden="until&#45;found">a</div>', { ...options, decodeEntities: true }), '<div hidden="until-found">a</div>');
   });
 
+  test('Keeps Boolean attribute values that hold custom fragments or ignored markup', async () => {
+    const options = { collapseBooleanAttributes: true };
+    for (const input of [
+      '<input checked="<?= $a ?>">',
+      '<input checked="checked<?= $a ?>">',
+      '<input checked="<?php if ($a): ?>checked<?php else: ?>" data-a="<?php endif; ?>">',
+      '<option selected="<?= f() ?>">a</option>'
+    ]) {
+      assert.strictEqual(await minify(input, options), input);
+    }
+    assert.strictEqual(await minify('<input checked="<!-- htmlmin:ignore -->a<!-- htmlmin:ignore -->">', options), '<input checked="a">');
+    assert.strictEqual(await minify('<input checked="checked" disabled="false">', options), '<input checked disabled>');
+  });
+
   test('Collapses enumerated attributes', async () => {
     assert.strictEqual(await minify('<div draggable="auto"></div>', { collapseBooleanAttributes: true }), '<div draggable></div>');
     assert.strictEqual(await minify('<div draggable="true"></div>', { collapseBooleanAttributes: true }), '<div draggable="true"></div>');

@@ -2174,7 +2174,7 @@ async function minifyHTML(value, options, partialMarkup) {
             if (uidAttr && normalizedAttr.name.includes(uidAttr)) {
               markTagFragments(normalizedAttr.name);
             }
-            tagText += buildAttr(normalizedAttr, tag, hasUnarySlash, optionsTag, i === lastKeptIndex, uidAttr);
+            tagText += buildAttr(normalizedAttr, tag, hasUnarySlash, optionsTag, i === lastKeptIndex, uidAttr, markers);
           }
         }
       } else {
@@ -2187,7 +2187,7 @@ async function minifyHTML(value, options, partialMarkup) {
             if (uidAttr && normalizedAttr.name.includes(uidAttr)) {
               markTagFragments(normalizedAttr.name);
             }
-            const builtAttr = buildAttr(normalizedAttr, tag, hasUnarySlash, optionsTag, i === lastKeptIndex, uidAttr);
+            const builtAttr = buildAttr(normalizedAttr, tag, hasUnarySlash, optionsTag, i === lastKeptIndex, uidAttr, markers);
             // One entry with the tag name, so that no line break can come between them
             if (i === 0 && fragmentJoinsTag) {
               buffer[buffer.length - 1] += builtAttr;

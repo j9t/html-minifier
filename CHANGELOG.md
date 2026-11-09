@@ -16,7 +16,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   - `<script>switch (a) { case 1: <?= $x ?> }</script>` became `if(1===a) <?= $x ?>`, which is wrong if the fragment renders several statements
   - `<script>l: <?= $x ?>;</script>` lost the label
 * Fixed `collapseBooleanAttributes` turning `hidden="until-found"` into `hidden`, which made the content unfindable
-* Fixed `collapseBooleanAttributes` removing `hidden` and `draggable` values that hold a custom fragment or a character reference, where only rendering or decoding shows the state (e.g., `draggable="<?= $d ?>"`)
+* Fixed `collapseBooleanAttributes` removing values that hold a custom fragment or `htmlmin:ignore` markup, which deleted template code (e.g., `checked="<?= $c ?>"`), and `hidden` and `draggable` values that hold a character reference, where only decoding shows the state
 * Fixed `collapseBooleanAttributes` removing the loop count of `marquee` elements (`<marquee loop="3">` became `<marquee loop>`, which loops forever) and the values of attributes in SVG and MathML, where HTML’s Boolean attributes don’t apply (e.g., `<mfenced open="[">` lost its delimiter)
 * Fixed `collapseWhitespace` removing spaces around and within SVG `tspan` and `textPath` elements, which joined words (e.g., `a <tspan>b</tspan>` became `a<tspan>b</tspan>`)
 * Fixed `collapseWhitespace` collapsing whitespace within SVG `script` and `style` elements written in uppercase, which could break their code (e.g., a line comment in `<svg><SCRIPT>` swallowed the next line)
