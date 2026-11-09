@@ -52,6 +52,7 @@ const RE_ATTR_WS_CHECK = /[ \n\r\t\f]/;
 const RE_ATTR_WS_COLLAPSE = /[ \n\r\t\f]+/g;
 const RE_WS_CHAR = /\s/;
 const RE_STYLE_ELEMENT = /<style[\s/>]/i;
+const RE_STYLE_TAG = /<\/?style/gi;
 // Text that a space after would collapse into (a no-break space does not take it in)
 const RE_ENDS_COLLAPSIBLE = /(?:^|[ \n\r\t\f])$/;
 // An attribute selector’s name, namespace prefix aside, in lowercased CSS
@@ -448,6 +449,7 @@ export {
   RE_ATTR_WS_COLLAPSE,
   RE_WS_CHAR,
   RE_STYLE_ELEMENT,
+  RE_STYLE_TAG,
   RE_EMPTY_ATTRIBUTE,
 
   // Inline element sets

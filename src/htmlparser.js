@@ -1123,9 +1123,10 @@ export class HTMLParser {
         const text = attr[0] ?? '';
         attrPos = fullHtml.indexOf(text, attrPos);
         const surroundCount = handler.customAttrSurround ? handler.customAttrSurround.length : 0;
-        const nameQuote = (attr[baseIndex] ?? '').search(RE_ATTR_NAME_QUOTE);
+        const attrName = attr[baseIndex] ?? '';
+        const nameQuote = attrName.includes('"') || attrName.includes("'") ? attrName.search(RE_ATTR_NAME_QUOTE) : -1;
         if (nameQuote !== -1) {
-          reportParseError(attrPos + text.indexOf(attr[baseIndex] ?? '') + nameQuote, `Kept \`${(attr[baseIndex] ?? '')[nameQuote]}\` in attribute name`);
+          reportParseError(attrPos + text.indexOf(attrName) + nameQuote, `Kept \`${attrName[nameQuote]}\` in attribute name`);
         }
         for (let i = 0; i <= surroundCount; i++) {
           // Unquoted values sit at index 5 of each surround block, and 4 behind the plain name
@@ -1412,13 +1413,17 @@ export class HTMLParser {
     function isDroppedEndTag(/** @type {string} */ lowerTagName) {
       const stackIndex = findEndTagTarget(lowerTagName);
       if (stackIndex >= 0) {
-        return !handler.partialMarkup && isBehindSpecialElement(stackIndex);
+        return !handler.partialMarkup && stackIndex !== stack.length - 1 && isBehindSpecialElement(stackIndex);
       }
       return !handler.partialMarkup && !formattingElements.has(lowerTagName) && lowerTagName !== 'br' && lowerTagName !== 'p' && !isImpliedTablePart(lowerTagName);
     }
 
     // Table parts end within their own table only
     function findEndTagTarget(/** @type {string} */ lowerTagName) {
+      const stackIndex = stack.length - 1;
+      if (stack[stackIndex]?.lowerTag === lowerTagName) {
+        return stackIndex;
+      }
       return tablePartElements.has(lowerTagName) || lowerTagName === 'caption' ? findTagInCurrentTable(lowerTagName) : findTag(lowerTagName);
     }
 
@@ -1443,10 +1448,11 @@ export class HTMLParser {
       // Whatever follows the name, which browsers drop but a custom fragment may stand in for
       const rest = tag.length > tagName.length + 3 ? tag.slice(tagName.length + 2, -1) : '';
 
-      if (tag && stackIndex >= 0 && formattingElements.has(lowerTagName) && !stack[stackIndex]?.namespace && closeFormattingElement(stackIndex, rest)) {
+      const closesTop = stackIndex === stack.length - 1;
+      if (tag && !closesTop && stackIndex >= 0 && formattingElements.has(lowerTagName) && !stack[stackIndex]?.namespace && closeFormattingElement(stackIndex, rest)) {
         return lowerTagName;
       }
-      if (tag && !handler.partialMarkup && stackIndex >= 0 && isBehindSpecialElement(stackIndex)) {
+      if (tag && !closesTop && !handler.partialMarkup && stackIndex >= 0 && isBehindSpecialElement(stackIndex)) {
         endTagDropped = true;
         handler.strayEnd?.();
         return lowerTagName;

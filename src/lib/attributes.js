@@ -30,7 +30,8 @@ import {
   collapsibleValues,
   srcsetElements,
   RE_EMPTY_ATTRIBUTE,
-  RE_STYLE_ELEMENT
+  RE_STYLE_ELEMENT,
+  RE_STYLE_TAG
 } from './constants.js';
 import { trimWhitespace, collapseWhitespaceAll } from './whitespace.js';
 import { shouldMinifyInnerHTML } from './options.js';
@@ -210,17 +211,17 @@ function findSelectedAttributes(source) {
     return names;
   }
   // Scanned rather than matched, as a lazy pattern is quadratic on `style` tags left open
-  const sourceLower = source.toLowerCase();
-  let start = sourceLower.indexOf('<style');
-  while (start !== -1) {
-    const end = sourceLower.indexOf('</style', start);
-    if (end === -1) {
-      break;
+  let start = -1;
+  RE_STYLE_TAG.lastIndex = 0;
+  for (let match = RE_STYLE_TAG.exec(source); match; match = RE_STYLE_TAG.exec(source)) {
+    if (match[0][1] !== '/') {
+      if (start === -1) start = match.index;
+    } else if (start !== -1) {
+      for (const selector of source.slice(start, match.index).toLowerCase().matchAll(RE_ATTR_SELECTOR)) {
+        names.add(/** @type {string} */ (selector[1]));
+      }
+      start = -1;
     }
-    for (const match of sourceLower.slice(start, end).matchAll(RE_ATTR_SELECTOR)) {
-      names.add(/** @type {string} */ (match[1]));
-    }
-    start = sourceLower.indexOf('<style', end);
   }
   return names;
 }

@@ -8671,6 +8671,15 @@ describe('HTML', () => {
     assert.strictEqual(await minify('<style>a{color:red}</style><input type=text>', { removeRedundantAttributes: true }), '<style>a{color:red}</style><input>');
   });
 
+  test('Finds selected attributes in every `style` element, in any case, and nowhere else', async () => {
+    const options = { removeRedundantAttributes: true };
+
+    assert.strictEqual(await minify('<STYLE>input[TYPE=text]{color:red}</STYLE><input type=text>', options), '<style>input[TYPE=text]{color:red}</style><input type=text>');
+    assert.strictEqual(await minify('<style>a{color:red}</style><style>[type]{color:red}</style><input type=text>', options), '<style>a{color:red}</style><style>[type]{color:red}</style><input type=text>');
+    assert.strictEqual(await minify('<style>a{color:red}</style>[type]<style>b{color:red}</style><input type=text>', options), '<style>a{color:red}</style>[type]<style>b{color:red}</style><input>');
+    assert.strictEqual(await minify('</style>[type]<style>a{color:red}</style><input type=text>', options), '[type]<style>a{color:red}</style><input>');
+  });
+
   test('Removes only what is empty with `removeEmptyElements` and `removeOptionalTags` together', async () => {
     const options = { removeEmptyElements: true, removeOptionalTags: true };
 
