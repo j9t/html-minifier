@@ -519,14 +519,15 @@ const processOptions = (inputOptions, { getLightningCSS, getTerser, getSwc, getS
             const outputCSS = unwrapCSS(result.code.toString(), type);
 
             // Where Lightning CSS emptied template syntax (`<?php ?>`, `{{ }}`: `<` or `>` without
-            // `CDATA`) or custom-fragment UIDs (long lowercase alphanumeric runs), keep the
-            // original; CDATA sections, entities, and other invalid CSS may go
+            // `CDATA`), custom-fragment UIDs (long lowercase alphanumeric runs), or a media query
+            // (an invalid one matches nothing, an empty one everything), keep the original;
+            // CDATA sections, entities, and other invalid CSS may go
             const isCDATA = text.includes('<![CDATA[');
             const uidPattern = /[a-z0-9]{10,}/; // UIDs are long alphanumeric strings
             const hasUID = uidPattern.test(text) && !isCDATA; // Exclude CDATA from UID detection
             const looksLikeTemplate = (text.includes('<') || text.includes('>')) && !isCDATA;
 
-            const css = (text.trim() && !outputCSS.trim() && (looksLikeTemplate || hasUID)) ? text : outputCSS;
+            const css = (text.trim() && !outputCSS.trim() && (type === 'media' || looksLikeTemplate || hasUID)) ? text : outputCSS;
             return /** @type {CSSResult} */ ({ css, warnings });
           });
           report(resolved.warnings);

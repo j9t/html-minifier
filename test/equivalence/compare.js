@@ -19,11 +19,14 @@ const RE_JSON_TYPE = /^(?:application\/(?:[\w.-]+\+)?json|importmap|speculationr
 const RE_JS_COMMENTS = /<!--.*|-->.*|\/\/.*|\/\*[\s\S]*?\*\//g;
 const RE_LITERALS_ONLY = /^(?:\s|;|"[^"]*"|'[^']*'|`[^`]*`|\d)*$/;
 const RE_EMPTY_ATTRIBUTE = /^(?:class|dir|id|lang|style|title)$/;
+const RE_QUOTES_ONLY = /^["']+$/;
+const RE_CSS_URL = /(?:url\(\s*(?:"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)'|((?:[^\s)\\]|\\.)*))\s*\)|@import\s*(?:"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)'))/gi;
 
 // Marks a replaced element in rendered text
 const REPLACED = '￼';
 const SEPARATOR = '\u0001';
 const MAX_RESYNC = 64;
+const MAX_CSS_PASSES = 10;
 
 const words = (/** @type {string} */ names) => new Set(names.split(' '));
 
@@ -112,10 +115,28 @@ function normalizeCode(/** @type {string} */ kind, /** @type {string} */ code, /
 
 const normalizeJS = (/** @type {string} */ code, isHandler = false) => normalizeCode('js' + isHandler, code, () =>
   terser(code, { compress: false, format: { comments: false }, mangle: false, parse: { bare_returns: isHandler } }).code ?? '');
+
+// Lightning CSS can shorten its own output further, so one side is passes ahead of the other
+function untilStable(/** @type {string} */ code, /** @type {(text: string) => string} */ normalize) {
+  let result = code;
+  for (let pass = 0; pass < MAX_CSS_PASSES; pass++) {
+    const next = normalize(result);
+    if (next === result) break;
+    result = next;
+  }
+  return result;
+}
+
 const normalizeCSS = (/** @type {string} */ code) => normalizeCode('css', code, () =>
-  transform({ code: Buffer.from(code), errorRecovery: true, filename: 'a.css', minify: true }).code.toString());
+  untilStable(code, text => transform({ code: Buffer.from(text), errorRecovery: true, filename: 'a.css', minify: true }).code.toString()));
 const normalizeStyleAttribute = (/** @type {string} */ code) => normalizeCode('style', code, () =>
-  transformStyleAttribute({ code: Buffer.from(code), errorRecovery: true, filename: 'a', minify: true }).code.toString());
+  untilStable(code, text => transformStyleAttribute({ code: Buffer.from(text), errorRecovery: true, filename: 'a', minify: true }).code.toString()));
+
+// An invalid query normalizes to nothing, which leaves it to be compared as written
+function canonicalizeMedia(/** @type {string} */ value) {
+  const query = trim(value);
+  return (query && normalizeCSS(`@media ${query}{a{top:0}}`)) || query;
+}
 
 // Compress and mangle change code past comparing it, so what can then be said is that it parses
 const isJSComparable = (/** @type {any} */ options) => typeof options.minifyJS === 'object' && options.minifyJS.compress === false && options.minifyJS.mangle === false;
@@ -131,6 +152,16 @@ function canonicalizeUrl(/** @type {string} */ value, /** @type {any} */ options
     return trim(value);
   }
 }
+
+// Ahead of Lightning CSS, which may then merge rules with what are the same URLs
+const canonicalizeCSSUrls = (/** @type {string} */ css, /** @type {any} */ options) => options.minifyURLs
+  ? css.replace(RE_CSS_URL, (match, double, single, unquoted, importDouble, importSingle) => {
+    const url = double ?? single ?? unquoted ?? importDouble ?? importSingle ?? '';
+    if (/^data:/i.test(url)) return match;
+    const canonical = JSON.stringify(canonicalizeUrl(url.replace(/\\(.)/g, '$1'), options));
+    return match[0] === '@' ? `@import ${canonical}` : `url(${canonical})`;
+  })
+  : css;
 
 // Splits by the algorithm in the spec, closely enough to compare URLs and descriptors
 // https://html.spec.whatwg.org/multipage/images.html#parsing-a-srcset-attribute
@@ -189,6 +220,8 @@ function isRedundant(/** @type {any} */ node, /** @type {string} */ name, /** @t
 
 function isRemovedAttribute(/** @type {any} */ node, /** @type {string} */ name, /** @type {string} */ value, /** @type {any} */ options, /** @type {any} */ context) {
   const tag = node.tagName;
+  // What a stray closing quote leaves, which the parser drops and which does nothing
+  if (!value && RE_QUOTES_ONLY.test(name)) return true;
   if (context.selected.has(name)) return false;
   if (options.removeEmptyAttributes && (isWsOnly(value) || (name === 'style' && RE_VALUELESS_STYLE.test(trim(value)))) && (RE_EMPTY_ATTRIBUTE.test(name) || isEventAttribute(name) || (tag === 'input' && name === 'value'))) return true;
   if (options.removeRedundantAttributes && isRedundant(node, name, value, options, context)) return true;
@@ -225,7 +258,7 @@ function canonicalizeValue(/** @type {any} */ node, /** @type {string} */ name, 
   if (name === 'style') {
     const style = trim(value);
     if (!style || RE_VALUELESS_STYLE.test(style)) return '';
-    return options.minifyCSS ? normalizeStyleAttribute(style) : style.replace(/\s*;$/, ';');
+    return options.minifyCSS ? normalizeStyleAttribute(canonicalizeCSSUrls(style, options)) : style.replace(/\s*;$/, ';');
   }
   if (isEventAttribute(name)) {
     const code = trim(value).replace(/^javascript:\s*/i, '');
@@ -240,7 +273,7 @@ function canonicalizeValue(/** @type {any} */ node, /** @type {string} */ name, 
   if (tag === 'meta' && name === 'content' && /content-security-policy/i.test(attrValue(node, 'http-equiv') ?? '')) return value.replace(RE_WS_RUN, ' ');
   if (tag === 'script' && name === 'type') return trim(value.replace(/\s*;\s*/g, ';'));
   if (name === 'rel' && options.removeRedundantAttributes) return canonicalizeRel(tag, value);
-  if (name === 'media' && options.minifyCSS && ['link', 'meta', 'source', 'style'].includes(tag)) return trim(value).toLowerCase().replace(/\s+/g, '');
+  if (name === 'media' && ['link', 'meta', 'source', 'style'].includes(tag)) return options.minifyCSS ? canonicalizeMedia(value) : trim(value);
   if (tag === 'iframe' && name === 'srcdoc') return canonicalize(value, options, true).lines.join(SEPARATOR);
   return value;
 }
@@ -261,7 +294,7 @@ function canonicalizeRaw(/** @type {any} */ node, /** @type {string} */ text, /*
   const type = trim(attrValue(node, 'type') ?? '').toLowerCase();
   if (node.tagName === 'style') {
     if (!options.minifyCSS) return trim(text);
-    return options.removeUnusedCSS ? '«CSS»' : normalizeCSS(text);
+    return options.removeUnusedCSS ? '«CSS»' : normalizeCSS(canonicalizeCSSUrls(text, options));
   }
   if (RE_JSON_TYPE.test(type) && options.minifyJSON) {
     try {
@@ -473,6 +506,8 @@ function canonicalize(source, options, scripting) {
     if (parent === 'noscript' && scripting) return;
     // Markup to the user agents that read it, and minified as such
     if (parent === 'noembed' || parent === 'noframes') return;
+    // Browsers render no fallback content here
+    if (parent === 'iframe') return;
     if (parent === 'select' && isWsOnly(value)) return;
     if (parent === 'option') {
       // Browsers strip and collapse this for the label

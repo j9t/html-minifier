@@ -54,8 +54,9 @@ const singleAttrIdentifier = /([^\s"'<>/=]+)/;
 const singleAttrIdentifierLenient = /([^\s<>/=]+)/;
 const singleAttrAssigns = [/=/];
 const singleAttrValues = [
-  /"([^"]*)"+/.source,
-  /'([^']*)'+/.source,
+  // Repeated closing quotes go with the value, unless they run into a name, which they then start
+  /"([^"]*)"(?:"+(?![^\s/>]))?/.source,
+  /'([^']*)'(?:'+(?![^\s/>]))?/.source,
   // Attr value, no quotes (strict: excludes `=` per HTML spec)
   /([^ \t\n\f\r"'`=<>]+)/.source
 ];
@@ -130,6 +131,14 @@ const tablePartElements = new Set([...tableSectionElements, 'td', 'th', 'tr']);
 const formattingScopeBoundaries = new Set(['applet', 'caption', 'html', 'marquee', 'object', 'table', 'td', 'template', 'th']);
 // https://html.spec.whatwg.org/multipage/parsing.html#special
 const specialElements = new Set(['address', 'article', 'aside', 'blockquote', 'body', 'button', 'center', 'colgroup', 'dd', 'details', 'dir', 'div', 'dl', 'dt', 'fieldset', 'figcaption', 'figure', 'footer', 'form', 'frameset', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'head', 'header', 'hgroup', 'iframe', 'li', 'listing', 'main', 'menu', 'nav', 'noembed', 'noframes', 'noscript', 'ol', 'p', 'plaintext', 'pre', 'script', 'search', 'section', 'select', 'style', 'summary', 'tbody', 'textarea', 'tfoot', 'thead', 'title', 'tr', 'ul', 'xmp']);
+
+// End tags browsers ignore unless the element is in scope, which ends at the boundaries below, at
+// `button` for `p`, and at `ol` and `ul` for `li`. Cells and captions are left out, as they’re
+// only open within a `table` that ends the scope anyway, and `form`, whose end tag has an effect
+// even where it’s ignored.
+// https://html.spec.whatwg.org/multipage/parsing.html#parsing-main-inbody
+const scopedEndTagElements = new Set(['address', 'applet', 'article', 'aside', 'blockquote', 'button', 'center', 'dd', 'details', 'dialog', 'dir', 'div', 'dl', 'dt', 'fieldset', 'figcaption', 'figure', 'footer', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'header', 'hgroup', 'li', 'listing', 'main', 'marquee', 'menu', 'nav', 'object', 'ol', 'p', 'pre', 'search', 'section', 'summary', 'ul']);
+const endTagScopeBoundaries = new Set(['applet', 'html', 'marquee', 'object', 'table', 'template']);
 
 const isSpecialOrBoundary = (/** @type {string} */ lowerTag) => specialElements.has(lowerTag) || formattingScopeBoundaries.has(lowerTag);
 
@@ -891,6 +900,10 @@ export class HTMLParser {
       // Repeated closing quotes belong to the attribute, as in the attribute pattern
       let attrEnd = closeQuote + 1;
       while (fullHtml[attrEnd] === quoteChar) attrEnd++;
+      const codeAfter = fullHtml.charCodeAt(attrEnd);
+      if (attrEnd < fullLength && !isWhitespaceCode(codeAfter) && codeAfter !== 47 && codeAfter !== 62) {
+        attrEnd = closeQuote + 1;
+      }
       /** @type {Array<string | undefined>} */
       const attr = [];
       attr[0] = fullHtml.substring(attrPos, attrEnd);
@@ -1343,6 +1356,7 @@ export class HTMLParser {
     }
 
     // What a formatting element’s end tag meets among the elements open inside it
+    // @@ Reopen formatting on whitespace (`<p><a><div></div> <div>` should stay as is)
     function readFormattingScope(/** @type {number} */ stackIndex) {
       let hasSpecial = false;
       for (let i = stack.length - 1; i > stackIndex; i--) {
@@ -1448,7 +1462,28 @@ export class HTMLParser {
       if (stack[stackIndex]?.lowerTag === lowerTagName) {
         return stackIndex;
       }
-      return tablePartElements.has(lowerTagName) || lowerTagName === 'caption' ? findTagInCurrentTable(lowerTagName) : findTag(lowerTagName);
+      if (tablePartElements.has(lowerTagName) || lowerTagName === 'caption') {
+        return findTagInCurrentTable(lowerTagName);
+      }
+      const target = findTag(lowerTagName);
+      return target >= 0 && isOutOfScope(lowerTagName, target) ? -1 : target;
+    }
+
+    // @@ Close only `form` on `</form>` (`<form><div></form>x</div>y` should stay as is)
+    function isOutOfScope(/** @type {string} */ lowerTagName, /** @type {number} */ stackIndex) {
+      if (!scopedEndTagElements.has(lowerTagName) || stack[stackIndex]?.namespace) {
+        return false;
+      }
+      for (let i = stack.length - 1; i > stackIndex; i--) {
+        const entry = /** @type {NonNullable<(typeof stack)[number]>} */ (stack[i]);
+        if (entry.namespace) {
+          return false;
+        }
+        if (endTagScopeBoundaries.has(entry.lowerTag) || (lowerTagName === 'p' && entry.lowerTag === 'button') || (lowerTagName === 'li' && (entry.lowerTag === 'ol' || entry.lowerTag === 'ul'))) {
+          return true;
+        }
+      }
+      return false;
     }
 
     function parseEndTag(/** @type {string} */ tag, /** @type {string} */ tagName) {

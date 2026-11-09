@@ -21,7 +21,21 @@ describe('Equivalence', () => {
       ['<!-- a --><p>b', '<p>b', { removeComments: true }],
       ['<p>a <b>c</b></p>', '<p>a <b>c</b>', { removeOptionalTags: true }],
       ['<a title="a&amp;b">c</a>', '<a title=a&b>c</a>', { decodeEntities: true, removeAttributeQuotes: true }],
-      ['<!doctype html PUBLIC "-//W3C//DTD HTML 4.01//EN"><p>a', '<!doctype html><p>a', { useShortDoctype: true }]
+      ['<!doctype html PUBLIC "-//W3C//DTD HTML 4.01//EN"><p>a', '<!doctype html><p>a', { useShortDoctype: true }],
+      ['<p>a\n<div>b</div>\n<div>c</div>', '<p>a<div>b</div><div>c</div>', { collapseWhitespace: true }],
+      ['<p>a\n<div></div>\nb', '<p>a</p>b', { collapseWhitespace: true, removeEmptyElements: true }],
+      ['<style>:where(.a.b){gap:2em}:where(.a.c){gap:2em}w{g:}{}:where(.a.b){gap:2em}:where(.a.c){gap:2em}</style>', '<style>:where(.a.b),:where(.a.c){gap:2em}w{g:}:where(.a.b),:where(.a.c){gap:2em}</style>', { minifyCSS: true }],
+      ['<link rel="stylesheet" media=" (max-width: 768px) " href="a">', '<link rel="stylesheet" media="(width<=768px)" href="a">', { minifyCSS: true }],
+      ['<link rel="stylesheet" media="only screen and 8px)" href="a">', '<link rel="stylesheet" media=" only screen and 8px) " href="a">', { minifyCSS: true }],
+      ['<style>a{background:url(https://example.org/b.png)}</style>', '<style>a{background:url(//example.org/b.png)}</style>', { minifyCSS: true, minifyURLs: 'https://example.org/dir/page.html' }],
+      ['<p style="background:url(https://example.org/b.png)">a</p>', '<p style="background:url(//example.org/b.png)">a</p>', { minifyCSS: true, minifyURLs: 'https://example.org/dir/page.html' }],
+      ['<style>@import "https://example.org/b.css";</style>', '<style>@import "//example.org/b.css";</style>', { minifyCSS: true, minifyURLs: 'https://example.org/dir/page.html' }],
+      ['<style>a{background:url("")}</style>', '<style>a{background:url()}</style>', { minifyCSS: true, minifyURLs: 'https://example.org/dir/page.html' }],
+      ['<style>a{mask:url("data:image/svg+xml,<svg a=\\"b\\"/>")}</style>', '<style>a{mask:url(\'data:image/svg+xml,<svg a="b"/>\')}</style>', { minifyCSS: true, minifyURLs: 'https://example.org/dir/page.html' }],
+      ['<style>a{background:url(/b\\ c.png)}</style>', '<style>a{background:url(/b%20c.png)}</style>', { minifyCSS: true, minifyURLs: 'https://example.org/dir/page.html' }],
+      ['<link rel="stylesheet" media=" print " href="a">', '<link rel="stylesheet" media="print" href="a">', {}],
+      ['<a href="x"" id="y">b</a>', '<a href="x" id="y">b</a>', {}],
+      ['<iframe>a</noscript></body></html>', '<iframe>a</noscript>', {}]
     ]);
     for (const [input, output, options] of cases) {
       assert.deepStrictEqual(compareMarkup(input, output, options), [], input);
@@ -36,7 +50,13 @@ describe('Equivalence', () => {
       ['<a id=x name=y>b</a>', '<a id=x>b</a>', { removeRedundantAttributes: true }, 'tree'],
       ['<div>a</div>b', '<div>ab', {}, 'tree'],
       ['<table><tr><td>a<tr><td>b</table>', '<table><tr><td>a<td>b</table>', {}, 'tree'],
-      ['<a onclick="a(&quot;&amp;copy;&quot;)">b</a>', '<a onclick="a(&quot;&copy;&quot;)">b</a>', { minifyJS: { compress: false, mangle: false } }, 'tree']
+      ['<a onclick="a(&quot;&amp;copy;&quot;)">b</a>', '<a onclick="a(&quot;&copy;&quot;)">b</a>', { minifyJS: { compress: false, mangle: false } }, 'tree'],
+      ['<style>a{top:0}</style>', '<style>a{top:1px}</style>', { minifyCSS: true }, 'tree'],
+      ['<link rel="stylesheet" media="(max-width:768px)" href="a">', '<link rel="stylesheet" media="(max-width:769px)" href="a">', { minifyCSS: true }, 'tree'],
+      ['<link rel="stylesheet" media="(" href="a">', '<link rel="stylesheet" media="" href="a">', { minifyCSS: true }, 'tree'],
+      ['<style>a{background:url(https://example.org/b.png)}</style>', '<style>a{background:url(https://example.org/c.png)}</style>', { minifyCSS: true, minifyURLs: 'https://example.org/dir/page.html' }, 'tree'],
+      ['<style>a{background:url(http://example.org/b.png)}</style>', '<style>a{background:url(//example.org/b.png)}</style>', { minifyCSS: true, minifyURLs: 'https://example.org/dir/page.html' }, 'tree'],
+      ['<a "target="_blank">b</a>', '<a target="_blank">b</a>', {}, 'tree']
     ]);
     for (const [input, output, options, kind] of cases) {
       assert.strictEqual(compareMarkup(input, output, options)[0]?.kind, kind, input);

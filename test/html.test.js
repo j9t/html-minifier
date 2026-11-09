@@ -39,6 +39,8 @@ describe('HTML', () => {
     assert.strictEqual(await minify('<a title="x"href=" ">foo</a>'), '<a title="x" href="">foo</a>');
     assert.strictEqual(await minify('<p id=""class=""title="">x'), '<p id="" class="" title="">x');
     assert.strictEqual(await minify('<p x="x\'"">x</p>'), '<p x="x\'">x</p>', 'trailing quote should be ignored');
+    assert.strictEqual(await minify('<p x="y"" z>a</p>'), '<p x="y" z>a</p>', 'trailing quote before whitespace should be ignored');
+    assert.strictEqual(await minify('<br x="y""/>'), '<br x="y">', 'trailing quote before a slash should be ignored');
     assert.strictEqual(await minify('<a href="#"><p>Click me</p></a>'), '<a href="#"><p>Click me</p></a>');
     assert.strictEqual(await minify('<span><button>Hit me</button></span>'), '<span><button>Hit me</button></span>');
     assert.strictEqual(await minify('<object type="image/svg+xml" data="image.svg"><div>[fallback image]</div></object>'),
@@ -2302,6 +2304,63 @@ describe('HTML', () => {
     input = '<div id="keep"></div><span></span><p id="also-keep"></p>';
     output = '<div id="keep"></div><p id="also-keep"></p>';
     assert.strictEqual(await minify(input, { removeEmptyElements: true }), output);
+  });
+
+  test('Keeps closed what a removed element closed with `removeEmptyElements`', async () => {
+    const options = { removeEmptyElements: true };
+
+    assert.strictEqual(await minify('<p>a<div></div>b', options), '<p>a</p>b');
+    assert.strictEqual(await minify('<p>a<div><span></span></div>b', options), '<p>a</p>b');
+    assert.strictEqual(await minify('<li>a<li></li>b', options), '<li>a</li>b');
+    assert.strictEqual(await minify('<ul><li><p>a<li></li>b</ul>', options), '<ul><li><p>a</p></li>b</ul>');
+    assert.strictEqual(await minify('<p><span>a<div></div>b', options), '<p><span>a</span></p>b');
+
+    // Browsers reopen a formatting element after what closed it, which its end tag would prevent
+    assert.strictEqual(await minify('<p><b>a<div></div>c', options), '<p><b>a</p>c');
+
+    // An element removed itself needs no closing
+    assert.strictEqual(await minify('<p><div></div>b', options), 'b');
+
+    // Whether a `table` closes the `p` depends on the unknown mode, so its end tag can’t be written
+    assert.strictEqual(await minify('<p><table><tr><td>a</table><div></div>b', options), '<p><table><tr><td>a</table><div></div>b');
+
+    // Optional like any other end tag
+    assert.strictEqual(await minify('<p>a<div></div><div>b</div>', { ...options, removeOptionalTags: true }), '<p>a<div>b</div>');
+    assert.strictEqual(await minify('<p>a<div></div>b', { ...options, removeOptionalTags: true }), '<p>a</p>b');
+
+    // Except after a formatting element, which whitespace reopens around what comes next
+    assert.strictEqual(await minify('<p><a>b<div></div> <div>c', { ...options, removeOptionalTags: true }), '<p><a>b</p> <div>c');
+  });
+
+  test('Ignores end tags of elements that a scope boundary is open inside of', async () => {
+    assert.strictEqual(await minify('<li><ul></li></ul>x'), '<li><ul></ul>x');
+    assert.strictEqual(await minify('<li><ol></li></ol>x'), '<li><ol></ol>x');
+    assert.strictEqual(await minify('<li><table><tr><td></li></table>x'), '<li><table><tr><td></table>x');
+    assert.strictEqual(await minify('<li><marquee></li></marquee>x'), '<li><marquee></marquee>x');
+    assert.strictEqual(await minify('<dt><object></dt></object>x'), '<dt><object></object>x');
+    assert.strictEqual(await minify('<div><table></div></table>x'), '<div><table></table>x');
+    assert.strictEqual(await minify('<h1><table></h1></table>x'), '<h1><table></table>x');
+
+    // Only `p` stops at `button`, where its end tag then stands for an empty element
+    assert.strictEqual(await minify('<p><button></p>x</button>y'), '<p><button></p>x</button>y');
+    assert.strictEqual(await minify('<div><button></div>x</button>'), '<div><button></div>x');
+
+    // Browsers ignore cell start tags outside tables, so those end no scope
+    assert.strictEqual(await minify('<li><td></li>x'), '<li><td></li>x');
+
+    // `ol` and `ul` end the scope of `li` only
+    assert.strictEqual(await minify('<dd><ul></dd>x'), '<dd><ul></dd>x');
+    assert.strictEqual(await minify('<ul><li><ul><li>a</li></ul></li></ul>'), '<ul><li><ul><li>a</li></ul></li></ul>');
+  });
+
+  test('Reads quotes running into a name as the start of that name', async () => {
+    const options = { continueOnParseError: true, log() {} };
+
+    assert.strictEqual(await minify('<a href="x""target="_blank">y</a>', options), '<a href="x" "target="_blank">y</a>');
+    assert.strictEqual(await minify('<a href="x"""target="_blank">y</a>', options), '<a href="x" ""target="_blank">y</a>');
+    assert.strictEqual(await minify('<a href=\'x\'\'target="_blank">y</a>', options), '<a href=\'x\' \'target="_blank">y</a>');
+
+    await assert.rejects(minify('<a href="x""target="_blank">y</a>'), /Parse error/);
   });
 
   test('Removes elements left empty by removing empty elements', async () => {
@@ -8291,6 +8350,15 @@ describe('HTML', () => {
         await minify(`${padding}<a ${unquoted}>t</a>`, { continueOnParseError: true }),
         `${padding}<a ${unquoted}>t</a>`,
         `length ${length}`
+      );
+    }
+
+    // Unless the quotes run into a name, where they start it
+    for (const quote of ['"', '\'']) {
+      const value = 'a'.repeat(40000);
+      assert.strictEqual(
+        await minify(`${padding}<a href=${quote}${value}${quote}${quote}target="_blank">t</a>`, { continueOnParseError: true }),
+        `${padding}<a href=${quote}${value}${quote} ${quote}target="_blank">t</a>`
       );
     }
 
