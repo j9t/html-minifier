@@ -49,10 +49,14 @@ import { endlessRawTextElements, escapableRawTextElements, formattingElements, g
 
 // Regular expressions for parsing tags and attributes
 const singleAttrIdentifier = /([^\s"'<>/=]+)/;
+// Lenient attribute name pattern for `continueOnParseError`:
+// Quotes in names are parse errors that browsers keep in the name
+const singleAttrIdentifierLenient = /([^\s<>/=]+)/;
 const singleAttrAssigns = [/=/];
 const singleAttrValues = [
-  /"([^"]*)"+/.source,
-  /'([^']*)'+/.source,
+  // Repeated closing quotes go with the value, unless they run into a name, which they then start
+  /"([^"]*)"(?:"+(?![^\s/>]))?/.source,
+  /'([^']*)'(?:'+(?![^\s/>]))?/.source,
   // Attr value, no quotes (strict: excludes `=` per HTML spec)
   /([^ \t\n\f\r"'`=<>]+)/.source
 ];
@@ -62,6 +66,7 @@ const singleAttrValues = [
 const singleAttrValueLenientUnquoted = /([^ \t\n\f\r"'>]+)/.source;
 // The characters the lenient pattern takes in beyond the strict one, each a parse error
 const RE_UNQUOTED_VALUE_ERROR = /[<=`]/;
+const RE_ATTR_NAME_QUOTE = /["']/;
 // An attribute name and `=`, for reading a quoted value too long for the attribute pattern
 const RE_ATTR_NAME_ASSIGN = /^\s*([^\s"'<>/=]+)\s*=\s*/;
 // The rest of an unquoted value, strict and lenient, as one character class read in a single
@@ -81,8 +86,10 @@ const qnameCapture = (function () {
 const startTagOpen = new RegExp('^<' + qnameCapture);
 const endTagOpen = new RegExp('^</' + qnameCapture);
 
+const RE_COMMENT_END = /--!?>/g;
+
 // Empty elements
-const empty = new Set(['area', 'base', 'basefont', 'br', 'col', 'embed', 'frame', 'hr', 'img', 'input', 'isindex', 'keygen', 'link', 'meta', 'param', 'source', 'track', 'wbr']);
+const empty = new Set(['area', 'base', 'basefont', 'br', 'col', 'embed', 'frame', 'hr', 'img', 'input', 'keygen', 'link', 'meta', 'param', 'source', 'track', 'wbr']);
 
 // Elements that you can, intentionally, leave open (and which close themselves)
 const closeSelf = new Set(['colgroup', 'dd', 'dt', 'li', 'option', 'p', 'td', 'tfoot', 'th', 'thead', 'tr', 'source']);
@@ -114,6 +121,26 @@ const buttonScopeBoundaries = new Set(['applet', 'button', 'caption', 'html', 'm
 // ignored, like `td` outside a table)
 // https://html.spec.whatwg.org/multipage/parsing.html#parsing-main-inbody
 const closesP = new Set(['address', 'article', 'aside', 'blockquote', 'center', 'dd', 'details', 'dialog', 'dir', 'div', 'dl', 'dt', 'fieldset', 'figcaption', 'figure', 'footer', 'form', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'header', 'hgroup', 'hr', 'li', 'listing', 'main', 'menu', 'nav', 'ol', 'p', 'plaintext', 'pre', 'search', 'section', 'summary', 'table', 'ul', 'xmp']);
+
+const tableSectionElements = new Set(['tbody', 'tfoot', 'thead']);
+const tablePartElements = new Set([...tableSectionElements, 'td', 'th', 'tr']);
+
+// Elements that end the scope a formatting element’s end tag looks for it in,
+// and those that make it leave the elements inside it open
+// https://html.spec.whatwg.org/multipage/parsing.html#has-an-element-in-scope
+const formattingScopeBoundaries = new Set(['applet', 'caption', 'html', 'marquee', 'object', 'table', 'td', 'template', 'th']);
+// https://html.spec.whatwg.org/multipage/parsing.html#special
+const specialElements = new Set(['address', 'article', 'aside', 'blockquote', 'body', 'button', 'center', 'colgroup', 'dd', 'details', 'dir', 'div', 'dl', 'dt', 'fieldset', 'figcaption', 'figure', 'footer', 'form', 'frameset', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'head', 'header', 'hgroup', 'iframe', 'li', 'listing', 'main', 'menu', 'nav', 'noembed', 'noframes', 'noscript', 'ol', 'p', 'plaintext', 'pre', 'script', 'search', 'section', 'select', 'style', 'summary', 'tbody', 'textarea', 'tfoot', 'thead', 'title', 'tr', 'ul', 'xmp']);
+
+// End tags browsers ignore unless the element is in scope, which ends at the boundaries below, at
+// `button` for `p`, and at `ol` and `ul` for `li`. Cells and captions are left out, as they’re
+// only open within a `table` that ends the scope anyway, and `form`, whose end tag has an effect
+// even where it’s ignored.
+// https://html.spec.whatwg.org/multipage/parsing.html#parsing-main-inbody
+const scopedEndTagElements = new Set(['address', 'applet', 'article', 'aside', 'blockquote', 'button', 'center', 'dd', 'details', 'dialog', 'dir', 'div', 'dl', 'dt', 'fieldset', 'figcaption', 'figure', 'footer', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'header', 'hgroup', 'li', 'listing', 'main', 'marquee', 'menu', 'nav', 'object', 'ol', 'p', 'pre', 'search', 'section', 'summary', 'ul']);
+const endTagScopeBoundaries = new Set(['applet', 'html', 'marquee', 'object', 'table', 'template']);
+
+const isSpecialOrBoundary = (/** @type {string} */ lowerTag) => specialElements.has(lowerTag) || formattingScopeBoundaries.has(lowerTag);
 
 // A tag name ends at whitespace, a slash, or the closing bracket, so `</scriptx>` names a
 // different element and does not end this one
@@ -184,6 +211,9 @@ function findEndTagClose(text, nameEnd) {
  *   reaches, or `null` where no end tag of its own follows
  */
 function findRawTextEnd(text, tag) {
+  if (tag === 'script') {
+    return findScriptEnd(text);
+  }
   const nameEnd = tag.length + 2;
   for (let candidate = text.indexOf('</'); candidate !== -1; candidate = text.indexOf('</', candidate + 2)) {
     if (text.slice(candidate + 2, candidate + nameEnd).toLowerCase() !== tag || !endsTagName(text.charAt(candidate + nameEnd))) {
@@ -197,6 +227,48 @@ function findRawTextEnd(text, tag) {
   return null;
 }
 
+// What changes the state script content is read in; a tag name ends as in `endsTagName`,
+// and `--!>` is left out as it only ends comments, not these states
+const RE_SCRIPT_STATE = /<!--|-->|<\/?script(?=[\s/>])/gi;
+
+/**
+ * Browsers read `<!--` in a script as opening an escaped state, in which
+ * `<script` opens a double escaped one that an end tag only leaves again
+ * https://html.spec.whatwg.org/multipage/parsing.html#script-data-escaped-state
+ * @param {string} text - The input from the start of the content on
+ * @returns {{content: string, length: number} | null} What the element holds and how far it
+ *   reaches, or `null` where no end tag of its own follows
+ */
+function findScriptEnd(text) {
+  const DATA = 0;
+  const ESCAPED = 1;
+  const DOUBLE_ESCAPED = 2;
+  let state = DATA;
+  RE_SCRIPT_STATE.lastIndex = 0;
+  for (let match = RE_SCRIPT_STATE.exec(text); match; match = RE_SCRIPT_STATE.exec(text)) {
+    const token = match[0].toLowerCase();
+    if (token === '<!--') {
+      if (state === DATA) {
+        state = ESCAPED;
+        // The dashes can close what they open (`<!-->`)
+        RE_SCRIPT_STATE.lastIndex = match.index + 2;
+      }
+    } else if (token === '-->') {
+      state = DATA;
+    } else if (token === '<script') {
+      if (state === ESCAPED) {
+        state = DOUBLE_ESCAPED;
+      }
+    } else if (state === DOUBLE_ESCAPED) {
+      state = ESCAPED;
+    } else {
+      const end = findEndTagClose(text, match.index + token.length);
+      return end === -1 ? null : { content: text.slice(0, match.index), length: end + 1 };
+    }
+  }
+  return null;
+}
+
 // Cache for compiled attribute regexes per handler configuration
 const attrRegexCache = new WeakMap();
 
@@ -204,7 +276,8 @@ const attrRegexCache = new WeakMap();
 function buildAttrRegex(handler) {
   const unquotedValue = handler.continueOnParseError ? singleAttrValueLenientUnquoted : singleAttrValues[2];
   const attrValues = [singleAttrValues[0], singleAttrValues[1], unquotedValue];
-  let pattern = singleAttrIdentifier.source +
+  const attrName = handler.continueOnParseError ? singleAttrIdentifierLenient : singleAttrIdentifier;
+  let pattern = attrName.source +
     '(?:\\s*(' + joinSingleAttrAssigns(handler) + ')' +
     '[ \\t\\n\\f\\r]*(?:' + attrValues.join('|') + '))?';
   if (handler.customAttrSurround) {
@@ -280,7 +353,8 @@ export class HTMLParser {
     const fullLength = fullHtml.length;
 
     // `pScope` is the index of the `p` a start tag would close from within the entry, or -1
-    /** @type {Array<{tag: string, lowerTag: string, attrs: HTMLAttribute[], namespace: string, pScope: number}>} */
+    // A `table` entry’s `impliedRow` and `impliedSection` say what is open without a start tag
+    /** @type {Array<{tag: string, lowerTag: string, attrs: HTMLAttribute[], namespace: string, pScope: number, impliedRow?: boolean, impliedSection?: boolean}>} */
     const stack = [];
     /** @type {string} */
     let lastTag = '';
@@ -293,6 +367,10 @@ export class HTMLParser {
     /** @type {'' | 'quirks' | 'no-quirks'} */
     let docMode = '';
     let docModeSettable = true;
+    // Whether markup ended that, and whether a processing instruction came up: Unlike after text
+    // or such an instruction, which template code may be, a later doctype is sure to be ignored
+    let docStartsWithMarkup = false;
+    let docHasInstruction = false;
     // Open `p` elements a `table` started in while the mode was unknown
     /** @type {WeakSet<object>} */
     const pHoldingTable = new WeakSet();
@@ -376,7 +454,23 @@ export class HTMLParser {
       return { end: hasCloseAtOrAfter(p + 2) ? nextGtPos + 1 : fullLength, dropped };
     };
 
+    // Where the comment opened at `p` ends: `<!-->` and `<!--->` are empty comments,
+    // and besides `-->`, `--!>` ends one, too
+    // https://html.spec.whatwg.org/multipage/parsing.html#comment-end-bang-state
+    const matchCommentEnd = (/** @type {number} */ p) => {
+      const dataStart = p + 4;
+      if (fullHtml[dataStart] === '>') return { dataEnd: dataStart, end: dataStart + 1 };
+      if (fullHtml.startsWith('->', dataStart)) return { dataEnd: dataStart, end: dataStart + 2 };
+      RE_COMMENT_END.lastIndex = dataStart;
+      const match = RE_COMMENT_END.exec(fullHtml);
+      return match ? { dataEnd: match.index, end: match.index + match[0].length } : null;
+    };
+
     const advance = (/** @type {number} */ n) => { pos += n; };
+
+    // An end tag that is dropped leaves no tag for the whitespace around it to go by
+    let endTagDropped = false;
+    const endTagTokenOf = (/** @type {string} */ lowerTagName) => endTagDropped ? '' : '/' + lowerTagName;
 
     // Lazy line/column calculation—only compute on actual errors
     const getLineColumn = (/** @type {number} */ position) => {
@@ -505,7 +599,7 @@ export class HTMLParser {
       // Make sure not to be in an element whose content is text, not markup
       if (!lastTagLower || !topHoldsRawText()) {
         let textEnd = fullHtml.indexOf('<', pos);
-        if (textEnd !== -1 && lastTagLower && fullHtml.charCodeAt(textEnd + 1) === 33 && inForeignContent()) {
+        if (textEnd !== -1 && lastTagLower && fullHtml.charCodeAt(textEnd + 1) === 33 && (inForeignContent() || lastTagLower === 'svg' || lastTagLower === 'math')) {
           textEnd = skipCDATA(textEnd);
         }
 
@@ -527,7 +621,7 @@ export class HTMLParser {
             cachedNextStartTag = null;
             cachedNextEndTag = null;
             advance(endTagMatch.text.length);
-            prevTag = '/' + parseEndTag(endTagMatch.text, endTagMatch.name);
+            prevTag = endTagTokenOf(parseEndTag(endTagMatch.text, endTagMatch.name));
             prevAttrs = emptyAttrs;
             continue;
           }
@@ -542,15 +636,15 @@ export class HTMLParser {
           if (nextCode === 33) { // `!`
             commentTestY.lastIndex = pos;
             if (commentTestY.test(fullHtml)) {
-              const commentEnd = commentEndAhead ? fullHtml.indexOf('-->', pos + 4) : -1;
-              if (commentEnd === -1) commentEndAhead = false;
+              const comment = commentEndAhead ? matchCommentEnd(pos) : null;
+              if (!comment) commentEndAhead = false;
 
-              if (commentEnd >= 0) {
+              if (comment) {
                 if (handler.comment) {
-                  const result = handler.comment(fullHtml.substring(pos + 4, commentEnd));
+                  const result = handler.comment(fullHtml.substring(pos + 4, comment.dataEnd));
                   if (isThenable(result)) await result;
                 }
-                advance(commentEnd + 3 - pos);
+                advance(comment.end - pos);
                 prevTag = '';
                 prevAttrs = emptyAttrs;
                 continue;
@@ -578,12 +672,14 @@ export class HTMLParser {
             doctypeY.lastIndex = pos;
             const doctypeMatch = doctypeY.exec(fullHtml);
             if (doctypeMatch) {
-              if (docModeSettable) {
+              const setsMode = docModeSettable;
+              if (setsMode) {
                 docMode = handler.noQuirksMode || !isQuirksDoctype(doctypeMatch[0]) ? 'no-quirks' : 'quirks';
                 docModeSettable = false;
+                docStartsWithMarkup = true;
               }
               if (handler.doctype) {
-                handler.doctype(doctypeMatch[0], docMode === 'no-quirks');
+                handler.doctype(doctypeMatch[0], docMode === 'no-quirks', !setsMode && docStartsWithMarkup && !docHasInstruction);
               }
               advance(doctypeMatch[0].length);
               prevTag = '';
@@ -593,6 +689,7 @@ export class HTMLParser {
           } else if (nextCode === 63) { // `?`
             const processingInstructionEnd = matchProcessingInstruction(pos);
             if (processingInstructionEnd !== -1) {
+              docHasInstruction = true;
               if (handler.processingInstruction) {
                 handler.processingInstruction(fullHtml.substring(pos, processingInstructionEnd));
               }
@@ -622,7 +719,7 @@ export class HTMLParser {
               const endTagMatch = matchEndTag(pos);
               if (endTagMatch) {
                 advance(endTagMatch.text.length);
-                prevTag = '/' + parseEndTag(endTagMatch.text, endTagMatch.name);
+                prevTag = endTagTokenOf(parseEndTag(endTagMatch.text, endTagMatch.name));
                 prevAttrs = emptyAttrs;
                 continue;
               }
@@ -698,7 +795,7 @@ export class HTMLParser {
           } else if (nextCode === 47 && hasCloseAtOrAfter(pos)) {
             const nextEndTagMatch = matchEndTag(pos);
             if (nextEndTagMatch) {
-              nextTag = '/' + nextEndTagMatch.name.toLowerCase();
+              nextTag = isDroppedEndTag(nextEndTagMatch.name.toLowerCase()) ? '' : '/' + nextEndTagMatch.name.toLowerCase();
               nextAttrs = emptyAttrs;
               cachedNextEndTag = { match: nextEndTagMatch, pos };
             } else {
@@ -803,6 +900,10 @@ export class HTMLParser {
       // Repeated closing quotes belong to the attribute, as in the attribute pattern
       let attrEnd = closeQuote + 1;
       while (fullHtml[attrEnd] === quoteChar) attrEnd++;
+      const codeAfter = fullHtml.charCodeAt(attrEnd);
+      if (attrEnd < fullLength && !isWhitespaceCode(codeAfter) && codeAfter !== 47 && codeAfter !== 62) {
+        attrEnd = closeQuote + 1;
+      }
       /** @type {Array<string | undefined>} */
       const attr = [];
       attr[0] = fullHtml.substring(attrPos, attrEnd);
@@ -1015,6 +1116,26 @@ export class HTMLParser {
       return false;
     }
 
+    function closeCellInCurrentTable() {
+      return closeIfFoundInCurrentTable('td') || closeIfFoundInCurrentTable('th');
+    }
+
+    // Browsers open a row for a cell and a section for a row where the source has no start tag
+    // for them, and those stay open until an end tag or the next row or section closes them
+    function noteImpliedTableParts(/** @type {string} */ lowerTagName) {
+      const table = stack[findTagInCurrentTable('table')];
+      if (!table) {
+        return;
+      }
+      if (lowerTagName === 'tbody' || lowerTagName === 'tfoot' || lowerTagName === 'thead') {
+        table.impliedRow = false;
+        table.impliedSection = false;
+        return;
+      }
+      table.impliedRow = lowerTagName !== 'tr' && (table.impliedRow || findTagInCurrentTable('tr') < 0);
+      table.impliedSection = findTagInCurrentTable('tbody') < 0 && findTagInCurrentTable('tfoot') < 0 && findTagInCurrentTable('thead') < 0;
+    }
+
     // The lenient attribute pattern takes characters into unquoted values that the strict
     // one rejects; the start tag has just been consumed, so it ends right before `pos`
     function reportUnquotedValueErrors(/** @type {{attrs: Array<Array<string | undefined>>, advance: number}} */ match) {
@@ -1023,6 +1144,11 @@ export class HTMLParser {
         const text = attr[0] ?? '';
         attrPos = fullHtml.indexOf(text, attrPos);
         const surroundCount = handler.customAttrSurround ? handler.customAttrSurround.length : 0;
+        const attrName = attr[baseIndex] ?? '';
+        const nameQuote = attrName.includes('"') || attrName.includes("'") ? attrName.search(RE_ATTR_NAME_QUOTE) : -1;
+        if (nameQuote !== -1) {
+          reportParseError(attrPos + text.indexOf(attrName) + nameQuote, `Kept \`${attrName[nameQuote]}\` in attribute name`);
+        }
         for (let i = 0; i <= surroundCount; i++) {
           // Unquoted values sit at index 5 of each surround block, and 4 behind the plain name
           const value = i < surroundCount ? attr[1 + i * NCP + 5] : attr[1 + surroundCount * NCP + 4];
@@ -1042,6 +1168,7 @@ export class HTMLParser {
       const lowerTagName = match.lowerTagName;
       let unarySlash = match.unarySlash;
 
+      docStartsWithMarkup ||= docModeSettable;
       docModeSettable = false;
       if (handler.parseError) reportUnquotedValueErrors(match);
       // A plain loop, so a tag costs no closure allocation per attribute
@@ -1111,11 +1238,18 @@ export class HTMLParser {
       // A row or cell start tag closes the row or cell still open in the same table,
       // which may sit deeper down the stack than the element that was opened last
       if (lowerTagName === 'tr') {
-        closeIfFoundInCurrentTable('tr');
-      } else if (lowerTagName === 'td' || lowerTagName === 'th') {
-        if (!closeIfFoundInCurrentTable('td')) {
-          closeIfFoundInCurrentTable('th');
+        if (!closeIfFoundInCurrentTable('tr')) {
+          closeCellInCurrentTable();
         }
+      } else if (lowerTagName === 'td' || lowerTagName === 'th') {
+        closeCellInCurrentTable();
+      } else if (lowerTagName === 'tbody' || lowerTagName === 'tfoot' || lowerTagName === 'thead') {
+        if (!closeIfFoundInCurrentTable('tr')) {
+          closeCellInCurrentTable();
+        }
+      }
+      if (tablePartElements.has(lowerTagName)) {
+        noteImpliedTableParts(lowerTagName);
       }
       if (lowerTagName === 'tbody') {
         if (!closeIfFoundInCurrentTable('tfoot')) {
@@ -1171,7 +1305,9 @@ export class HTMLParser {
 
       // The name is returned so the parse loop can skip lowercasing it again
       const started = handler.start?.(tagName, attrs, unary, unarySlash);
-      return isThenable(started) ? started.then(() => lowerTagName) : lowerTagName;
+      // What a slash closes reads as ended to the whitespace logic
+      const token = selfClosed ? '/' + lowerTagName : lowerTagName;
+      return isThenable(started) ? started.then(() => token) : token;
     }
 
     // Pushes an open element, noting the `p` in scope from within it: its own index
@@ -1179,7 +1315,8 @@ export class HTMLParser {
     // holds text with scripting), and otherwise its parent’s; returns the namespace it sits in
     function pushOpenElement(/** @type {string} */ tag, /** @type {string} */ lowerTag, /** @type {HTMLAttribute[]} */ attrs) {
       const parent = stack.length ? stack[stack.length - 1] : undefined;
-      const namespace = namespaceInside(parent);
+      // An `svg` start tag leads out of MathML from `annotation-xml`, as it does from HTML
+      const namespace = lowerTag === 'svg' && parent?.lowerTag === 'annotation-xml' ? '' : namespaceInside(parent);
       let pScope = -1;
       if (!namespace) {
         if (lowerTag === 'p') {
@@ -1218,8 +1355,141 @@ export class HTMLParser {
       parseEndTagAt(stackIndex, false);
     }
 
+    // What a formatting element’s end tag meets among the elements open inside it
+    // @@ Reopen formatting on whitespace (`<p><a><div></div> <div>` should stay as is)
+    function readFormattingScope(/** @type {number} */ stackIndex) {
+      let hasSpecial = false;
+      for (let i = stack.length - 1; i > stackIndex; i--) {
+        const entry = /** @type {NonNullable<(typeof stack)[number]>} */ (stack[i]);
+        if (entry.namespace) {
+          return 'foreign';
+        }
+        if (formattingScopeBoundaries.has(entry.lowerTag)) {
+          return 'boundary';
+        }
+        hasSpecial ||= specialElements.has(entry.lowerTag);
+      }
+      return hasSpecial ? 'special' : '';
+    }
+
+    // A formatting element’s end tag leaves open the first special element in it, and is ignored
+    // from beyond a scope boundary; returns whether either applied, or `false` to close as usual
+    // https://html.spec.whatwg.org/multipage/parsing.html#adoption-agency-algorithm
+    function closeFormattingElement(/** @type {number} */ stackIndex, /** @type {string} */ rest) {
+      const scope = readFormattingScope(stackIndex);
+      if (scope === 'boundary') {
+        endTagDropped = true;
+        handler.strayEnd?.();
+        return true;
+      }
+      if (scope !== 'special') {
+        return false;
+      }
+      const entry = /** @type {NonNullable<(typeof stack)[number]>} */ (stack[stackIndex]);
+      handler.end?.(entry.tag, entry.attrs, false, rest);
+      stack.splice(stackIndex, 1);
+      for (let i = stackIndex; i < stack.length; i++) {
+        const above = /** @type {NonNullable<(typeof stack)[number]>} */ (stack[i]);
+        if (above.pScope > stackIndex) {
+          above.pScope--;
+        }
+      }
+      stackVersion++;
+      return true;
+    }
+
+    // Browsers ignore the end tag of an ordinary element with a special one open inside it
+    function isBehindSpecialElement(/** @type {number} */ stackIndex) {
+      const target = /** @type {NonNullable<(typeof stack)[number]>} */ (stack[stackIndex]);
+      // `dialog` isn’t special, but its end tag closes what is open in it nevertheless
+      if (target.namespace || isSpecialOrBoundary(target.lowerTag) || formattingElements.has(target.lowerTag) || tablePartElements.has(target.lowerTag) || ['dialog', 'math', 'svg'].includes(target.lowerTag)) {
+        return false;
+      }
+      for (let i = stack.length - 1; i > stackIndex; i--) {
+        const entry = /** @type {NonNullable<(typeof stack)[number]>} */ (stack[i]);
+        if (entry.namespace) {
+          return false;
+        }
+        if (isSpecialOrBoundary(entry.lowerTag)) {
+          return true;
+        }
+      }
+      return false;
+    }
+
+    // An end tag for a row or section whose start tag is implied by the cell or row open in it;
+    // closes what is open within it (returning whether there is such a part)
+    function closeImpliedTablePart(/** @type {string} */ lowerTagName) {
+      if (!isImpliedTablePart(lowerTagName)) {
+        return false;
+      }
+      const table = /** @type {NonNullable<(typeof stack)[number]>} */ (stack[findTagInCurrentTable('table')]);
+      if (lowerTagName === 'tr') {
+        closeCellInCurrentTable();
+      } else {
+        if (!closeIfFoundInCurrentTable('tr')) {
+          closeCellInCurrentTable();
+        }
+        table.impliedSection = false;
+      }
+      table.impliedRow = false;
+      return true;
+    }
+
+    function isImpliedTablePart(/** @type {string} */ lowerTagName) {
+      const table = stack[findTagInCurrentTable('table')];
+      return lowerTagName === 'tr' ? Boolean(table?.impliedRow) : tableSectionElements.has(lowerTagName) && Boolean(table?.impliedSection);
+    }
+
+    // Whether `parseEndTag` would drop this end tag, for the look-ahead
+    function isDroppedEndTag(/** @type {string} */ lowerTagName) {
+      const stackIndex = findEndTagTarget(lowerTagName);
+      if (stackIndex >= 0) {
+        if (stackIndex === stack.length - 1) {
+          return false;
+        }
+        if (formattingElements.has(lowerTagName) && !stack[stackIndex]?.namespace && readFormattingScope(stackIndex) === 'boundary') {
+          return true;
+        }
+        return isBehindSpecialElement(stackIndex);
+      }
+      return !handler.partialMarkup && !formattingElements.has(lowerTagName) && lowerTagName !== 'br' && lowerTagName !== 'p' && !isImpliedTablePart(lowerTagName);
+    }
+
+    // Table parts end within their own table only
+    function findEndTagTarget(/** @type {string} */ lowerTagName) {
+      const stackIndex = stack.length - 1;
+      if (stack[stackIndex]?.lowerTag === lowerTagName) {
+        return stackIndex;
+      }
+      if (tablePartElements.has(lowerTagName) || lowerTagName === 'caption') {
+        return findTagInCurrentTable(lowerTagName);
+      }
+      const target = findTag(lowerTagName);
+      return target >= 0 && isOutOfScope(lowerTagName, target) ? -1 : target;
+    }
+
+    // @@ Close only `form` on `</form>` (`<form><div></form>x</div>y` should stay as is)
+    function isOutOfScope(/** @type {string} */ lowerTagName, /** @type {number} */ stackIndex) {
+      if (!scopedEndTagElements.has(lowerTagName) || stack[stackIndex]?.namespace) {
+        return false;
+      }
+      for (let i = stack.length - 1; i > stackIndex; i--) {
+        const entry = /** @type {NonNullable<(typeof stack)[number]>} */ (stack[i]);
+        if (entry.namespace) {
+          return false;
+        }
+        if (endTagScopeBoundaries.has(entry.lowerTag) || (lowerTagName === 'p' && entry.lowerTag === 'button') || (lowerTagName === 'li' && (entry.lowerTag === 'ol' || entry.lowerTag === 'ul'))) {
+          return true;
+        }
+      }
+      return false;
+    }
+
     function parseEndTag(/** @type {string} */ tag, /** @type {string} */ tagName) {
+      docStartsWithMarkup ||= docModeSettable;
       docModeSettable = false;
+      endTagDropped = false;
       let stackIndex;
       const lowerTagName = tagName ? tagName.toLowerCase() : '';
 
@@ -1230,13 +1500,23 @@ export class HTMLParser {
 
       // Find the closest opened tag of the same type
       if (tagName) {
-        stackIndex = findTag(lowerTagName);
+        stackIndex = tag ? findEndTagTarget(lowerTagName) : findTag(lowerTagName);
       } else { // If no tag name is provided, clean shop
         stackIndex = 0;
       }
 
       // Whatever follows the name, which browsers drop but a custom fragment may stand in for
       const rest = tag.length > tagName.length + 3 ? tag.slice(tagName.length + 2, -1) : '';
+
+      const closesTop = stackIndex === stack.length - 1;
+      if (tag && !closesTop && stackIndex >= 0 && formattingElements.has(lowerTagName) && !stack[stackIndex]?.namespace && closeFormattingElement(stackIndex, rest)) {
+        return lowerTagName;
+      }
+      if (tag && !closesTop && stackIndex >= 0 && isBehindSpecialElement(stackIndex)) {
+        endTagDropped = true;
+        handler.strayEnd?.();
+        return lowerTagName;
+      }
 
       if (stackIndex >= 0) {
         // Close all the open elements, up the stack
@@ -1256,6 +1536,10 @@ export class HTMLParser {
         if (handler.end) {
           handler.end(tagName, [], false, rest);
         }
+      } else if (tag && closeImpliedTablePart(lowerTagName)) {
+        if (handler.end) {
+          handler.end(tagName, [], false, rest);
+        }
       } else if (lowerTagName === 'br') {
         if (handler.start) {
           handler.start(tagName, [], true, '');
@@ -1267,9 +1551,10 @@ export class HTMLParser {
         if (handler.end) {
           handler.end(tagName, []);
         }
-      } else if (handler.strayEnd) {
+      } else {
         // An end tag with nothing to close is dropped
-        handler.strayEnd();
+        endTagDropped = Boolean(tag);
+        handler.strayEnd?.();
       }
       // Returned so the parse loop can skip lowercasing the name again
       return lowerTagName;

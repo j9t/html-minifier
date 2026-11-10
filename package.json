@@ -19,6 +19,7 @@
     "@types/node": "^26.6.6",
     "eslint": "^10.14.0",
     "globals": "^17.14.0",
+    "parse5": "^8.1.1",
     "typescript": "^7.0.2",
     "vite": "^8.3.6"
   },
@@ -88,10 +89,11 @@
     "prepare": "git config core.hooksPath .githooks || true",
     "serve": "vite",
     "test": "npm run test:types && node --test \"test/**/*.test.js\" \"backtest/*.test.js\"",
+    "test:equivalence": "node test/equivalence/corpus.js",
     "test:types": "tsc --noEmit && tsc --project tsconfig.test.json",
     "test:watch": "node --test --watch \"test/**/*.test.js\" \"backtest/*.test.js\""
   },
   "type": "module",
   "types": "dist/types/htmlminifier.d.ts",
-  "version": "5.0.2"
+  "version": "5.0.3"
 }

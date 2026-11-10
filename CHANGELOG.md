@@ -4,7 +4,44 @@ As of version 5.0.0, all notable changes to HTML Minifier (HM) are documented in
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [5.0.3] - 2026-11-10
+
+### Fixed
+
+* Fixed `mergeScripts` joining scripts with only a newline after a last line holding `//` (as in a URL), which made the next script a call where it starts with `(` or `[` (e.g., `a="https://b"` before `(c)()`)
+* Fixed `collapseWhitespace` removing spaces that render:
+  - after an inline element holding only an image, SVG, or other replaced content (e.g., `<a><img></a> text`)
+  - within `bdi`, `bdo`, `cite`, `code`, `dfn`, `label`, `q`, and `ruby` elements next to text (e.g., `a<code> b</code>`)
+  - after self-closed `svg` and `math` elements, after a no-break space, around end tags that get dropped, and before removed comments next to text
+* Fixed scripts holding `<!-- <script>…</script> -->`, which browsers end only at a later `</script>`: The real end tag was dropped, which made the rest of the document script text
+* Fixed `removeEmptyElements` with `removeOptionalTags` mishandling what surrounds removed elements:
+  - deleting the element before an empty `body` (e.g., a `script` or `title`)
+  - leaving a tag omitted because of an element that then got removed (e.g., `<a><p>b</p><footer></footer></a>` lost `</p>`, and without a `body` start tag before a removed element, a following `script` moved to the `head`)
+* Fixed `removeEmptyElements` removing an element that closes another one with no end tag, which moved what follows into that other element (e.g., `<p>a<div></div>b` became `<p>ab`)
+* Fixed `removeEmptyElements` removing empty `html`, `head`, and `body` elements with attributes, which browsers don’t recreate (e.g., `<body class="a"></body>`), and `frameset` elements, without which browsers render what follows
+* Fixed `removeRedundantAttributes`, `removeDefaultTypeAttributes`, and `removeEmptyAttributes` removing attributes that a `style` element in the document selects on (e.g., `type` given `input[type=text]`)
+* Fixed `removeRedundantAttributes` removing `name` from `a` elements with a different `id`, which broke links to the name
+* Fixed `collapseWhitespace` removing a trailing newline from `textarea` elements, which is part of their value
+* Fixed comments not ending at `--!>`, and `<!-->` and `<!--->` not being read as empty comments—with `removeComments`, content up to the next `-->` was deleted
+* Fixed end tags browsers read differently from the parser, which moved or merged content:
+  - `</tr>` and `</tbody>` closing rows and sections that only have implied start tags were dropped, merging table rows
+  - `tr` and section start tags didn’t close an implied cell, which `removeEmptyElements` saw as emptying the row
+  - End tags of table parts reached outside their own table
+  - End tags of formatting elements closed block elements inside them (e.g., `<a><div></a>x</div>`), and weren’t ignored from within a table when the element is outside it
+  - End tags of ordinary elements weren’t ignored with a block element open inside them (e.g., `<span><div></span>x</div>`)
+  - End tags weren’t ignored with an element open inside that ends their scope, such as a `table` or, for `li`, a list (e.g., `<li><ul></li></ul>x` lost `</ul>`)
+* Fixed whitespace handling and `removeEmptyElements` losing track of what is open after the end tag of a formatting element with a block element open inside it (e.g., `<pre><b><p></b>a</p></pre>` kept whitespace after it, and `<b><p></b></p>x` lost `</b>`)
+* Fixed whitespace being collapsed within doctype identifiers, which changed them and could change the document mode (e.g., `PUBLIC "a  b"`)
+* Fixed doctypes that browsers ignore after a tag or another doctype staying in the output, where `removeOptionalTags` could leave one first and have it set the document mode (e.g., `<body></body><!doctype html>`)
+* Fixed `removeOptionalTags` omitting the `body` start tag before `base`, `basefont`, `bgsound`, `noframes`, and `title` elements, which moved them to the `head`
+* Fixed `minifyCSS` emptying invalid `media` queries, which made the style sheet apply (e.g., `media="only screen and 8px)"`)
+* Fixed quotes running into an attribute name being dropped with the value before them, which turned `<a href="x""target="_blank">` into a real `target` attribute—such a tag is now a parse error, and with `continueOnParseError` keeps its `"target` attribute
+* Fixed `continueOnParseError` turning tags with quotes in attribute names into text (e.g., `<img alt="a "b" c">`, with `decodeEntities`, became `&lt;img…`)
+* Fixed CDATA sections directly in `svg` and `math` elements being read as comments, `svg` elements in `annotation-xml` being read as MathML, and `isindex` being read as a void element
+
+### Added
+
+* Added a development-only check that minified output means the same to browsers as its source: `npm test` compares parse5 trees and rendered whitespace across option combinations, generated markup, and html5lib’s parser tests, and `npm run test:equivalence` does so for the real-world corpus
 
 ### Changed
 

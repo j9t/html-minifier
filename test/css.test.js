@@ -142,6 +142,16 @@ describe('CSS', () => {
     assert.ok(result.includes('screen'), 'Media type should be preserved');
   });
 
+  test('Keeps invalid media queries, which an empty value would turn into matching everything', async () => {
+    for (const query of ['only screen and 8px)', '(', '(max-width: 8px), )']) {
+      assert.strictEqual(await minify(`<link rel="stylesheet" media="${query}" href="a">`, { minifyCSS: true }), `<link rel="stylesheet" media="${query}" href="a">`);
+      assert.strictEqual(await minify(`<style media="${query}">a{top:0}</style>`, { minifyCSS: true }), `<style media="${query}">a{top:0}</style>`);
+    }
+
+    // Trimmed all the same
+    assert.strictEqual(await minify('<link rel="stylesheet" media=" ( " href="a">', { minifyCSS: true }), '<link rel="stylesheet" media="(" href="a">');
+  });
+
   test('Removes invalid and empty CSS in `style` attributes', async () => {
     let input, output;
 

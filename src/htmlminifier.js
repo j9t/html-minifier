@@ -17,7 +17,10 @@ import {
   RE_WS_ONLY,
   RE_WS_NBSP_END,
   RE_STYLE_ELEMENT,
+  RE_ENDS_COLLAPSIBLE,
+  RE_DOCTYPE_SEGMENT,
   formattingElements,
+  inlineElementsToKeepWhitespace,
   inlineElementsToKeepWhitespaceAround,
   inlineElementsToKeepWhitespaceWithin,
   inlineElementsTransparent,
@@ -826,13 +829,13 @@ function mergeConsecutiveScripts(html, hasMathML = false) {
       }
       if (boolConflict || a1.nonce !== a2.nonce || (!mergedAny && insideMath(m1.index))) break;
 
-      // Join with a semicolon, or with a newline where the first ends in a `//` comment
+      // Join with a semicolon, after a newline where the first may end in a `//` comment
       const content2 = html.slice(tagEnd2 + 1, close2.index);
       const c1 = mergedContent.trim();
       const c2 = content2.trim();
       if (c1 && c2) {
         const lastLine = c1.slice(c1.lastIndexOf('\n') + 1);
-        const separator = lastLine.includes('//') ? '\n' : (c1.endsWith(';') ? '' : ';');
+        const separator = lastLine.includes('//') ? '\n;' : (c1.endsWith(';') ? '' : ';');
         mergedContent = c1 + separator + c2;
       } else {
         mergedContent = c1 || c2;
@@ -1124,8 +1127,12 @@ async function minifyHTML(value, options, partialMarkup) {
   // Open elements under `removeEmptyElements`, so an element whose content
   // went is removed, too: where its start tag sits in `buffer`, and whether
   // anything kept went in since
-  /** @type {Array<{tag: string, index: number, empty: boolean}>} */
+  /** @type {Array<{tag: string, index: number, empty: boolean, omittedStartTag?: {tag: string, text: string} | undefined, omittedEndTag?: {tag: string, text: string} | undefined, impliedEnds?: Array<{tag: string, text: string}> | undefined}>} */
   const openElements = [];
+  // End tags not written, for the start tag that comes next (`text` is empty where one can’t be)
+  /** @type {Array<{tag: string, text: string}>} */
+  let impliedEnds = [];
+  let impliedEndsIndex = -1;
   // Under `selfCloseForeignElements`, the open `svg` and `math` elements and the integration points
   // in them, whose children are HTML, which a slash does not close
   /** @type {string[]} */
@@ -1149,7 +1156,7 @@ async function minifyHTML(value, options, partialMarkup) {
   const stackNoTrimWhitespace = [];
   /** @type {string[]} */
   const stackNoCollapseWhitespace = [];
-  let preTextareaDepth = 0; // Count of `pre`/`textarea` entries in `stackNoTrimWhitespace`
+  let preDepth = 0; // Count of `pre` entries in `stackNoTrimWhitespace`
   // Where the last element whose whitespace may not be trimmed ended in `buffer`;
   // what lies up to there stays as written, also where `canTrimWhitespace` decides
   // by attributes the trim walk lacks
@@ -1503,8 +1510,11 @@ async function minifyHTML(value, options, partialMarkup) {
     return index;
   }
 
-  function removeStartTag() {
-    bufferTruncate(lastStartTagIndex());
+  function removeStartTag(/** @type {boolean} */ capture = false) {
+    const index = lastStartTagIndex();
+    const text = capture ? buffer.slice(index).join('') : undefined;
+    bufferTruncate(index);
+    return text;
   }
 
   // Write the last start tag as self-closing, where it is the last thing written and holds no
@@ -1547,6 +1557,26 @@ async function minifyHTML(value, options, partialMarkup) {
     }
     const scope = foreignScopes[foreignScopes.length - 1];
     return lowerTag === 'svg' || lowerTag === 'math' || scope === undefined || scope === 'svg' || scope === 'math';
+  }
+
+  // Browsers can close a formatting element with others left open inside it;
+  // any other end tag that doesn’t match the top entry of a stack is stray
+  function canCloseBelowTop(/** @type {string} */ tag, /** @type {string} */ lowerTag) {
+    return formattingElements.has((lowerTag || tag).toLowerCase());
+  }
+
+  // Returns whether `tag` was open
+  function removeClosedTag(/** @type {string[]} */ tags, /** @type {string} */ tag, /** @type {string} */ lowerTag) {
+    if (tags[tags.length - 1] === tag) {
+      tags.pop();
+      return true;
+    }
+    const index = canCloseBelowTop(tag, lowerTag) ? tags.lastIndexOf(tag) : -1;
+    if (index === -1) {
+      return false;
+    }
+    tags.splice(index, 1);
+    return true;
   }
 
   function markOpenElementFilled() {
@@ -1596,11 +1626,12 @@ async function minifyHTML(value, options, partialMarkup) {
     while (index > 0 && !RE_END_TAG.test(buffer[index] ?? '')) {
       index--;
     }
+    const text = buffer[index] ?? '';
     // Text that follows the end tag is kept as is, so drop the tag alone. Whitespace kept
     // verbatim—in `pre`, in `textarea`, or wherever `canTrimWhitespace` says so—counts as
     // kept text too, no matter how whitespace is collapsed elsewhere.
     const noTrim = insideNoTrim || stackNoTrimWhitespace.length > 0;
-    if (index < buffer.length - 1 && (keepsWhitespace() || noTrim) && RE_END_TAG.test(buffer[index] ?? '')) {
+    if (index < buffer.length - 1 && (keepsWhitespace() || noTrim) && RE_END_TAG.test(text)) {
       buffer.splice(index, 1);
       bufferTags?.splice(index, 1);
       // Collapsed whitespace can merge, kept whitespace can leave a line of only whitespace
@@ -1611,9 +1642,10 @@ async function minifyHTML(value, options, partialMarkup) {
           removeWhitespaceLine(index);
         }
       }
-      return;
+      return text;
     }
     bufferTruncate(index);
+    return text;
   }
 
   // Look for trailing whitespace, bypassing inline tags
@@ -1775,11 +1807,11 @@ async function minifyHTML(value, options, partialMarkup) {
 
   // Whitespace collapsing phase (sync)
   function charsCollapse(/** @type {string} */ text) {
-    // Trim a single trailing newline inside `pre`/`textarea`, often a template engine artifact
-    // (several are likely intentional formatting)
+    // Trim a single trailing newline inside `pre`, often a template engine artifact (several are
+    // likely intentional formatting); in `textarea`, it is part of the value
     if (options.collapseWhitespace && stackNoTrimWhitespace.length) {
       const topTag = stackNoTrimWhitespace[stackNoTrimWhitespace.length - 1];
-      if (preTextareaDepth > 0) {
+      if (preDepth > 0 && topTag?.toLowerCase() !== 'textarea') {
         // Treat CRLF (`\r\n`), CR (`\r`), and LF (`\n`) as single line-ending units
         if (textNextTag && textNextTag === '/' + topTag && /[^\r\n](?:\r\n|\r|\n)[ \t]*$/.test(text)) {
           text = text.replace(RE_LINE_BREAK_BLANKS_END, '');
@@ -1803,6 +1835,10 @@ async function minifyHTML(value, options, partialMarkup) {
               const charsIndex = buffer.length - 2;
               buffer[charsIndex] = (buffer[charsIndex] ?? '').replace(/\s+$/, function (trailingSpaces) {
                 text = trailingSpaces + text;
+                // It moved, and is judged again as part of this text
+                if (currentChars.endsWith(trailingSpaces)) {
+                  currentChars = currentChars.slice(0, -trailingSpaces.length);
+                }
                 return '';
               });
             }
@@ -1835,7 +1871,7 @@ async function minifyHTML(value, options, partialMarkup) {
               trimTrailingWhitespace(tagIndex - 1, 'br');
             }
           } else if (inlineSets.withinEither.has(textPrevTag)) {
-            text = collapseWhitespace(text, options, /(?:^|\s)$/.test(currentChars), false, false, stackNoCollapseWhitespace.length > 0);
+            text = collapseWhitespace(text, options, RE_ENDS_COLLAPSIBLE.test(currentChars), false, false, stackNoCollapseWhitespace.length > 0);
           }
         }
         if (textPrevTag || textNextTag) {
@@ -2344,11 +2380,20 @@ async function minifyHTML(value, options, partialMarkup) {
       currentTag = tag;
       charsPrevTag = tag;
       if (!inlineTextSet.has(lowerTag || tag)) {
-        currentChars = '';
+        // Replaced content counts as content for the whitespace after what holds it
+        currentChars = inlineElementsToKeepWhitespace.has(lowerTag || tag) ? '|' : '';
       }
       hasChars = false;
       currentAttrs = attrs;
 
+      // What this start tag closed, which is left to the end tags if its element is removed
+      const impliedEndsClosed = impliedEndsIndex === buffer.length ? impliedEnds : undefined;
+
+      // What this start tag made optional, for if the element then turns out to be removed
+      /** @type {{tag: string, text: string} | undefined} */
+      let omittedStartTag;
+      /** @type {{tag: string, text: string} | undefined} */
+      let omittedEndTag;
       let optional = options.removeOptionalTags;
       if (optional) {
         const htmlTag = htmlElements.has(tag);
@@ -2359,7 +2404,10 @@ async function minifyHTML(value, options, partialMarkup) {
         // `<colgroup>` may be omitted if first thing inside is `<col>`
         // `<tbody>` may be omitted if first thing inside is `<tr>`
         if (htmlTag && canRemoveParentTag(optionalStartTag, tag)) {
-          removeStartTag();
+          const text = removeStartTag(options.removeEmptyElements);
+          if (text !== undefined) {
+            omittedStartTag = { tag: optionalStartTag, text };
+          }
         }
         optionalStartTag = '';
         // End-tag-followed-by-start-tag omission rules
@@ -2367,7 +2415,10 @@ async function minifyHTML(value, options, partialMarkup) {
         if (htmlTag && canRemovePrecedingTag(optionalEndTag, tag) && (tableClosesP || optionalEndTag !== 'p' || tag !== 'table')) {
           // Only a start tag that gets written can stand in for the end tag
           if (optionalEndTagEmitted && (!autoGenerated || options.includeAutoGeneratedTags)) {
-            removeEndTag();
+            const text = removeEndTag();
+            if (options.removeEmptyElements) {
+              omittedEndTag = { tag: optionalEndTag, text };
+            }
           }
           // `<colgroup>` cannot be omitted if preceding `</colgroup>` is omitted
           // `<tbody>` cannot be omitted if preceding `</tbody>`, `</thead>`, or `</tfoot>` is
@@ -2390,7 +2441,7 @@ async function minifyHTML(value, options, partialMarkup) {
         const tagLower = lowerTag || tag;
         if (!canTrimWhitespace(tagLower, tagOut, attrs) || stackNoTrimWhitespace.length) {
           stackNoTrimWhitespace.push(tag);
-          if (tagLower === 'pre' || tagLower === 'textarea') preTextareaDepth++;
+          if (tagLower === 'pre') preDepth++;
         }
         if (options.collapseWhitespace && (!canCollapseWhitespace(tagLower, tagOut, attrs) || stackNoCollapseWhitespace.length)) {
           stackNoCollapseWhitespace.push(tag);
@@ -2420,7 +2471,7 @@ async function minifyHTML(value, options, partialMarkup) {
           markOpenElementFilled();
         } else {
           // A start tag not written can’t be removed with its element
-          openElements.push({ tag, index: buffer.length - 1, empty: !autoGenerated || Boolean(options.includeAutoGeneratedTags) });
+          openElements.push({ tag, index: buffer.length - 1, empty: !autoGenerated || Boolean(options.includeAutoGeneratedTags), omittedStartTag, omittedEndTag, impliedEnds: impliedEndsClosed });
         }
       }
 
@@ -2513,10 +2564,9 @@ async function minifyHTML(value, options, partialMarkup) {
       const insideNoTrim = stackNoTrimWhitespace.length > 0;
       let closesNoTrim = false;
       if (stackNoTrimWhitespace.length) {
-        if (tag === stackNoTrimWhitespace[stackNoTrimWhitespace.length - 1]) {
+        if (removeClosedTag(stackNoTrimWhitespace, tag, lowerTag)) {
           const tagLower = lowerTag || tag;
-          if (tagLower === 'pre' || tagLower === 'textarea') preTextareaDepth--;
-          stackNoTrimWhitespace.pop();
+          if (tagLower === 'pre') preDepth--;
           closesNoTrim = !stackNoTrimWhitespace.length;
         }
       } else if (options.collapseWhitespace) {
@@ -2526,9 +2576,7 @@ async function minifyHTML(value, options, partialMarkup) {
         transparentDepth--;
       }
       let closesNoCollapse = false;
-      if (stackNoCollapseWhitespace.length &&
-          tag === stackNoCollapseWhitespace[stackNoCollapseWhitespace.length - 1]) {
-        stackNoCollapseWhitespace.pop();
+      if (stackNoCollapseWhitespace.length && removeClosedTag(stackNoCollapseWhitespace, tag, lowerTag)) {
         closesNoCollapse = !stackNoCollapseWhitespace.length;
       }
 
@@ -2539,6 +2587,7 @@ async function minifyHTML(value, options, partialMarkup) {
       const skipsEndTag = autoGenerated && (!options.includeAutoGeneratedTags || Boolean(holdsTable));
       impliedStartTag = '';
 
+      let startTagRemoved = false;
       let isElementEmpty = false;
       if (tag === currentTag) {
         currentTag = '';
@@ -2546,7 +2595,19 @@ async function minifyHTML(value, options, partialMarkup) {
       }
       selfCloses &&= isElementEmpty;
       // A stray end tag has no open element of its own
-      const openElement = options.removeEmptyElements && openElements[openElements.length - 1]?.tag === tag ? openElements.pop() : undefined;
+      let openElement;
+      if (options.removeEmptyElements && openElements.length) {
+        if (openElements[openElements.length - 1]?.tag === tag) {
+          openElement = openElements.pop();
+        } else if (canCloseBelowTop(tag, lowerTag)) {
+          const index = openElements.findLastIndex(entry => entry.tag === tag);
+          if (index !== -1) {
+            openElement = openElements.splice(index, 1)[0];
+            // Closed around what is open inside it, so that holds this end tag now
+            currentTag = '';
+          }
+        }
+      }
       // Emptied by removing what it held, as long as its start tag is still the last one written
       const isElementEmptied = !isElementEmpty && Boolean(openElement?.empty) && lastStartTagIndex() === openElement?.index;
 
@@ -2554,6 +2615,7 @@ async function minifyHTML(value, options, partialMarkup) {
         // `<html>`, `<head>`, or `<body>` may be omitted if the element is empty
         if (isElementEmpty && topLevelElements.has(optionalStartTag)) {
           removeStartTag();
+          startTagRemoved = true;
         }
         optionalStartTag = '';
         // `</html>` or `</body>` may be omitted if not followed by comment
@@ -2572,7 +2634,7 @@ async function minifyHTML(value, options, partialMarkup) {
       let isElementRemoved = false;
       // A formatting element closed by a block is reopened after it by browsers, so it has to stay
       if (options.removeEmptyElements && (isElementEmpty || isElementEmptied) && !options.insideForeignContent && canRemoveElement(tag, attrs) &&
-          !(autoGenerated && formattingElements.has(tag))) {
+          !(autoGenerated && formattingElements.has(tag)) && !openElement?.impliedEnds?.some(implied => !implied.text)) {
         let preserve = false;
         if (removeEmptyElementsExcept.length) {
           const normalizedAttrs = attrs.map((/** @type {HTMLAttribute} */ attr) => ({ ...attr, name: resolveName(attr.name) }));
@@ -2580,11 +2642,37 @@ async function minifyHTML(value, options, partialMarkup) {
         }
 
         if (!preserve) {
-          removeStartTag();
+          // Once it is gone, the last start tag is another element’s
+          if (!startTagRemoved) {
+            removeStartTag();
+          }
           isElementRemoved = true;
           optionalStartTag = '';
           optionalEndTag = '';
           optionalEndTagEmitted = false;
+          // What it made optional is up to what comes next now
+          if (openElement?.omittedEndTag) {
+            bufferPush(openElement.omittedEndTag.text, true);
+            optionalEndTag = openElement.omittedEndTag.tag;
+            optionalEndTagEmitted = true;
+          }
+          if (openElement?.omittedStartTag) {
+            bufferPush(openElement.omittedStartTag.text, true);
+            optionalStartTag = openElement.omittedStartTag.tag;
+          }
+          if (openElement?.impliedEnds) {
+            // Browsers reopen formatting elements after what closed them, which their end tags
+            // would prevent and whitespace following an omitted end tag would change
+            const written = openElement.impliedEnds.filter(implied => !formattingElements.has(implied.tag));
+            for (const implied of written) {
+              bufferPush(implied.text, true);
+            }
+            const last = written[written.length - 1];
+            if (last && written.length === openElement.impliedEnds.length && optionalEndTags.has(last.tag)) {
+              optionalEndTag = last.tag;
+              optionalEndTagEmitted = true;
+            }
+          }
         } else {
           // Preserve the element—add closing tag
           if (skipsEndTag) {
@@ -2595,7 +2683,7 @@ async function minifyHTML(value, options, partialMarkup) {
           charsPrevTag = '/' + tag;
           if (!inlineElements.has(lowerTag || tag)) {
             currentChars = '';
-          } else if (isElementEmpty) {
+          } else if (isElementEmpty || !inlineTextSet.has(lowerTag || tag)) {
             currentChars += '|';
           }
         }
@@ -2608,9 +2696,18 @@ async function minifyHTML(value, options, partialMarkup) {
         charsPrevTag = '/' + tag;
         if (!inlineElements.has(lowerTag || tag)) {
           currentChars = '';
-        } else if (isElementEmpty) {
+        } else if (isElementEmpty || !inlineTextSet.has(lowerTag || tag)) {
+          // What is not text counts as content for the whitespace after it
           currentChars += '|';
         }
+      }
+
+      if (skipsEndTag && !isElementRemoved && options.removeEmptyElements) {
+        if (impliedEndsIndex !== buffer.length) {
+          impliedEnds = [];
+          impliedEndsIndex = buffer.length;
+        }
+        impliedEnds.push({ tag, text: holdsTable ? '' : endTagText });
       }
 
       if (closesNoTrim && !isElementRemoved) {
@@ -2710,12 +2807,16 @@ async function minifyHTML(value, options, partialMarkup) {
     strayEnd: function () {
       removed = true;
     },
-    doctype: function (/** @type {string} */ doctype, /** @type {boolean} */ noQuirksMode) {
+    doctype: function (/** @type {string} */ doctype, /** @type {boolean} */ noQuirksMode, /** @type {boolean} */ isIgnored) {
       tableClosesP = noQuirksMode;
+      if (isIgnored) {
+        removed = true;
+        return;
+      }
       bufferPush(options.useShortDoctype
         ? '<!doctype' +
         (options.removeTagWhitespace ? '' : ' ') + 'html>'
-        : collapseWhitespaceAll(doctype), false);
+        : doctype.replace(RE_DOCTYPE_SEGMENT, (segment, quoted) => quoted ?? collapseWhitespaceAll(segment)), false);
     }
   });
 

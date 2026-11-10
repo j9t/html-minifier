@@ -7,6 +7,7 @@ import {
   RE_CAN_REMOVE_ATTR_QUOTES,
   RE_AMP_REFERENCE_ATTR,
   RE_CR,
+  RE_ATTR_SELECTOR,
   RE_BASE_ELEMENT,
   RE_ATTR_WS_CHECK,
   RE_ATTR_WS_COLLAPSE,
@@ -29,7 +30,8 @@ import {
   collapsibleValues,
   srcsetElements,
   RE_EMPTY_ATTRIBUTE,
-  RE_STYLE_ELEMENT
+  RE_STYLE_ELEMENT,
+  RE_STYLE_TAG
 } from './constants.js';
 import { trimWhitespace, collapseWhitespaceAll } from './whitespace.js';
 import { shouldMinifyInnerHTML } from './options.js';
@@ -198,6 +200,54 @@ function isTargetSelfRedundant(attrValue, options) {
 }
 
 /**
+ * The attribute names `style` elements in `source` select on, in lowercase
+ * @param {string} source
+ * @returns {Set<string>}
+ */
+function findSelectedAttributes(source) {
+  /** @type {Set<string>} */
+  const names = new Set();
+  if (!RE_STYLE_ELEMENT.test(source)) {
+    return names;
+  }
+  const addSelected = (/** @type {number} */ start, /** @type {number} */ end) => {
+    for (const selector of source.slice(start, end).toLowerCase().matchAll(RE_ATTR_SELECTOR)) {
+      names.add(/** @type {string} */ (selector[1]));
+    }
+  };
+  // Scanned rather than matched, as a lazy pattern is quadratic on `style` tags left open
+  let start = -1;
+  RE_STYLE_TAG.lastIndex = 0;
+  for (let match = RE_STYLE_TAG.exec(source); match; match = RE_STYLE_TAG.exec(source)) {
+    if (match[0][1] !== '/') {
+      if (start === -1) start = match.index;
+    } else if (start !== -1) {
+      addSelected(start, match.index);
+      start = -1;
+    }
+  }
+  // Browsers apply a `style` element the document ends in, but not one that is script text,
+  // with a script’s end tag after it (without, `<script` before it is text of some other kind)
+  if (start !== -1) {
+    const before = source.slice(0, start).toLowerCase();
+    if (before.lastIndexOf('<script') <= before.lastIndexOf('</script') || !source.slice(start).toLowerCase().includes('</script')) {
+      addSelected(start, source.length);
+    }
+  }
+  return names;
+}
+
+/**
+ * Whether a style sheet of the document selects on the attribute, which removing it would break
+ * @param {string} attrName
+ * @param {ProcessedOptions} options
+ */
+function isAttributeSelected(attrName, options) {
+  const state = options.baseState;
+  return state !== undefined && (state.selectedAttrs ??= findSelectedAttributes(state.source)).has(attrName.toLowerCase());
+}
+
+/**
  * @param {string} tag - In lowercase
  * @param {string} attrName - In lowercase
  * @param {string} attrValue
@@ -268,7 +318,18 @@ function isAttributeRedundant(tag, attrName, attrValue, attrs, options) {
     : undefined;
   const tagDefault = tagAttrDefaults && Object.hasOwn(tagAttrDefaults, attrName) ? tagAttrDefaults[attrName] : undefined;
 
-  const isLegacyAttr = (tag === 'script' && (attrName === 'language' || attrName === 'charset')) || (tag === 'a' && attrName === 'name');
+  // As written, for browsers match fragments case-sensitively and without trimming
+  if (tag === 'a' && attrName === 'name') {
+    const id = attrs.find(attr => attr.name.toLowerCase() === 'id');
+    const idValue = id?.value ?? '';
+    // With `decodeEntities`, the name is decoded by now, the ID isn’t
+    if (id === undefined || (options.decodeEntities && idValue.indexOf('&') !== -1)) {
+      return false;
+    }
+    return options.collapseAttributeWhitespace ? collapseAttributeValue(idValue) === collapseAttributeValue(attrValue) : idValue === attrValue;
+  }
+
+  const isLegacyAttr = tag === 'script' && (attrName === 'language' || attrName === 'charset');
 
   // Without a default for this very attribute, nor a legacy rule, the value cannot be redundant
   if (generalDefault === undefined && tagDefault === undefined && !isLegacyAttr) {
@@ -282,9 +343,6 @@ function isAttributeRedundant(tag, attrName, attrValue, attrs, options) {
     return true;
   }
   if (tag === 'script' && attrName === 'charset' && !attributesInclude(attrs, 'src')) {
-    return true;
-  }
-  if (tag === 'a' && attrName === 'name' && attributesInclude(attrs, 'id')) {
     return true;
   }
   if (tag === 'ol' && attrName === 'start' && attributesInclude(attrs, 'reversed')) {
@@ -659,6 +717,15 @@ const collapseAttributeWhitespaceExempt = new Set(['pattern', 'placeholder', 'ti
 const valueWhitespaceExemptElements = new Set(['button', 'data', 'input', 'option', 'param']);
 
 /**
+ * @param {string} value
+ * @returns {string}
+ */
+function collapseAttributeValue(value) {
+  // Fast path: Only process if whitespace exists (avoids regex overhead on clean values)
+  return RE_ATTR_WS_CHECK.test(value) ? trimWhitespace(value).replace(RE_ATTR_WS_COLLAPSE, ' ') : value;
+}
+
+/**
  * Drop repeated names from a whitespace-separated class list, keeping the first of each.
  * @param {string} value
  * @returns {string}
@@ -690,10 +757,7 @@ function cleanAttributeValue(tag, attrName, attrValue, options, attrs, minifyHTM
   // Special spaces (no-break space, hair space, etc.) stay, for consistency
   // with `collapseWhitespace`
   if (options.collapseAttributeWhitespace && !collapseAttributeWhitespaceExempt.has(attrName) && !(attrName === 'value' && valueWhitespaceExemptElements.has(tag)) && !isEventAttr) {
-    // Fast path: Only process if whitespace exists (avoids regex overhead on clean values)
-    if (RE_ATTR_WS_CHECK.test(attrValue)) {
-      attrValue = trimWhitespace(attrValue).replace(RE_ATTR_WS_COLLAPSE, ' ');
-    }
+    attrValue = collapseAttributeValue(attrValue);
   }
 
   if (isEventAttr) {
@@ -1016,12 +1080,12 @@ function normalizeAttr(attr, attrs, tag, tagOut, options, minifyHTML, markers) {
  * @param {string[]} [markers] - What custom fragment and `htmlmin:ignore` placeholders hold
  */
 function normalizeAttrContinue(attrName, attrNameOut, attrValue, attr, attrs, tag, tagOut, options, minifyHTML, markers) {
-  if ((options.removeRedundantAttributes &&
+  if (((options.removeRedundantAttributes &&
        isAttributeRedundant(tag, attrName, attrValue ?? '', attrs, options)) ||
       (options.removeDefaultTypeAttributes && attrName === 'type' && (
         ((tag === 'style' || tag === 'link') && isStyleLinkTypeAttribute(attrValue)) ||
         (tag === 'script' && isScriptTypeAttribute(attrValue) && !keepScriptTypeAttribute(attrValue))
-      ))) {
+      ))) && !isAttributeSelected(attrName, options)) {
     return;
   }
 
@@ -1048,7 +1112,8 @@ function normalizeAttrContinue(attrName, attrNameOut, attrValue, attr, attrs, ta
  */
 function normalizeAttrFinish(attrName, attrNameOut, attrValue, attr, tag, tagOut, options) {
   if (options.removeEmptyAttributes &&
-      canDeleteEmptyAttribute(tag, attrName, attrValue, options, tagOut, attrNameOut)) {
+      canDeleteEmptyAttribute(tag, attrName, attrValue, options, tagOut, attrNameOut) &&
+      !isAttributeSelected(attrName, options)) {
     return;
   }
 

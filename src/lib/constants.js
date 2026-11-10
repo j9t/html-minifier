@@ -48,10 +48,17 @@ const RE_HTML_ENCODING = /^(text\/html|application\/xhtml\+xml)$/i;
 // identifier precedes it, anything but `>` sets quirks mode
 // https://html.spec.whatwg.org/multipage/parsing.html#doctype-state
 const RE_DOCTYPE = /^<!doctype[ \n\r\t\f]*([^ \n\r\t\f>]+)[ \n\r\t\f]*(?:public[ \n\r\t\f]*("[^">]*"|'[^'>]*')[ \n\r\t\f]*("[^">]*"|'[^'>]*')?|system[ \n\r\t\f]*("[^">]*"|'[^'>]*'))?([^]*)$/i;
+// A doctype’s quoted identifiers (captured) and what lies between them
+const RE_DOCTYPE_SEGMENT = /("[^"]*(?:"|$)|'[^']*(?:'|$))|[^"']+/g;
 const RE_ATTR_WS_CHECK = /[ \n\r\t\f]/;
 const RE_ATTR_WS_COLLAPSE = /[ \n\r\t\f]+/g;
 const RE_WS_CHAR = /\s/;
 const RE_STYLE_ELEMENT = /<style[\s/>]/i;
+const RE_STYLE_TAG = /<\/?style/gi;
+// Text that a space after would collapse into (a no-break space does not take it in)
+const RE_ENDS_COLLAPSIBLE = /(?:^|[ \n\r\t\f])$/;
+// An attribute selector’s name, namespace prefix aside, in lowercased CSS
+const RE_ATTR_SELECTOR = /\[\s*(?:[\w-]*\|)?([\w:-]+)\s*[\]=~|^$*]/g;
 const RE_EMPTY_ATTRIBUTE = new RegExp(
   '^(?:class|id|style|title|lang|dir|on(?:focus|blur|change|click|dblclick|mouse(' +
   '?:down|up|over|move|out)|key(?:press|down|up)))$');
@@ -62,11 +69,11 @@ const RE_EMPTY_ATTRIBUTE = new RegExp(
 const inlineElementsToKeepWhitespaceAround = new Set(['a', 'abbr', 'acronym', 'audio', 'b', 'bdi', 'bdo', 'big', 'button', 'canvas', 'cite', 'code', 'data', 'del', 'dfn', 'em', 'embed', 'font', 'i', 'iframe', 'img', 'input', 'ins', 'kbd', 'label', 'map', 'mark', 'math', 'meter', 'nobr', 'object', 'output', 'picture', 'progress', 'q', 'rb', 'rp', 'rt', 'rtc', 'ruby', 's', 'samp', 'select', 'selectedcontent', 'slot', 'small', 'span', 'strike', 'strong', 'sub', 'sup', 'svg', 'textarea', 'textpath', 'time', 'tspan', 'tt', 'u', 'var', 'video', 'wbr']);
 
 // Non-empty elements that will maintain whitespace within them
-const inlineElementsToKeepWhitespaceWithin = new Set(['a', 'abbr', 'acronym', 'b', 'big', 'data', 'del', 'em', 'font', 'i', 'ins', 'kbd', 'map', 'mark', 'nobr', 's', 'samp', 'slot', 'small', 'span', 'strike', 'strong', 'sub', 'sup', 'textpath', 'time', 'tspan', 'tt', 'u', 'var']);
+const inlineElementsToKeepWhitespaceWithin = new Set(['a', 'abbr', 'acronym', 'b', 'bdi', 'bdo', 'big', 'cite', 'code', 'data', 'del', 'dfn', 'em', 'font', 'i', 'ins', 'kbd', 'label', 'map', 'mark', 'nobr', 'q', 'ruby', 's', 'samp', 'slot', 'small', 'span', 'strike', 'strong', 'sub', 'sup', 'textpath', 'time', 'tspan', 'tt', 'u', 'var']);
 
 // Text-level elements that keep whitespace between them and other elements under
 // `collapseInlineTagWhitespace`
-const inlineElementsToKeepWhitespaceBetween = new Set([...inlineElementsToKeepWhitespaceWithin, 'bdi', 'bdo', 'cite', 'code', 'dfn', 'label', 'math', 'q', 'ruby']);
+const inlineElementsToKeepWhitespaceBetween = new Set([...inlineElementsToKeepWhitespaceWithin, 'math']);
 
 // Phrasing elements that don’t render, whose neighbors decide on the whitespace around them
 const inlineElementsTransparent = new Set(['area', 'datalist', 'link', 'meta', 'noscript', 'script', 'style', 'template']);
@@ -296,7 +303,7 @@ const optionalStartTags = new Set(['html', 'head', 'body', 'colgroup', 'tbody'])
 
 const optionalEndTags = new Set(['html', 'head', 'body', 'li', 'dt', 'dd', 'p', 'rb', 'rt', 'rtc', 'rp', 'optgroup', 'option', 'colgroup', 'caption', 'thead', 'tbody', 'tfoot', 'tr', 'td', 'th']);
 
-const headerElements = new Set(['meta', 'link', 'script', 'style', 'template', 'noscript']);
+const headerElements = new Set(['base', 'basefont', 'bgsound', 'link', 'meta', 'noframes', 'noscript', 'script', 'style', 'template', 'title']);
 
 const descriptionElements = new Set(['dt', 'dd']);
 
@@ -432,16 +439,20 @@ export {
   RE_LINE_BREAK_CR,
   RE_LEGACY_ENTITIES,
   RE_ESCAPE_LT,
+  RE_ATTR_SELECTOR,
+  RE_ENDS_COLLAPSIBLE,
   RE_BASE_ELEMENT,
   RE_ESCAPE_LT_RAW_TEXT,
   RE_XML_ESCAPE_TEXT,
   RE_XML_ESCAPE_ATTR,
   RE_HTML_ENCODING,
   RE_DOCTYPE,
+  RE_DOCTYPE_SEGMENT,
   RE_ATTR_WS_CHECK,
   RE_ATTR_WS_COLLAPSE,
   RE_WS_CHAR,
   RE_STYLE_ELEMENT,
+  RE_STYLE_TAG,
   RE_EMPTY_ATTRIBUTE,
 
   // Inline element sets
