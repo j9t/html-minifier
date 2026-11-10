@@ -967,8 +967,8 @@ async function createSortFns(value, options, uidIgnore, ignoredMarkupChunks) {
     minifyCSS: identity,
     minifyJS: identity,
     minifyJSON: false,
+    minifySVG: null,
     minifyURLs: identity,
-    // SVGO stays, as it changes which attributes there are to count
     // `ignoreCustomFragments` stays, and template syntax may not parse cleanly
     continueOnParseError: true,
     log: identity
@@ -3177,6 +3177,9 @@ export const minify = async function (value, options) {
   let processedBase;
   // `valueUnchanged` needs no budget of its own: Recursion is bounded by the
   // stored snapshot, which is a finite tree of at most `SNAPSHOT_MAX_NODES`
+  //
+  // Note: The comparison takes about 8% of a call on tiny documents; only options
+  // known never to change (e.g., deeply frozen ones) could skip it
   if (cached && valueUnchanged(cached.snapshot, inputOptions)) {
     processedBase = cached.processed;
   } else {

@@ -22,7 +22,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Changed
 
-* Made `sortAttributes` and `sortClassNames` faster by not running CSS, JavaScript, JSON, and URL minification in their analysis pass, which only counts attributes and classes
+* Made `sortAttributes` and `sortClassNames` faster by not running CSS, JavaScript, JSON, SVG, and URL minification in their analysis pass, which only counts attributes and classes
 * Made `removeUnusedCSS` faster at collecting the classes and IDs a document uses
 * Made each `minify` call faster by reusing attribute and `ignoreCustomFragments` patterns across calls
 * Documented how SWC compares to Terser for JavaScript minification

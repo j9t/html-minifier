@@ -1775,6 +1775,7 @@ describe('HTML', () => {
     assert.strictEqual(await minify(input, { removeAttributeQuotes: true, minifyCSS: true }), output);
 
     // Actual media queries—should be minified
+    //
     // Note: Lightning CSS converts `min-width` to modern range syntax (`width>=`)
     input = '<link rel="stylesheet" href="a.css" media="(min-width: 768px)">';
     output = '<link rel=stylesheet href=a.css media="(width>=768px)">';
@@ -6738,8 +6739,9 @@ describe('HTML', () => {
   test('Collapses attribute whitespace', async () => {
     let input, output;
 
-    // Should not collapse by default (note: `class` attribute values always collapse, so
-    // test with other attributes)
+    // Should not collapse by default
+    //
+    // Note: `class` attribute values always collapse, so test with other attributes
     input = '<article title="foo  bar" data-selector="teaser-object parent-image-label picture-article" data-external-selector="\n      teaser-object parent-image-label \n        \n    "></article>';
     assert.strictEqual(await minify(input), input);
     assert.strictEqual(await minify(input, { collapseWhitespace: true }), input);
@@ -7646,22 +7648,23 @@ describe('HTML', () => {
   });
 
   test('Runs the code minifiers once with `sortAttributes` and `sortClassNames`', async () => {
-    const input = '<style>p{color:red}</style><p style="color:blue" onclick="go()" class="b a"><a href="/x">x</a></p><script>go()</script>';
-    const calls = { css: 0, js: 0, urls: 0 };
+    const input = '<style>p{color:red}</style><p style="color:blue" onclick="go()" class="b a"><a href="/x">x</a></p><script>go()</script><svg><circle r="1"/></svg>';
+    const calls = { css: 0, js: 0, urls: 0, svg: 0 };
     const options = {
       cacheCSS: 0,
       cacheJS: 0,
       minifyCSS: (/** @type {string} */ text) => (calls.css++, text),
       minifyJS: (/** @type {string} */ text) => (calls.js++, text),
-      minifyURLs: (/** @type {string} */ url) => (calls.urls++, url)
+      minifyURLs: (/** @type {string} */ url) => (calls.urls++, url),
+      minifySVG: (/** @type {string} */ svg) => (calls.svg++, svg)
     };
 
     await minify(input, options);
     const unsorted = { ...calls };
-    calls.css = calls.js = calls.urls = 0;
+    calls.css = calls.js = calls.urls = calls.svg = 0;
     await minify(input, { ...options, sortAttributes: true, sortClassNames: true });
 
-    assert.ok(unsorted.css && unsorted.js && unsorted.urls, 'Every minifier should run');
+    assert.ok(unsorted.css && unsorted.js && unsorted.urls && unsorted.svg, 'Every minifier should run');
     assert.deepStrictEqual(calls, unsorted);
   });
 
