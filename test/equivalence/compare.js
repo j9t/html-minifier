@@ -308,7 +308,9 @@ function canonicalizeRaw(/** @type {any} */ node, /** @type {string} */ text, /*
     if (isJSComparable(options) && type !== 'module') return normalizeJS(text);
     return isInertScript(text) ? '' : '«JavaScript»';
   }
-  return options.mergeScripts ? text.replace(/[;\s]+/g, '') : trim(text);
+  if (!options.mergeScripts) return trim(text);
+  // Separators matter where code parses; what doesn’t is compared loosely
+  return (SCRIPT_TYPES_JS.has(type) && normalizeJS(text)) || text.replace(/[;\s]+/g, '');
 }
 
 // Only classic scripts merge, and only with the same loading behavior

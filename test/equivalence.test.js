@@ -37,7 +37,9 @@ describe('Equivalence', () => {
       ['<style>a{background:url(/b\\ c.png)}</style>', '<style>a{background:url(/b%20c.png)}</style>', { minifyCSS: true, minifyURLs: 'https://example.org/dir/page.html' }],
       ['<link rel="stylesheet" media=" print " href="a">', '<link rel="stylesheet" media="print" href="a">', {}],
       ['<a href="x"" id="y">b</a>', '<a href="x" id="y">b</a>', {}],
-      ['<iframe>a</noscript></body></html>', '<iframe>a</noscript>', {}]
+      ['<iframe>a</noscript></body></html>', '<iframe>a</noscript>', {}],
+      ['<script>a();</script>\n<script>b()</script>', '<script>a();b()</script>', { mergeScripts: true }],
+      ['<script>a() // c</script><script>b()</script>', '<script>a() // c\n;b()</script>', { mergeScripts: true }]
     ]);
     for (const [input, output, options] of cases) {
       assert.deepStrictEqual(compareMarkup(input, output, options), [], input);
@@ -58,7 +60,8 @@ describe('Equivalence', () => {
       ['<link rel="stylesheet" media="(" href="a">', '<link rel="stylesheet" media="" href="a">', { minifyCSS: true }, 'tree'],
       ['<style>a{background:url(https://example.org/b.png)}</style>', '<style>a{background:url(https://example.org/c.png)}</style>', { minifyCSS: true, minifyURLs: 'https://example.org/dir/page.html' }, 'tree'],
       ['<style>a{background:url(http://example.org/b.png)}</style>', '<style>a{background:url(//example.org/b.png)}</style>', { minifyCSS: true, minifyURLs: 'https://example.org/dir/page.html' }, 'tree'],
-      ['<a "target="_blank">b</a>', '<a target="_blank">b</a>', {}, 'tree']
+      ['<a "target="_blank">b</a>', '<a target="_blank">b</a>', {}, 'tree'],
+      ['<script>a()</script><script>(b)()</script>', '<script>a()(b)()</script>', { mergeScripts: true }, 'tree']
     ]);
     for (const [input, output, options, kind] of cases) {
       assert.strictEqual(compareMarkup(input, output, options)[0]?.kind, kind, input);
