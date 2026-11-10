@@ -5870,6 +5870,53 @@ describe('HTML', () => {
     assert.strictEqual(await minify(output, { collapseWhitespace: true }), output);
   });
 
+  test('Trims trailing whitespace past nested end tags', async () => {
+    const collapse = { collapseWhitespace: true };
+    const remove = { collapseWhitespace: true, removeComments: true, removeEmptyElements: true };
+
+    assert.strictEqual(await minify('<div><span><span>a </span> </span> </div>', collapse), '<div><span><span>a</span></span></div>');
+    assert.strictEqual(await minify('<div><span>a <b>b </b></span></div><p>c</p>', collapse), '<div><span>a <b>b</b></span></div><p>c</p>');
+    assert.strictEqual(await minify('<div><div><span>a </span></div> <span>b </span></div>', collapse), '<div><div><span>a</span></div><span>b</span></div>');
+    assert.strictEqual(await minify('<div><span>a </span><pre> x </pre> <span>b </span></div>', collapse), '<div><span>a</span><pre> x </pre><span>b</span></div>');
+
+    // Removed comments and elements leave the walk more to pass
+    assert.strictEqual(await minify('<p><span>a </span><!-- c --> </p><p><em>b </em><span></span> </p>', collapse), '<p><span>a</span><!-- c --></p><p><em>b </em><span></span></p>');
+    assert.strictEqual(await minify('<p><span>a </span><!-- c --> </p><p><em>b </em><span></span> </p>', remove), '<p><span>a</span></p><p><em>b</em></p>');
+    assert.strictEqual(await minify('<div>a <span></span></div><div>b <i> </i></div>', remove), '<div>a</div><div>b</div>');
+
+    // Every level of a deep nest is trimmed, not just the innermost
+    const depth = 50;
+    assert.strictEqual(
+      await minify('<div>'.repeat(depth) + '<span>a </span> '.repeat(depth) + '</div>'.repeat(depth), collapse),
+      '<div>'.repeat(depth) + '<span>a </span>'.repeat(depth - 1) + '<span>a</span>' + '</div>'.repeat(depth)
+    );
+  });
+
+  test('Trims trailing whitespace in linear time on deeply nested markup', async () => {
+    // Each end tag walked back over all those before it; compare growth rather than
+    // absolute time, keeping the best of several runs (see the raw-text scan test in
+    // css.test.js)
+    const measure = async (/** @type {number} */ depth) => {
+      const input = '<div> a '.repeat(depth) + 'x' + ' </div>'.repeat(depth);
+      let best = Infinity;
+      for (let run = 0; run < 3; run++) {
+        const started = performance.now();
+        await minify(input, { collapseWhitespace: true });
+        best = Math.min(best, performance.now() - started);
+      }
+      return best;
+    };
+
+    await measure(500);
+    const small = await measure(2000);
+    const large = await measure(4000);
+
+    assert.ok(
+      large <= small * 3 + 50,
+      `Minifying grew from ${small.toFixed(1)} ms to ${large.toFixed(1)} ms on twice the depth`
+    );
+  });
+
   test('Collapses to a no-break space between consecutive `htmlmin:ignore` blocks', async () => {
     let output;
 
@@ -7572,6 +7619,26 @@ describe('HTML', () => {
     // `partialMarkup` and `removeOptionalTags` work independently
     assert.strictEqual(await minify(input, { partialMarkup: true, removeOptionalTags: true }), '<div><p>Text</div>',
       'partialMarkup and removeOptionalTags work independently (optional </p> is removed)');
+  });
+
+  test('Runs the code minifiers once with `sortAttributes` and `sortClassNames`', async () => {
+    const input = '<style>p{color:red}</style><p style="color:blue" onclick="go()" class="b a"><a href="/x">x</a></p><script>go()</script>';
+    const calls = { css: 0, js: 0, urls: 0 };
+    const options = {
+      cacheCSS: 0,
+      cacheJS: 0,
+      minifyCSS: (/** @type {string} */ text) => (calls.css++, text),
+      minifyJS: (/** @type {string} */ text) => (calls.js++, text),
+      minifyURLs: (/** @type {string} */ url) => (calls.urls++, url)
+    };
+
+    await minify(input, options);
+    const unsorted = { ...calls };
+    calls.css = calls.js = calls.urls = 0;
+    await minify(input, { ...options, sortAttributes: true, sortClassNames: true });
+
+    assert.ok(unsorted.css && unsorted.js && unsorted.urls, 'Every minifier should run');
+    assert.deepStrictEqual(calls, unsorted);
   });
 
   test('Does not corrupt HTML with `sortAttributes` and `processScripts`', async () => {

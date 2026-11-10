@@ -964,6 +964,11 @@ async function createSortFns(value, options, uidIgnore, ignoredMarkupChunks) {
     removeTagWhitespace: false,
     decodeEntities: false,
     processScripts: false,
+    minifyCSS: identity,
+    minifyJS: identity,
+    minifyJSON: false,
+    minifyURLs: identity,
+    // SVGO stays, as it changes which attributes there are to count
     // `ignoreCustomFragments` stays, and template syntax may not parse cleanly
     continueOnParseError: true,
     log: identity
@@ -1123,8 +1128,13 @@ async function minifyHTML(value, options, partialMarkup) {
   /** @type {HTMLAttribute[]} */
   const emptyAttrs = [];
 
+  // Entries already in it change through `bufferSet` or `bufferTruncate`, so that
+  // `trimSettledIndex` stays true
   /** @type {string[]} */
   const buffer = [];
+  // Where the last trim walk began that came to text it couldn’t trim, past end tags alone: A
+  // later walk that gets there finds the same, until an entry up to there changes
+  let trimSettledIndex = -1;
   // Parallel to `buffer`: whether the entry is a tag—the only place lines may break
   const bufferTags = options.maxLineLength ? /** @type {boolean[]} */ ([]) : null;
   /** @type {string} */
@@ -1426,8 +1436,14 @@ async function minifyHTML(value, options, partialMarkup) {
     if (entry) removed = false;
   }
 
+  function bufferSet(/** @type {number} */ index, /** @type {string} */ entry) {
+    buffer[index] = entry;
+    if (index <= trimSettledIndex) trimSettledIndex = -1;
+  }
+
   function bufferTruncate(/** @type {number} */ length) {
     buffer.length = Math.max(0, length);
+    if (length <= trimSettledIndex) trimSettledIndex = -1;
     if (bufferTags) bufferTags.length = buffer.length;
     if (transparentGapIndex >= buffer.length) transparentGapIndex = -1;
     if (noTrimEndIndex >= buffer.length) noTrimEndIndex = -1;
@@ -1472,15 +1488,15 @@ async function minifyHTML(value, options, partialMarkup) {
       return;
     }
     for (let i = before + 1; i <= first; i++) {
-      buffer[i] = '';
+      bufferSet(i, '');
     }
     // The line break goes on the side of the text before the removal, so that the text after
     // it keeps its own for a removal that may follow
     if (before < 0) {
-      buffer[after] = next.replace(RE_BLANKS_LINE_BREAK_START, '');
+      bufferSet(after, next.replace(RE_BLANKS_LINE_BREAK_START, ''));
     } else {
-      buffer[before] = prev.replace(RE_LINE_BREAK_BLANKS_END, '');
-      buffer[after] = next.replace(RE_BLANKS_START, '');
+      bufferSet(before, prev.replace(RE_LINE_BREAK_BLANKS_END, ''));
+      bufferSet(after, next.replace(RE_BLANKS_START, ''));
     }
   }
 
@@ -1495,18 +1511,18 @@ async function minifyHTML(value, options, partialMarkup) {
     if (!textVerbatim) {
       let index = buffer.length - 1;
       while (index >= 0 && (buffer[index] === '' || RE_WS_ONLY.test(buffer[index] ?? ''))) {
-        buffer[index--] = '';
+        bufferSet(index--, '');
       }
       if (index >= 0) {
-        buffer[index] = (buffer[index] ?? '').replace(RE_WS_END, '');
+        bufferSet(index, (buffer[index] ?? '').replace(RE_WS_END, ''));
       }
     }
     let index = 0;
     while (index < buffer.length && (buffer[index] === '' || RE_WS_ONLY.test(buffer[index] ?? ''))) {
-      buffer[index++] = '';
+      bufferSet(index++, '');
     }
     if (index < buffer.length) {
-      buffer[index] = (buffer[index] ?? '').replace(RE_WS_START, '');
+      bufferSet(index, (buffer[index] ?? '').replace(RE_WS_START, ''));
     }
   }
 
@@ -1545,7 +1561,7 @@ async function minifyHTML(value, options, partialMarkup) {
     }
     const tagOpen = tagText.slice(0, -1);
     // A slash right after an unquoted value would belong to the value
-    buffer[last] = tagOpen + (RE_UNQUOTED_VALUE_END.test(tagOpen) ? ' />' : '/>');
+    bufferSet(last, tagOpen + (RE_UNQUOTED_VALUE_END.test(tagOpen) ? ' />' : '/>'));
     return true;
   }
 
@@ -1622,9 +1638,9 @@ async function minifyHTML(value, options, partialMarkup) {
     // A line break the run already carries outranks the whitespace ahead of it; trimming
     // the other side takes ASCII whitespace only, so a no-break space stays as is
     if (options.preserveLineBreaks && /[\n\r]/.test((next.match(RE_WS_START) ?? [''])[0])) {
-      buffer[before] = prev.replace(RE_WS_END, '');
+      bufferSet(before, prev.replace(RE_WS_END, ''));
     } else {
-      buffer[after] = next.replace(RE_WS_START, '');
+      bufferSet(after, next.replace(RE_WS_START, ''));
     }
   }
 
@@ -1661,10 +1677,18 @@ async function minifyHTML(value, options, partialMarkup) {
     // Nothing to the left of the text is in play here, so only its trailing run can
     // change—unless preserved line breaks bring the leading run into play, too
     const trailingOnly = !options.preserveLineBreaks;
+    const indexStart = index;
     let prevTag = '';
     let prevTagLower = '';
     for (; index > noTrimEndIndex && canTrimWhitespace(prevTagLower, prevTag, emptyAttrs); index--) {
+      if (index === trimSettledIndex) {
+        trimSettledIndex = indexStart;
+        return;
+      }
       const str = buffer[index] ?? '';
+      if (!str) {
+        continue;
+      }
       const endTagName = matchPlainEndTag(str);
       if (endTagName !== null) {
         prevTag = endTagName;
@@ -1673,14 +1697,12 @@ async function minifyHTML(value, options, partialMarkup) {
       }
       // A tag ends the search, and so does text that survives collapsing. Text with no
       // trailing run comes back from the call unchanged, so it can end the search on
-      // the spot; empty text cannot, as the search has to carry on past it
-      if (str.charCodeAt(str.length - 1) === 62 /* > */) {
+      // the spot, and so can every later search that gets as far as this one began
+      if (str.charCodeAt(str.length - 1) === 62 /* > */ || (trailingOnly && !endsWithWhitespace(str))) {
+        trimSettledIndex = indexStart;
         break;
       }
-      if (trailingOnly && str && !endsWithWhitespace(str)) {
-        break;
-      }
-      buffer[index] = collapseWhitespaceSmart(str, '', nextTag, emptyAttrs, emptyAttrs, options, inlineSets, !stackNoCollapseWhitespace.length && index > noCollapseEndIndex);
+      bufferSet(index, collapseWhitespaceSmart(str, '', nextTag, emptyAttrs, emptyAttrs, options, inlineSets, !stackNoCollapseWhitespace.length && index > noCollapseEndIndex));
       if (buffer[index]) {
         break;
       }
@@ -1736,7 +1758,7 @@ async function minifyHTML(value, options, partialMarkup) {
   // Keep or trim the whitespace pending before or between elements that don’t render
   function settleTransparentGap(/** @type {boolean} */ keep) {
     if (!keep) {
-      buffer[transparentGapIndex] = collapseWhitespace(buffer[transparentGapIndex] ?? '', options, false, true);
+      bufferSet(transparentGapIndex, collapseWhitespace(buffer[transparentGapIndex] ?? '', options, false, true));
     }
     transparentGapIndex = -1;
   }
@@ -1841,14 +1863,14 @@ async function minifyHTML(value, options, partialMarkup) {
             }
             if (buffer.length > 1 && (!prevComment || (!options.conservativeCollapse && / $/.test(currentChars)))) {
               const charsIndex = buffer.length - 2;
-              buffer[charsIndex] = (buffer[charsIndex] ?? '').replace(/\s+$/, function (trailingSpaces) {
+              bufferSet(charsIndex, (buffer[charsIndex] ?? '').replace(/\s+$/, function (trailingSpaces) {
                 text = trailingSpaces + text;
                 // It moved, and is judged again as part of this text
                 if (currentChars.endsWith(trailingSpaces)) {
                   currentChars = currentChars.slice(0, -trailingSpaces.length);
                 }
                 return '';
-              });
+              }));
             }
           } else if (uidIgnorePlaceholderPattern && textNextTag !== 'comment') {
             // UID placeholder followed by a real element—derive the effective `prevTag` from the
@@ -2075,9 +2097,9 @@ async function minifyHTML(value, options, partialMarkup) {
       const firstTag = match ? RE_FIRST_HTML_TAG.exec(ignoredMarkupChunks[+(match[1] ?? 0)] ?? '')?.[1] : undefined;
       if (firstTag && inlineElementsTransparent.has(resolveName(firstTag)) && inlineElementsTransparentAfter.has(charsPrevTag)) {
         // Emptied first, as `precedesTransparentRun` stops at text
-        buffer[buffer.length - 1] = '';
+        bufferSet(buffer.length - 1, '');
         if (transparentGapIndex === buffer.length - 1) transparentGapIndex = -1;
-        buffer[buffer.length - 1] = options.conservativeCollapse || precedesTransparentRun(true) ? ' ' : '';
+        bufferSet(buffer.length - 1, options.conservativeCollapse || precedesTransparentRun(true) ? ' ' : '');
       }
     }
     // What an `htmlmin:ignore` block holds is unknown, so whitespace pending before it stays
@@ -2148,7 +2170,7 @@ async function minifyHTML(value, options, partialMarkup) {
                         }
                       }
 
-                      buffer[buffer.length - 1] = collapsedText;
+                      bufferSet(buffer.length - 1, collapsedText);
                     }
                   }
                 }
@@ -2241,7 +2263,7 @@ async function minifyHTML(value, options, partialMarkup) {
             const builtAttr = buildAttr(normalizedAttr, tag, hasUnarySlash, optionsTag, i === lastKeptIndex, uidAttr, markers);
             // One entry with the tag name, so that no line break can come between them
             if (i === 0 && fragmentJoinsTag) {
-              buffer[buffer.length - 1] += builtAttr;
+              bufferSet(buffer.length - 1, (buffer[buffer.length - 1] ?? '') + builtAttr);
             } else {
               bufferPush(builtAttr, true);
             }
@@ -2253,7 +2275,7 @@ async function minifyHTML(value, options, partialMarkup) {
       optionalStartTag = tag;
     }
 
-    buffer[buffer.length - 1] += tagText + (hasUnarySlash ? '/' : '') + '>';
+    bufferSet(buffer.length - 1, (buffer[buffer.length - 1] ?? '') + tagText + (hasUnarySlash ? '/' : '') + '>');
 
     impliedStartTag = autoGenerated && !options.includeAutoGeneratedTags ? tag : '';
     if (impliedStartTag) {
@@ -2869,7 +2891,7 @@ async function minifyHTML(value, options, partialMarkup) {
     for (let i = 0; i < buffer.length; i++) {
       const segment = /** @type {string} */ (buffer[i]);
       if (segment.indexOf(uidSVGRawText) !== -1) {
-        buffer[i] = segment.replace(pattern, (/** @type {string} */ match, /** @type {string} */ index) => svgRawTexts[+index] ?? match);
+        bufferSet(i, segment.replace(pattern, (/** @type {string} */ match, /** @type {string} */ index) => svgRawTexts[+index] ?? match));
       }
     }
   }
