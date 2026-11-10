@@ -41,6 +41,8 @@ const fragmentReferenceAttributes = new Set([
 
 const attributePattern = /(?:^|[\s/])([-\w:.]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+))/g;
 const identifierPattern = /--[\w-]*|-?[A-Za-z_][\w-]*/g;
+const whitespacePattern = /\s/;
+const whitespaceRunPattern = /\s+/;
 // SVG paints and filters reach elements by ID through `url(#gradient)`, in
 // presentation attributes as well as in `style`
 const fragmentURLPattern = /url\(\s*['"]?#([^)'"\s]+)/gi;
@@ -58,8 +60,8 @@ const cssIdentifierPattern = /(?<!\\)[.#]((?:[-_a-zA-Z]|\\[0-9a-fA-F]{1,6}[ \t\n
 // name used there is off limits even when no element carries it as a class or ID
 const reservedAtRulePattern = /@(?:-\w+-)?(?:keyframes|counter-style)\s+(-?[_a-zA-Z][\w-]*)/gi;
 const escapePattern = /\\(?:([0-9a-fA-F]{1,6})[ \t\n]?|(.))/g;
-// Run over case-folded markup; matches inside comments and scripts only add names
-const startTagPattern = /<([a-z][^\s/>]*)/g;
+// Matches inside comments and scripts only add names
+const startTagPattern = /<([a-z][^\s/>]*)/gi;
 
 /**
  * Resolve CSS escape sequences in an identifier.
@@ -83,20 +85,43 @@ function unescapeIdentifier(identifier) {
 }
 
 /**
- * Lowercase for matching without disturbing offsets.
- *
- * `toLowerCase()` can change a string's length—U+0130 becomes two code units—which
- * would misalign every offset taken from the result. Folding just ASCII preserves
- * length, and tag names are ASCII anyway.
- *
+ * Add what `identifierPattern` matches in `text`
  * @param {string} text
- * @returns {string} Same length as `text`
+ * @param {Set<string>} used
+ * @param {Set<string>} [names] - Also receives each identifier lowercased
+ * @param {Set<string>} [seen] - Identifiers added before, which are skipped
  */
-function foldCase(text) {
-  const lowercased = text.toLowerCase();
-  return lowercased.length === text.length
-    ? lowercased
-    : text.replace(/[A-Z]+/g, uppercase => uppercase.toLowerCase());
+function addIdentifiers(text, used, names, seen) {
+  for (const identifier of text.match(identifierPattern) ?? []) {
+    if (seen) {
+      if (seen.has(identifier)) {
+        continue;
+      }
+      seen.add(identifier);
+    }
+    used.add(identifier);
+    names?.add(identifier.toLowerCase());
+  }
+}
+
+/**
+ * Add what splitting `text` at `/\s+/` yields, but empty strings
+ * @param {string} text
+ * @param {Set<string>} used
+ */
+function addTokens(text, used) {
+  // Most values are a single token, which needs no array
+  if (!whitespacePattern.test(text)) {
+    if (text) {
+      used.add(text);
+    }
+    return;
+  }
+  for (const token of text.split(whitespaceRunPattern)) {
+    if (token) {
+      used.add(token);
+    }
+  }
 }
 
 /**
@@ -107,15 +132,21 @@ function foldCase(text) {
  * quadratically over a document full of near-matches, and bounding it would make
  * long start tags go unrecognized.
  *
- * @param {string} haystack - Case-folded markup, as returned by `foldCase`
+ * Tag names are matched in ASCII case only, as browsers do, and on the markup itself,
+ * so offsets need no mapping back.
+ *
+ * @param {string} html
  * @param {string} tagName - Lowercase element name
  * @returns {Array<{start: number, bodyStart: number, bodyEnd: number, end: number, closed: boolean}>}
  */
-function findRawTextElements(haystack, tagName) {
+function findRawTextElements(html, tagName) {
   /** @type {Array<{start: number, bodyStart: number, bodyEnd: number, end: number, closed: boolean}>} */
   const found = [];
-  const openTag = '<' + tagName;
-  const closeTag = '</' + tagName;
+  // Without the `u` flag, `i` folds no non-ASCII character into ASCII
+  const openTag = new RegExp('<' + tagName, 'gi');
+  const closeTag = new RegExp('</' + tagName, 'gi');
+  const lengthOpen = tagName.length + 1;
+  const lengthClose = tagName.length + 2;
   // A tag name ends at whitespace, a slash, or the closing bracket—so `<styles>`
   // and `</scriptfoo>` name different elements and must not match
   const endsName = (/** @type {string} */ character) =>
@@ -123,17 +154,18 @@ function findRawTextElements(haystack, tagName) {
 
   let cursor = 0;
   for (;;) {
-    const start = haystack.indexOf(openTag, cursor);
+    openTag.lastIndex = cursor;
+    const start = openTag.exec(html)?.index ?? -1;
     if (start === -1) {
       break;
     }
-    if (!endsName(haystack.charAt(start + openTag.length))) {
-      cursor = start + openTag.length;
+    if (!endsName(html.charAt(start + lengthOpen))) {
+      cursor = start + lengthOpen;
       continue;
     }
     // A quoted attribute value may hold a `>`, so the tag ends where the parser
     // says it does, not at the next bracket
-    const startTagEnd = findTagEnd(haystack, start + openTag.length);
+    const startTagEnd = findTagEnd(html, start + lengthOpen);
     if (startTagEnd === -1) {
       break;
     }
@@ -143,30 +175,31 @@ function findRawTextElements(haystack, tagName) {
     let bodyEnd = -1;
     let end = -1;
     for (;;) {
-      const candidate = haystack.indexOf(closeTag, search);
+      closeTag.lastIndex = search;
+      const candidate = closeTag.exec(html)?.index ?? -1;
       if (candidate === -1) {
         break;
       }
-      if (endsName(haystack.charAt(candidate + closeTag.length))) {
-        const closeEnd = findTagEnd(haystack, candidate + closeTag.length);
+      if (endsName(html.charAt(candidate + lengthClose))) {
+        const closeEnd = findTagEnd(html, candidate + lengthClose);
         if (closeEnd !== -1) {
           bodyEnd = candidate;
           end = closeEnd + 1;
         }
         break;
       }
-      search = candidate + closeTag.length;
+      search = candidate + lengthClose;
     }
 
     const closed = bodyEnd !== -1;
     found.push({
       start,
       bodyStart,
-      bodyEnd: closed ? bodyEnd : haystack.length,
-      end: closed ? end : haystack.length,
+      bodyEnd: closed ? bodyEnd : html.length,
+      end: closed ? end : html.length,
       closed
     });
-    cursor = closed ? end : haystack.length;
+    cursor = closed ? end : html.length;
   }
 
   return found;
@@ -189,38 +222,19 @@ function findRawTextElements(haystack, tagName) {
  */
 function collectUsedSymbols(html, includeScripts, decode, elements) {
   const used = new Set();
-  const haystack = foldCase(html);
 
-  // Style sheets are skipped rather than cut out, so both scans share one folded
-  // copy and offsets keep pointing into `html`. Only the body is skipped—the start
-  // tag carries ordinary attributes, and `<style id="theme">` could be what
-  // `#theme` refers to. An unclosed element is not skipped: Reading its contents
-  // as markup can only add symbols, whereas ignoring the rest of the document
-  // would lose them.
-  const skipped = findRawTextElements(haystack, 'style')
+  // Style sheets are skipped rather than cut out, so offsets keep pointing into
+  // `html`. Only the body is skipped—the start tag carries ordinary attributes,
+  // and `<style id="theme">` could be what `#theme` refers to. An unclosed
+  // element is not skipped: Reading its contents as markup can only add symbols,
+  // whereas ignoring the rest of the document would lose them.
+  const skipped = findRawTextElements(html, 'style')
     .filter(element => element.closed)
     .map(element => ({ start: element.bodyStart, end: element.bodyEnd }));
 
   if (elements) {
-    collectUsedElements(haystack, skipped, elements);
+    collectUsedElements(html, skipped, elements);
   }
-
-  const addIdentifiers = (/** @type {string} */ text, /** @type {Set<string> | undefined} */ names = undefined) => {
-    identifierPattern.lastIndex = 0;
-    let identifier;
-    while ((identifier = identifierPattern.exec(text))) {
-      used.add(identifier[0]);
-      names?.add(identifier[0].toLowerCase());
-    }
-  };
-
-  const addTokens = (/** @type {string} */ text) => {
-    for (const token of text.split(/\s+/)) {
-      if (token) {
-        used.add(token);
-      }
-    }
-  };
 
   // Both loops below walk forward, so one cursor over the skipped ranges suffices
   let skipCursor = 0;
@@ -243,20 +257,20 @@ function collectUsedSymbols(html, includeScripts, decode, elements) {
     // `class="us&#101;d"` names the class `used`, so compare against the decoded value
     const value = (decode && raw.indexOf('&') !== -1) ? decode(raw) : raw;
     if (name === 'class' || name === 'id' || idReferenceAttributes.has(name)) {
-      addTokens(value);
+      addTokens(value, used);
     } else if (name.startsWith('data-')) {
       // Class names are commonly parked in `data-*` attributes for scripts to apply later
-      addIdentifiers(value);
-      addTokens(value);
+      addIdentifiers(value, used);
+      addTokens(value, used);
     } else if (fragmentReferenceAttributes.has(name) && value.charAt(0) === '#') {
       // Only a leading `#`: `href="/page#sec"` names a section of another document
-      addTokens(value.slice(1));
+      addTokens(value.slice(1), used);
     }
     if (value.indexOf('(') !== -1) {
       fragmentURLPattern.lastIndex = 0;
       let reference;
       while ((reference = fragmentURLPattern.exec(value))) {
-        addTokens(reference[1] ?? '');
+        addTokens(reference[1] ?? '', used);
       }
     }
   }
@@ -267,18 +281,21 @@ function collectUsedSymbols(html, includeScripts, decode, elements) {
     // isn’t tracked here, both readings count where they differ. An unclosed
     // `script` runs to the end of the document, as it does in a browser.
     skipCursor = 0;
-    for (const element of findRawTextElements(haystack, 'script')) {
+    // Scripts repeat their identifiers, which need adding only once
+    /** @type {Set<string>} */
+    const identifiersScript = new Set();
+    for (const element of findRawTextElements(html, 'script')) {
       if (isSkipped(element.start)) {
         continue;
       }
       const body = html.slice(element.bodyStart, element.bodyEnd);
       const decoded = (decode && body.indexOf('&') !== -1) ? decode(body) : body;
       for (const text of decoded === body ? [body] : [body, decoded]) {
-        addIdentifiers(text, elements);
+        addIdentifiers(text, used, elements, identifiersScript);
         stringLiteralPattern.lastIndex = 0;
         let literal;
         while ((literal = stringLiteralPattern.exec(text))) {
-          addTokens(literal[1] ?? literal[2] ?? literal[3] ?? '');
+          addTokens(literal[1] ?? literal[2] ?? literal[3] ?? '', used);
         }
       }
     }
@@ -342,11 +359,11 @@ function isSafelisted(symbol, safelist) {
 /**
  * Collect the element names a document contains, including those the parser
  * supplies when the markup leaves them out.
- * @param {string} haystack - Case-folded markup, as returned by `foldCase`
+ * @param {string} html
  * @param {Array<{start: number, end: number}>} skipped - Style sheet bodies, in document order
  * @param {Set<string>} elements - Lowercase element names, added to
  */
-function collectUsedElements(haystack, skipped, elements) {
+function collectUsedElements(html, skipped, elements) {
   elements.add('html');
   elements.add('head');
   elements.add('body');
@@ -354,7 +371,7 @@ function collectUsedElements(haystack, skipped, elements) {
   let skipIndex = 0;
   startTagPattern.lastIndex = 0;
   let match;
-  while ((match = startTagPattern.exec(haystack))) {
+  while ((match = startTagPattern.exec(html))) {
     while (skipIndex < skipped.length && (skipped[skipIndex]?.end ?? 0) <= match.index) {
       skipIndex++;
     }
@@ -362,7 +379,7 @@ function collectUsedElements(haystack, skipped, elements) {
     if (element && match.index >= element.start) {
       continue;
     }
-    elements.add(match[1] ?? '');
+    elements.add((match[1] ?? '').toLowerCase());
   }
 }
 

@@ -18,10 +18,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 * Fixed `collapseAttributeWhitespace` trimming the `encoding` of `annotation-xml` elements, which browsers match as written, so that the element came to hold HTML rather than MathML (e.g., `encoding=" text/html "`)
 * Fixed `collapseWhitespace` removing spaces around `marquee` elements, which browsers render as inline blocks (e.g., `a <marquee>b</marquee> c`)
 * Fixed `removeEmptyElements` with `removeEmptyAttributes` keeping empty elements whose only reason to stay was an empty `id` that then got removed (e.g., `<div id=""></div>` became `<div></div>`)
+* Fixed `removeUnusedCSS` keeping rules for elements whose names match only where non-ASCII letters are lowercased, which browsers don’t do (e.g., `kbd` rules for `<\u212Abd>`, written with a Kelvin sign)
 
 ### Changed
 
 * Made `sortAttributes` and `sortClassNames` faster by not running CSS, JavaScript, JSON, and URL minification in their analysis pass, which only counts attributes and classes
+* Made `removeUnusedCSS` faster at collecting the classes and IDs a document uses
+* Made each `minify` call faster by reusing attribute and `ignoreCustomFragments` patterns across calls
+* Documented how SWC compares to Terser for JavaScript minification
 
 ## [5.0.3] - 2026-11-10
 

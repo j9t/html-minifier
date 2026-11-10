@@ -2041,6 +2041,30 @@ describe('HTML', () => {
     }));
   });
 
+  test('Parses attributes as each call’s options say, whatever other calls used', async () => {
+    const input = '<input {{#if value}}checked="checked"{{/if}} a"b=c>';
+    const surround = [[/\{\{#if\s+\w+\}\}/, /\{\{\/if\}\}/]];
+    const calls = [
+      [{ customAttrSurround: surround, continueOnParseError: true }, '<input {{#if value}}checked="checked" {{/if}}a"b=c>'],
+      [{ continueOnParseError: true }, input],
+      [{ customAttrSurround: [] }, null],
+      [{ customAttrAssign: [/\)?\]?=/], continueOnParseError: true }, input],
+      [{}, null]
+    ];
+    const run = async ([options, expected]) => {
+      if (expected === null) {
+        await assert.rejects(minify(input, options), /Parse error/);
+      } else {
+        assert.strictEqual(await minify(input, options), expected);
+      }
+    };
+
+    for (const call of [...calls, ...calls.toReversed()]) {
+      await run(call);
+    }
+    await Promise.all([...calls, ...calls].map(run));
+  });
+
   test('Preserves custom attribute-wrapping markup', async () => {
     let input, customAttrOptions;
 
