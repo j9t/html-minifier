@@ -6681,6 +6681,8 @@ describe('HTML', () => {
     // An `annotation-xml` encoding with spaces doesn’t make it hold HTML
     input = '<math><annotation-xml encoding=" text/html "><foo>a</foo></annotation-xml></math>';
     assert.strictEqual(await minify(input, { collapseAttributeWhitespace: true }), input);
+    input = '<math><annotation-XML ENCODING=" text/html "><foo>a</foo></annotation-XML></math>';
+    assert.strictEqual(await minify(input, { collapseAttributeWhitespace: true }), input);
 
     // Multiple spaces in `alt` attribute
     input = '<img src="example" alt="Dieser Blick könnte Rückschlüsse auf Jane Austens Skepsis nahelegen, doch das Miniaturbild  ist  postum entstanden, Ende des neunzehnten Jahrhunderts.">';

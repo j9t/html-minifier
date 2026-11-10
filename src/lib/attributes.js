@@ -783,7 +783,7 @@ function cleanAttributeValue(tag, attrName, attrValue, options, attrs, minifyHTM
   // Special spaces (no-break space, hair space, etc.) stay, for consistency
   // with `collapseWhitespace`; an `annotation-xml` encoding is matched as written,
   // and with spaces taken out could make the element hold HTML
-  if (options.collapseAttributeWhitespace && !collapseAttributeWhitespaceExempt.has(attrName) && !(attrName === 'value' && valueWhitespaceExemptElements.has(tag)) && !(attrName === 'encoding' && tag === 'annotation-xml') && !isEventAttr) {
+  if (options.collapseAttributeWhitespace && !collapseAttributeWhitespaceExempt.has(attrName) && !(attrName === 'value' && valueWhitespaceExemptElements.has(tag)) && !(attrName.toLowerCase() === 'encoding' && tag.toLowerCase() === 'annotation-xml') && !isEventAttr) {
     attrValue = collapseAttributeValue(attrValue);
   }
 
