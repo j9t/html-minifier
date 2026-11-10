@@ -218,12 +218,17 @@ function isRedundant(/** @type {any} */ node, /** @type {string} */ name, /** @t
   return false;
 }
 
+// Whether `removeEmptyAttributes` removes the attribute where it is empty
+const removesEmpty = (/** @type {string} */ tag, /** @type {string} */ name, /** @type {any} */ options) => typeof options.removeEmptyAttributes === 'function'
+  ? Boolean(options.removeEmptyAttributes(name, tag))
+  : Boolean(options.removeEmptyAttributes) && (RE_EMPTY_ATTRIBUTE.test(name) || isEventAttribute(name) || (tag === 'input' && name === 'value'));
+
 function isRemovedAttribute(/** @type {any} */ node, /** @type {string} */ name, /** @type {string} */ value, /** @type {any} */ options, /** @type {any} */ context) {
   const tag = node.tagName;
   // What a stray closing quote leaves, which the parser drops and which does nothing
   if (!value && RE_QUOTES_ONLY.test(name)) return true;
   if (context.selected.has(name)) return false;
-  if (options.removeEmptyAttributes && (isWsOnly(value) || (name === 'style' && RE_VALUELESS_STYLE.test(trim(value)))) && (RE_EMPTY_ATTRIBUTE.test(name) || isEventAttribute(name) || (tag === 'input' && name === 'value'))) return true;
+  if ((isWsOnly(value) || (name === 'style' && RE_VALUELESS_STYLE.test(trim(value)))) && removesEmpty(tag, name, options)) return true;
   if (options.removeRedundantAttributes && isRedundant(node, name, value, options, context)) return true;
   if (options.removeDefaultTypeAttributes && (isHTML(node) || tag === 'style') && name === 'type') {
     const type = trim(value.split(';', 1)[0] ?? '').toLowerCase();
@@ -366,7 +371,7 @@ function isEmptyRemovable(/** @type {any} */ node, /** @type {any} */ options, /
   if (!isHTML(node) && node.tagName !== 'svg' && node.tagName !== 'math') return false;
   const tag = node.tagName;
   const id = attrValue(node, 'id');
-  if (ELEMENTS_NOT_EMPTIED.has(tag) || tag.includes('-') || (id !== undefined && (id.trim() || !options.removeEmptyAttributes || context.selected.has('id')))) return false;
+  if (ELEMENTS_NOT_EMPTIED.has(tag) || tag.includes('-') || (id !== undefined && (id.trim() || !removesEmpty(tag, 'id', options) || context.selected.has('id')))) return false;
   if (ELEMENTS_RECREATED.has(tag) && node.attrs.length) return false;
   if ((options.removeEmptyElementsExcept ?? []).some((/** @type {string} */ spec) => spec.replace(/[<>]/g, '').split(/\s/)[0] === tag)) return false;
   for (const { name, value } of node.attrs) {
@@ -473,7 +478,7 @@ function canonicalize(source, options, scripting) {
   // empty element it sits in; SVGO, which may remove them, reads an SVG whole and by default
   // keeps those starting with `!`, trimmed
   const keepsAllSVGComments = !options.minifySVG;
-  const keepsMarkedSVGComments = options.minifySVG === true || (typeof options.minifySVG === 'object' && !options.minifySVG.plugins);
+  const keepsMarkedSVGComments = options.minifySVG === true || (typeof options.minifySVG === 'object' && options.minifySVG !== null && !options.minifySVG.plugins);
   const collectComments = (/** @type {any} */ node, /** @type {boolean} */ insideSVG) => {
     for (const child of childrenOf(node)) {
       if (child.nodeName === '#comment') {
@@ -604,7 +609,7 @@ function renderedText(root, options) {
       if (!isHTML(child)) {
         if (tag === 'svg' || tag === 'math') parts.push(REPLACED);
         // Text within SVG text runs on in these
-        if (tag === 'tspan' || tag === 'textPath') inline(child);
+        if (tag === 'a' || tag === 'tspan' || tag === 'textPath') inline(child);
         else foreign(child, pathChild);
       } else if (tag === 'template') {
         block(child.content, pathChild);

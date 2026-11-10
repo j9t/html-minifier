@@ -10,6 +10,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 * Fixed `mergeScripts` joining scripts on one line after a last line holding `<!--` or `-->`, which browsers read as starting a comment, so that the next script didn’t run (e.g., `a()\n<!--b-->` before `c()`)
 * Fixed `mergeScripts` merging a script holding `<!--` with one holding `<script`, which browsers then didn’t end at `</script>`, so that the rest of the document became script text (e.g., `a="<!--"` before `b="<script>"`)
+* Fixed `mergeScripts` joining a script that starts with `-->` on the line before it, where browsers no longer read it as a comment, which broke the merged script (e.g., `a()` before `-->b`)
 * Fixed `removeOptionalTags` omitting `</li>`, `</dd>`, and `</dt>` before end tags that don’t close these elements in browsers, which moved what follows into them (e.g., `<span><li>a</li></span><li>b`)
 * Fixed `minifySVG` removing whitespace from HTML in `foreignObject` elements, which joined words (e.g., `<p>a <b>b</b> c</p>` rendered as “abc”)
 * Fixed `minifyJS` and `minifyCSS` turning `NUL` characters in scripts and style sheets into `\0`, where browsers read `U+FFFD`

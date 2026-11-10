@@ -8956,6 +8956,14 @@ describe('HTML', () => {
     assert.strictEqual(await minify('<script>a()</script><script>(c)()</script>', options), '<script>a();(c)()</script>');
   });
 
+  test('Keeps a `-->` comment starting a merged script at the start of a line', async () => {
+    const options = { mergeScripts: true };
+
+    assert.strictEqual(await minify('<script>a()</script><script>-->b\nc()</script>', options), '<script>a();\n-->b\nc()</script>');
+    assert.strictEqual(await minify('<script>a();</script><script>-->b\nc()</script>', options), '<script>a();\n-->b\nc()</script>');
+    assert.strictEqual(await minify('<script>a="<!--"</script><script>-->b\nc()</script>', options), '<script>a="<!--"\n;\n-->b\nc()</script>');
+  });
+
   test('Doesn’t merge scripts where `<!--` in one would make `<script` in the next keep the element open', async () => {
     const options = { mergeScripts: true };
 

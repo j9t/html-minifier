@@ -837,13 +837,14 @@ function mergeConsecutiveScripts(html, hasMathML = false) {
       if (mergedContent.indexOf('<!--') !== -1 && RE_SCRIPT_START_TEXT.test(content2)) break;
 
       // Join with a semicolon, after a newline where the first may end in a `//`, `<!--`,
-      // or `-->` comment, all of which browsers read as running to the end of the line
+      // or `-->` comment, all of which browsers read as running to the end of the line,
+      // and before one where the second starts with `-->`, a comment only there
       const c1 = mergedContent.trim();
       const c2 = content2.trim();
       if (c1 && c2) {
         const lastLine = c1.slice(c1.lastIndexOf('\n') + 1);
         const separator = /\/\/|<!--|-->/.test(lastLine) ? '\n;' : (c1.endsWith(';') ? '' : ';');
-        mergedContent = c1 + separator + c2;
+        mergedContent = c1 + separator + (c2.startsWith('-->') ? '\n' : '') + c2;
       } else {
         mergedContent = c1 || c2;
       }
