@@ -367,8 +367,13 @@ function mergeText(/** @type {any} */ node) {
   if (node.content) mergeText(node.content);
 }
 
-function isEmptyRemovable(/** @type {any} */ node, /** @type {any} */ options, /** @type {any} */ context) {
-  if (!isHTML(node) && node.tagName !== 'svg' && node.tagName !== 'math') return false;
+// Where foreign content holds HTML, as for the minifier
+const holdsHTML = (/** @type {any} */ node) => !node.namespaceURI || isHTML(node) || node.tagName === 'foreignObject' ||
+  (node.tagName === 'annotation-xml' && /^(?:text\/html|application\/xhtml\+xml)$/i.test(trim(attrValue(node, 'encoding') ?? '')));
+
+function isEmptyRemovable(/** @type {any} */ node, /** @type {any} */ parent, /** @type {any} */ options, /** @type {any} */ context) {
+  // Only SVG and MathML roots in HTML go, not ones nested in foreign content
+  if (!isHTML(node) && !((node.tagName === 'svg' || node.tagName === 'math') && holdsHTML(parent))) return false;
   const tag = node.tagName;
   const id = attrValue(node, 'id');
   if (ELEMENTS_NOT_EMPTIED.has(tag) || tag.includes('-') || (id !== undefined && (id.trim() || !removesEmpty(tag, 'id', options) || context.selected.has('id')))) return false;
@@ -387,7 +392,7 @@ function pruneEmptyElements(/** @type {any} */ node, /** @type {any} */ options,
   if (node.childNodes) {
     for (const child of node.childNodes) pruneEmptyElements(child, options, context);
     node.childNodes = node.childNodes.filter((/** @type {any} */ child) => {
-      if (!child.tagName || !isEmptyRemovable(child, options, context)) return true;
+      if (!child.tagName || !isEmptyRemovable(child, node, options, context)) return true;
       // Styles can minify to nothing and then go
       if (child.tagName === 'style' && options.minifyCSS) return false;
       if (child.tagName === 'script' && options.minifyJS && isInertScript(child.childNodes[0]?.value ?? '')) return false;

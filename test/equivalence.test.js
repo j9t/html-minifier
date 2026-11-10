@@ -43,6 +43,8 @@ describe('Equivalence', () => {
       ['<svg><!-- a --><rect/></svg>', '<svg><rect/></svg>', { minifySVG: true }],
       ['<svg><!--! a --><rect/></svg>', '<svg><!--! a--><rect/></svg>', { minifySVG: true }],
       ['<svg><!-- a --><rect/></svg>', '<svg><!-- a --><rect/></svg>', { minifySVG: null }],
+      ['<svg><foreignObject><svg></svg></foreignObject></svg>x', '<svg><foreignObject></foreignObject></svg>x', { removeEmptyAttributes: true, removeEmptyElements: true }],
+      ['<math><annotation-xml encoding="text/html"><svg></svg></annotation-xml></math>x', '<math><annotation-xml encoding="text/html"></annotation-xml></math>x', { removeEmptyAttributes: true, removeEmptyElements: true }],
       ['<p class="" title="">a</p><div id=""></div>', '<p title="">a</p>', { removeEmptyAttributes: (/** @type {string} */ name) => name !== 'title', removeEmptyElements: true }]
     ]);
     for (const [input, output, options] of cases) {
@@ -73,6 +75,8 @@ describe('Equivalence', () => {
       ['<svg><!--! a --><rect/></svg>', '<svg><rect/></svg>', { minifySVG: true }, 'tree'],
       ['<p class="">a</p>', '<p>a</p>', { removeEmptyAttributes: () => false }, 'tree'],
       ['<div id=""></div>x', 'x', { removeEmptyAttributes: () => false, removeEmptyElements: true }, 'tree'],
+      ['<svg><svg></svg><rect/></svg>x', '<svg><rect/></svg>x', { removeEmptyAttributes: true, removeEmptyElements: true }, 'tree'],
+      ['<math><mi>a</mi><math></math></math>x', '<math><mi>a</mi></math>x', { removeEmptyAttributes: true, removeEmptyElements: true }, 'tree'],
       ['<style>[id]{top:0}</style><div id=""></div>x', '<style>[id]{top:0}</style>x', { removeEmptyAttributes: true, removeEmptyElements: true }, 'tree']
     ]);
     for (const [input, output, options, kind] of cases) {
