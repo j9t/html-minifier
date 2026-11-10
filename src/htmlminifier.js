@@ -669,6 +669,7 @@ const cacheStatsOrEmpty = (cache) => cache ? cache.stats() : { gets: 0, hits: 0,
 const RE_SCRIPT_ATTRS = /([^\s=]+)(?:=(?:"([^"]*)"|'([^']*)'|([^\s>]+)))?/g;
 const RE_SCRIPT_OPEN = /<script(?=[\s>])/gi; // Finds tag start; use `findTagEnd()` for the actual closing `>`
 const RE_SCRIPT_CLOSE = /<\/script\s*>/gi;
+const RE_SCRIPT_START_TEXT = /<script[\t\n\f\r />]/i; // As script text, after `<!--`
 const RE_MATH_TAG = /<(\/?)math(?=[\s/>])/gi;
 const SCRIPT_BOOL_ATTRS = new Set(['async', 'defer', 'nomodule']);
 const DEFAULT_JS_TYPES = new Set(['', 'text/javascript', 'application/javascript']);
@@ -830,9 +831,13 @@ function mergeConsecutiveScripts(html, hasMathML = false) {
       }
       if (boolConflict || a1.nonce !== a2.nonce || (!mergedAny && insideMath(m1.index))) break;
 
+      const content2 = html.slice(tagEnd2 + 1, close2.index);
+      // After `<!--`, `<script` opens a state `</script>` doesn’t end,
+      // which would swallow what follows the merged script
+      if (mergedContent.indexOf('<!--') !== -1 && RE_SCRIPT_START_TEXT.test(content2)) break;
+
       // Join with a semicolon, after a newline where the first may end in a `//`, `<!--`,
       // or `-->` comment, all of which browsers read as running to the end of the line
-      const content2 = html.slice(tagEnd2 + 1, close2.index);
       const c1 = mergedContent.trim();
       const c2 = content2.trim();
       if (c1 && c2) {

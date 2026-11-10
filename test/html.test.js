@@ -8955,6 +8955,14 @@ describe('HTML', () => {
     assert.strictEqual(await minify('<script>a()</script><script>(c)()</script>', options), '<script>a();(c)()</script>');
   });
 
+  test('Doesn’t merge scripts where `<!--` in one would make `<script` in the next keep the element open', async () => {
+    const options = { mergeScripts: true };
+
+    assert.strictEqual(await minify('<script>a="<!--"</script><script>b="<script>"</script><p>x</p>', options), '<script>a="<!--"</script><script>b="<script>"</script><p>x</p>');
+    assert.strictEqual(await minify('<script>a="<!--"</script><script>b="<SCRIPT "</script><p>x</p>', options), '<script>a="<!--"</script><script>b="<SCRIPT "</script><p>x</p>');
+    assert.strictEqual(await minify('<script>a="<!--"</script><script>b()</script><script>c="<script>"</script>', options), '<script>a="<!--"\n;b()</script><script>c="<script>"</script>');
+  });
+
   test('Keeps whitespace after inline elements that hold SVG, MathML, or form controls', async () => {
     const options = { collapseWhitespace: true };
 
