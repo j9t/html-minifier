@@ -5909,6 +5909,12 @@ describe('HTML', () => {
     assert.strictEqual(await minify('<p><span>a </span><!-- c --> </p><p><em>b </em><span></span> </p>', remove), '<p><span>a</span></p><p><em>b</em></p>');
     assert.strictEqual(await minify('<div>a <span></span></div><div>b <i> </i></div>', remove), '<div>a</div><div>b</div>');
 
+    // An omitted end tag taken out from before kept text shifts what follows it
+    assert.strictEqual(
+      await minify('<p> <b><td><li><td></td></dd><!-- c --></b><option></li><ul>y</option><!-- c -->y<dd><ul></div>  <ul><b></td> x ', { collapseWhitespace: true, preserveLineBreaks: true, removeOptionalTags: true, removeComments: true }),
+      '<p><b><td><li><td></b><option><ul>yy<dd><ul><ul><b> x'
+    );
+
     // Every level of a deep nest is trimmed, not just the innermost
     const depth = 50;
     assert.strictEqual(

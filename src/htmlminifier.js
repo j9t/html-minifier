@@ -1128,8 +1128,8 @@ async function minifyHTML(value, options, partialMarkup) {
   /** @type {HTMLAttribute[]} */
   const emptyAttrs = [];
 
-  // Entries already in it change through `bufferSet` or `bufferTruncate`, so that
-  // `trimSettledIndex` stays true
+  // While parsing, entries already in it change through `bufferSet`, `bufferRemove`,
+  // or `bufferTruncate`, so that `trimSettledIndex` stays true
   /** @type {string[]} */
   const buffer = [];
   // Where the last trim walk began that came to text it couldn’t trim, past end tags alone: A
@@ -1441,6 +1441,13 @@ async function minifyHTML(value, options, partialMarkup) {
     if (index <= trimSettledIndex) trimSettledIndex = -1;
   }
 
+  // Entries after `index` move down by one, so a settled walk from there on is no longer one
+  function bufferRemove(/** @type {number} */ index) {
+    buffer.splice(index, 1);
+    bufferTags?.splice(index, 1);
+    if (index <= trimSettledIndex) trimSettledIndex = -1;
+  }
+
   function bufferTruncate(/** @type {number} */ length) {
     buffer.length = Math.max(0, length);
     if (length <= trimSettledIndex) trimSettledIndex = -1;
@@ -1656,8 +1663,7 @@ async function minifyHTML(value, options, partialMarkup) {
     // kept text too, no matter how whitespace is collapsed elsewhere.
     const noTrim = insideNoTrim || stackNoTrimWhitespace.length > 0;
     if (index < buffer.length - 1 && (keepsWhitespace() || noTrim) && RE_END_TAG.test(text)) {
-      buffer.splice(index, 1);
-      bufferTags?.splice(index, 1);
+      bufferRemove(index);
       // Collapsed whitespace can merge, kept whitespace can leave a line of only whitespace
       if (!noTrim) {
         if (options.collapseWhitespace) {
