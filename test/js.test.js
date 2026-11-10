@@ -102,6 +102,13 @@ describe('JS', () => {
     assert.strictEqual(await minify(input, { minifyJS: true }), '<p onclick=\'x("&amp;copy b")\'>x</p>');
   });
 
+  test('Minifies `NUL` characters in scripts and style sheets as the replacement characters browsers read', async () => {
+    assert.strictEqual(await minify('<script>a="b\0"</script>', { minifyJS: true }), '<script>a="b�"</script>');
+    assert.strictEqual(await minify('<style>a::before{content:"b\0"}</style>', { minifyCSS: true }), '<style>a:before{content:"b�"}</style>');
+    // Unminified, they stay for browsers to replace
+    assert.strictEqual(await minify('<script>a="b\0"</script>'), '<script>a="b\0"</script>');
+  });
+
   test('Minifies the MIME types that trigger minification', async () => {
     let input, output;
 

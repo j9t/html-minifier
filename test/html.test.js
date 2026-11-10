@@ -2185,6 +2185,15 @@ describe('HTML', () => {
     assert.strictEqual(await minify('<p>x</p>', { removeEmptyElements: true }), '<p>x</p>');
     assert.strictEqual(await minify('<p></p>', { removeEmptyElements: true }), '');
 
+    // An `id` keeps an element only where it stays
+    assert.strictEqual(await minify('<div id=""></div>x', { removeEmptyElements: true }), '<div id=""></div>x');
+    assert.strictEqual(await minify('<div id=""></div>x', { removeEmptyAttributes: true, removeEmptyElements: true }), 'x');
+    assert.strictEqual(await minify('<div id=" "></div>x', { removeEmptyAttributes: true, removeEmptyElements: true }), 'x');
+    assert.strictEqual(await minify('<div id="a"></div>x', { removeEmptyAttributes: true, removeEmptyElements: true }), '<div id="a"></div>x');
+    assert.strictEqual(await minify('<style>[id]{top:0}</style><div id=""></div>x', { removeEmptyAttributes: true, removeEmptyElements: true }), '<style>[id]{top:0}</style><div id=""></div>x');
+    assert.strictEqual(await minify('<div id=""></div>x', { removeEmptyAttributes: () => false, removeEmptyElements: true }), '<div id=""></div>x');
+    assert.strictEqual(await minify('<DIV ID=""></DIV>x', { caseSensitive: true, removeEmptyAttributes: (/** @type {string} */ name, /** @type {string} */ tag) => tag === 'DIV' && name === 'ID', removeEmptyElements: true }), 'x');
+
     input = '<p>foo<span>bar</span><span></span></p>';
     output = '<p>foo<span>bar</span></p>';
     assert.strictEqual(await minify(input, { removeEmptyElements: true }), output);
@@ -5261,6 +5270,12 @@ describe('HTML', () => {
       assert.ok(!(await minify(`<${parent}><p>a</p></${parent}>`, { removeOptionalTags: true })).includes('</p>'), parent);
     }
 
+    // So are `</li>`, `</dd>`, and `</dt>`, as these are special elements, too
+    assert.strictEqual(await minify('<span><li>a</li></span><li>b', { removeOptionalTags: true }), '<span><li>a</li></span><li>b');
+    assert.strictEqual(await minify('<span><dd>a</dd></span><dd>b', { removeOptionalTags: true }), '<span><dd>a</dd></span><dd>b');
+    assert.strictEqual(await minify('<span><dt>a</dt></span><dd>b', { removeOptionalTags: true }), '<span><dt>a</dt></span><dd>b');
+    assert.strictEqual(await minify('<div><li>a</li></div><li>b', { removeOptionalTags: true }), '<div><li>a</div><li>b');
+
     // In quirks mode, which a legacy doctype may set, `table` doesn’t close a `p`
     const input = '<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN"><p>a</p><table><tr><td>b</table>';
     assert.strictEqual(await minify(input, { removeOptionalTags: true }), '<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN"><p>a</p><table><tr><td>b</table>');
@@ -5435,6 +5450,9 @@ describe('HTML', () => {
     assert.strictEqual(await minify(input, { collapseWhitespace: true }), output);
     output = '<form><input><output>Result</output><meter value="0.6">60%</meter><progress value="70" max="100">70%</progress></form>';
     assert.strictEqual(await minify(input, { collapseWhitespace: true, collapseInlineTagWhitespace: true }), output);
+
+    // `marquee` is an inline block, too
+    assert.strictEqual(await minify('<p>a <marquee>b</marquee> c</p>', { collapseWhitespace: true }), '<p>a <marquee>b</marquee> c</p>');
 
     // Preserve whitespace when input is in text flow (not between form controls)
     input = '<p>Enter name: <input> here</p>';
@@ -6659,6 +6677,12 @@ describe('HTML', () => {
     // Should collapse with `collapseAttributeWhitespace: true` (`title` is exempt)
     output = '<article title="foo  bar" data-selector="teaser-object parent-image-label picture-article" data-external-selector="teaser-object parent-image-label"></article>';
     assert.strictEqual(await minify(input, { collapseAttributeWhitespace: true }), output);
+
+    // An `annotation-xml` encoding with spaces doesn’t make it hold HTML
+    input = '<math><annotation-xml encoding=" text/html "><foo>a</foo></annotation-xml></math>';
+    assert.strictEqual(await minify(input, { collapseAttributeWhitespace: true }), input);
+    input = '<math><annotation-XML ENCODING=" text/html "><foo>a</foo></annotation-XML></math>';
+    assert.strictEqual(await minify(input, { collapseAttributeWhitespace: true }), input);
 
     // Multiple spaces in `alt` attribute
     input = '<img src="example" alt="Dieser Blick könnte Rückschlüsse auf Jane Austens Skepsis nahelegen, doch das Miniaturbild  ist  postum entstanden, Ende des neunzehnten Jahrhunderts.">';
@@ -8928,12 +8952,30 @@ describe('HTML', () => {
     assert.strictEqual(await minify('<p>a<b> <!-- c -->d</b></p>', { collapseWhitespace: true, removeComments: true }), '<p>a<b> d</b></p>');
   });
 
-  test('Separates merged scripts after a line that may hold a `//` comment', async () => {
+  test('Separates merged scripts after a line that may hold a `//`, `<!--`, or `-->` comment', async () => {
     const options = { mergeScripts: true };
 
     assert.strictEqual(await minify('<script>a="https://b"</script><script>(c)()</script>', options), '<script>a="https://b"\n;(c)()</script>');
     assert.strictEqual(await minify('<script>a() // b</script><script>(c)()</script>', options), '<script>a() // b\n;(c)()</script>');
+    assert.strictEqual(await minify('<script>a()\n<!--b--></script><script>c()</script>', options), '<script>a()\n<!--b-->\n;c()</script>');
+    assert.strictEqual(await minify('<script>a()\n--> b</script><script>c()</script>', options), '<script>a()\n--> b\n;c()</script>');
     assert.strictEqual(await minify('<script>a()</script><script>(c)()</script>', options), '<script>a();(c)()</script>');
+  });
+
+  test('Keeps a `-->` comment starting a merged script at the start of a line', async () => {
+    const options = { mergeScripts: true };
+
+    assert.strictEqual(await minify('<script>a()</script><script>-->b\nc()</script>', options), '<script>a();\n-->b\nc()</script>');
+    assert.strictEqual(await minify('<script>a();</script><script>-->b\nc()</script>', options), '<script>a();\n-->b\nc()</script>');
+    assert.strictEqual(await minify('<script>a="<!--"</script><script>-->b\nc()</script>', options), '<script>a="<!--"\n;\n-->b\nc()</script>');
+  });
+
+  test('Doesn’t merge scripts where `<!--` in one would make `<script` in the next keep the element open', async () => {
+    const options = { mergeScripts: true };
+
+    assert.strictEqual(await minify('<script>a="<!--"</script><script>b="<script>"</script><p>x</p>', options), '<script>a="<!--"</script><script>b="<script>"</script><p>x</p>');
+    assert.strictEqual(await minify('<script>a="<!--"</script><script>b="<SCRIPT "</script><p>x</p>', options), '<script>a="<!--"</script><script>b="<SCRIPT "</script><p>x</p>');
+    assert.strictEqual(await minify('<script>a="<!--"</script><script>b()</script><script>c="<script>"</script>', options), '<script>a="<!--"\n;b()</script><script>c="<script>"</script>');
   });
 
   test('Keeps whitespace after inline elements that hold SVG, MathML, or form controls', async () => {

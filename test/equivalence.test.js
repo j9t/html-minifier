@@ -39,7 +39,13 @@ describe('Equivalence', () => {
       ['<a href="x"" id="y">b</a>', '<a href="x" id="y">b</a>', {}],
       ['<iframe>a</noscript></body></html>', '<iframe>a</noscript>', {}],
       ['<script>a();</script>\n<script>b()</script>', '<script>a();b()</script>', { mergeScripts: true }],
-      ['<script>a() // c</script><script>b()</script>', '<script>a() // c\n;b()</script>', { mergeScripts: true }]
+      ['<script>a() // c</script><script>b()</script>', '<script>a() // c\n;b()</script>', { mergeScripts: true }],
+      ['<svg><!-- a --><rect/></svg>', '<svg><rect/></svg>', { minifySVG: true }],
+      ['<svg><!--! a --><rect/></svg>', '<svg><!--! a--><rect/></svg>', { minifySVG: true }],
+      ['<svg><!-- a --><rect/></svg>', '<svg><!-- a --><rect/></svg>', { minifySVG: null }],
+      ['<svg><foreignObject><svg></svg></foreignObject></svg>x', '<svg><foreignObject></foreignObject></svg>x', { removeEmptyAttributes: true, removeEmptyElements: true }],
+      ['<math><annotation-xml encoding="text/html"><svg></svg></annotation-xml></math>x', '<math><annotation-xml encoding="text/html"></annotation-xml></math>x', { removeEmptyAttributes: true, removeEmptyElements: true }],
+      ['<p class="" title="">a</p><div id=""></div>', '<p title="">a</p>', { removeEmptyAttributes: (/** @type {string} */ name) => name !== 'title', removeEmptyElements: true }]
     ]);
     for (const [input, output, options] of cases) {
       assert.deepStrictEqual(compareMarkup(input, output, options), [], input);
@@ -61,7 +67,19 @@ describe('Equivalence', () => {
       ['<style>a{background:url(https://example.org/b.png)}</style>', '<style>a{background:url(https://example.org/c.png)}</style>', { minifyCSS: true, minifyURLs: 'https://example.org/dir/page.html' }, 'tree'],
       ['<style>a{background:url(http://example.org/b.png)}</style>', '<style>a{background:url(//example.org/b.png)}</style>', { minifyCSS: true, minifyURLs: 'https://example.org/dir/page.html' }, 'tree'],
       ['<a "target="_blank">b</a>', '<a target="_blank">b</a>', {}, 'tree'],
-      ['<script>a()</script><script>(b)()</script>', '<script>a()(b)()</script>', { mergeScripts: true }, 'tree']
+      ['<script>a()</script><script>(b)()</script>', '<script>a()(b)()</script>', { mergeScripts: true }, 'tree'],
+      ['<svg><foreignObject><p>a <b>b</b></p></foreignObject></svg>', '<svg><foreignObject><p>a<b>b</b></p></foreignObject></svg>', { minifySVG: true }, 'render'],
+      ['<svg><text>a <tspan>b</tspan></text></svg>', '<svg><text>a<tspan>b</tspan></text></svg>', { minifySVG: true }, 'render'],
+      ['<svg><text><textPath>a</textPath></text></svg>', '<svg><text><textPath>b</textPath></text></svg>', { minifySVG: true }, 'render'],
+      ['<svg><text><a>a</a></text></svg>', '<svg><text><a>b</a></text></svg>', { minifySVG: true }, 'render'],
+      ['<svg><!--! a --><rect/></svg>', '<svg><rect/></svg>', { minifySVG: true }, 'tree'],
+      ['<p class="">a</p>', '<p>a</p>', { removeEmptyAttributes: () => false }, 'tree'],
+      ['<div id=""></div>x', 'x', { removeEmptyAttributes: () => false, removeEmptyElements: true }, 'tree'],
+      ['<svg><svg></svg><rect/></svg>x', '<svg><rect/></svg>x', { removeEmptyAttributes: true, removeEmptyElements: true }, 'tree'],
+      ['<math><mi>a</mi><math></math></math>x', '<math><mi>a</mi></math>x', { removeEmptyAttributes: true, removeEmptyElements: true }, 'tree'],
+      ['<math><annotation-xml encoding=" text/html "><svg></svg></annotation-xml></math>x', '<math><annotation-xml encoding=" text/html "></annotation-xml></math>x', { removeEmptyElements: true }, 'tree'],
+      ['<math><annotation-xml encoding=" text/html "></annotation-xml></math>', '<math><annotation-xml encoding="text/html"></annotation-xml></math>', { collapseAttributeWhitespace: true }, 'tree'],
+      ['<style>[id]{top:0}</style><div id=""></div>x', '<style>[id]{top:0}</style>x', { removeEmptyAttributes: true, removeEmptyElements: true }, 'tree']
     ]);
     for (const [input, output, options, kind] of cases) {
       assert.strictEqual(compareMarkup(input, output, options)[0]?.kind, kind, input);

@@ -218,12 +218,17 @@ function isRedundant(/** @type {any} */ node, /** @type {string} */ name, /** @t
   return false;
 }
 
+// Whether `removeEmptyAttributes` removes the attribute where it is empty
+const removesEmpty = (/** @type {string} */ tag, /** @type {string} */ name, /** @type {any} */ options) => typeof options.removeEmptyAttributes === 'function'
+  ? Boolean(options.removeEmptyAttributes(name, tag))
+  : Boolean(options.removeEmptyAttributes) && (RE_EMPTY_ATTRIBUTE.test(name) || isEventAttribute(name) || (tag === 'input' && name === 'value'));
+
 function isRemovedAttribute(/** @type {any} */ node, /** @type {string} */ name, /** @type {string} */ value, /** @type {any} */ options, /** @type {any} */ context) {
   const tag = node.tagName;
   // What a stray closing quote leaves, which the parser drops and which does nothing
   if (!value && RE_QUOTES_ONLY.test(name)) return true;
   if (context.selected.has(name)) return false;
-  if (options.removeEmptyAttributes && (isWsOnly(value) || (name === 'style' && RE_VALUELESS_STYLE.test(trim(value)))) && (RE_EMPTY_ATTRIBUTE.test(name) || isEventAttribute(name) || (tag === 'input' && name === 'value'))) return true;
+  if ((isWsOnly(value) || (name === 'style' && RE_VALUELESS_STYLE.test(trim(value)))) && removesEmpty(tag, name, options)) return true;
   if (options.removeRedundantAttributes && isRedundant(node, name, value, options, context)) return true;
   if (options.removeDefaultTypeAttributes && (isHTML(node) || tag === 'style') && name === 'type') {
     const type = trim(value.split(';', 1)[0] ?? '').toLowerCase();
@@ -244,7 +249,7 @@ function canonicalizeValue(/** @type {any} */ node, /** @type {string} */ name, 
   const tag = node.tagName;
   const html = isHTML(node);
   let value = raw;
-  if (options.collapseAttributeWhitespace && !ATTRIBUTES_WHITESPACE_KEPT.has(name) && !(name === 'value' && ELEMENTS_VALUE_KEPT.has(tag)) && !isEventAttribute(name)) {
+  if (options.collapseAttributeWhitespace && !ATTRIBUTES_WHITESPACE_KEPT.has(name) && !(name === 'value' && ELEMENTS_VALUE_KEPT.has(tag)) && !(name === 'encoding' && tag === 'annotation-xml') && !isEventAttribute(name)) {
     value = trim(value).replace(RE_WS_RUN, ' ');
   }
   if (options.collapseBooleanAttributes && html && !tag.includes('-')) {
@@ -362,10 +367,16 @@ function mergeText(/** @type {any} */ node) {
   if (node.content) mergeText(node.content);
 }
 
-function isEmptyRemovable(/** @type {any} */ node, /** @type {any} */ options) {
-  if (!isHTML(node) && node.tagName !== 'svg' && node.tagName !== 'math') return false;
+// Where foreign content holds HTML, with the encoding matched as written, as browsers do
+const holdsHTML = (/** @type {any} */ node) => !node.namespaceURI || isHTML(node) || node.tagName === 'foreignObject' ||
+  (node.tagName === 'annotation-xml' && /^(?:text\/html|application\/xhtml\+xml)$/i.test(attrValue(node, 'encoding') ?? ''));
+
+function isEmptyRemovable(/** @type {any} */ node, /** @type {any} */ parent, /** @type {any} */ options, /** @type {any} */ context) {
+  // Only SVG and MathML roots in HTML go, not ones nested in foreign content
+  if (!isHTML(node) && !((node.tagName === 'svg' || node.tagName === 'math') && holdsHTML(parent))) return false;
   const tag = node.tagName;
-  if (ELEMENTS_NOT_EMPTIED.has(tag) || tag.includes('-') || attrValue(node, 'id') !== undefined) return false;
+  const id = attrValue(node, 'id');
+  if (ELEMENTS_NOT_EMPTIED.has(tag) || tag.includes('-') || (id !== undefined && (id.trim() || !removesEmpty(tag, 'id', options) || context.selected.has('id')))) return false;
   if (ELEMENTS_RECREATED.has(tag) && node.attrs.length) return false;
   if ((options.removeEmptyElementsExcept ?? []).some((/** @type {string} */ spec) => spec.replace(/[<>]/g, '').split(/\s/)[0] === tag)) return false;
   for (const { name, value } of node.attrs) {
@@ -377,11 +388,11 @@ function isEmptyRemovable(/** @type {any} */ node, /** @type {any} */ options) {
   return !(tag === 'applet' && attrValue(node, 'code') !== undefined);
 }
 
-function pruneEmptyElements(/** @type {any} */ node, /** @type {any} */ options) {
+function pruneEmptyElements(/** @type {any} */ node, /** @type {any} */ options, /** @type {any} */ context) {
   if (node.childNodes) {
-    for (const child of node.childNodes) pruneEmptyElements(child, options);
+    for (const child of node.childNodes) pruneEmptyElements(child, options, context);
     node.childNodes = node.childNodes.filter((/** @type {any} */ child) => {
-      if (!child.tagName || !isEmptyRemovable(child, options)) return true;
+      if (!child.tagName || !isEmptyRemovable(child, node, options, context)) return true;
       // Styles can minify to nothing and then go
       if (child.tagName === 'style' && options.minifyCSS) return false;
       if (child.tagName === 'script' && options.minifyJS && isInertScript(child.childNodes[0]?.value ?? '')) return false;
@@ -389,7 +400,7 @@ function pruneEmptyElements(/** @type {any} */ node, /** @type {any} */ options)
       return content.some((/** @type {any} */ grandchild) => grandchild.nodeName !== '#text' || !isWsOnly(grandchild.value));
     });
   }
-  if (node.content) pruneEmptyElements(node.content, options);
+  if (node.content) pruneEmptyElements(node.content, options, context);
 }
 
 // Removing `meta` elements without effect and replacing the content-type pragma
@@ -469,13 +480,22 @@ function canonicalize(source, options, scripting) {
   const context = { hasBase, selected: findSelected(document) };
   if (options.removeComments) stripComments(document);
   // Where a comment ends up around the document’s elements does nothing, and it goes with an
-  // empty element it sits in
-  if (!options.removeEmptyElements) {
-    walk(document, node => {
-      if (node.nodeName === '#comment') comments.push(node.data);
-    });
-  }
-  if (options.removeEmptyElements) pruneEmptyElements(document, options);
+  // empty element it sits in; SVGO, which may remove them, reads an SVG whole and by default
+  // keeps those starting with `!`, trimmed
+  const keepsAllSVGComments = !options.minifySVG;
+  const keepsMarkedSVGComments = options.minifySVG === true || (typeof options.minifySVG === 'object' && options.minifySVG !== null && !options.minifySVG.plugins);
+  const collectComments = (/** @type {any} */ node, /** @type {boolean} */ insideSVG) => {
+    for (const child of childrenOf(node)) {
+      if (child.nodeName === '#comment') {
+        if (!insideSVG || keepsAllSVGComments) comments.push(child.data);
+        else if (keepsMarkedSVGComments && trim(child.data).startsWith('!')) comments.push(trim(child.data));
+      } else {
+        collectComments(child, insideSVG || child.tagName === 'svg');
+      }
+    }
+  };
+  if (!options.removeEmptyElements) collectComments(document, false);
+  if (options.removeEmptyElements) pruneEmptyElements(document, options, context);
   mergeText(document);
   if (options.removeRedundantAttributes) canonicalizeMeta(document);
   const body = document.childNodes.find(child => child.nodeName === 'html')?.childNodes.find((/** @type {any} */ child) => child.tagName === 'body');
@@ -593,7 +613,9 @@ function renderedText(root, options) {
       const pathChild = `${path}/${tag}`;
       if (!isHTML(child)) {
         if (tag === 'svg' || tag === 'math') parts.push(REPLACED);
-        foreign(child, pathChild);
+        // Text within SVG text runs on in these
+        if (tag === 'a' || tag === 'tspan' || tag === 'textPath') inline(child);
+        else foreign(child, pathChild);
       } else if (tag === 'template') {
         block(child.content, pathChild);
       } else if (ELEMENTS_NOT_RENDERED.has(tag) || (tag === 'input' && trim(attrValue(child, 'type') ?? '').toLowerCase() === 'hidden')) {
@@ -686,7 +708,8 @@ export function compareMarkup(input, output, options) {
     const canonicalIn = canonicalize(input, options, scripting);
     const canonicalOut = canonicalize(output, options, scripting);
     const differences = diffLines('tree', canonicalIn.lines, canonicalOut.lines);
-    if (options.collapseWhitespace || options.removeOptionalTags || options.removeEmptyElements) {
+    // An SVG SVGO reads is opaque to the tree, so its HTML is compared as rendered
+    if (options.collapseWhitespace || options.removeOptionalTags || options.removeEmptyElements || options.minifySVG) {
       differences.push(...diffLines('render', renderedText(canonicalIn.document, options), renderedText(canonicalOut.document, options)));
     }
     if (options.minifyJS) {

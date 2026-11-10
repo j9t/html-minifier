@@ -698,6 +698,32 @@ function canDeleteEmptyAttribute(tag, attrName, attrValue, options, tagOut = tag
 }
 
 /**
+ * The name to write and to hand to hooks: as in the source for HTML names under
+ * `caseSensitive`, as named otherwise (foreign names are named as written anyway)
+ * @param {HTMLAttribute} attr
+ * @param {string} attrName
+ * @param {ProcessedOptions} options
+ */
+function nameAttrOut(attr, attrName, options) {
+  return options.namesAsWritten && options.name === lowercase ? attr.name : attrName;
+}
+
+/**
+ * Whether `removeEmptyAttributes` removes the attribute
+ * @param {string} tag
+ * @param {string} attrName
+ * @param {string | undefined} attrValue
+ * @param {ProcessedOptions} options
+ * @param {string} [tagOut]
+ * @param {string} [attrNameOut]
+ */
+function removesEmptyAttribute(tag, attrName, attrValue, options, tagOut = tag, attrNameOut = attrName) {
+  return Boolean(options.removeEmptyAttributes) &&
+    canDeleteEmptyAttribute(tag, attrName, attrValue, options, tagOut, attrNameOut) &&
+    !isAttributeSelected(attrName, options);
+}
+
+/**
  * @param {string} name
  * @param {HTMLAttribute[]} attrs
  */
@@ -755,8 +781,9 @@ function cleanAttributeValue(tag, attrName, attrValue, options, attrs, minifyHTM
   const isEventAttr = isEventAttribute(attrName, options, attrNameOut);
 
   // Special spaces (no-break space, hair space, etc.) stay, for consistency
-  // with `collapseWhitespace`
-  if (options.collapseAttributeWhitespace && !collapseAttributeWhitespaceExempt.has(attrName) && !(attrName === 'value' && valueWhitespaceExemptElements.has(tag)) && !isEventAttr) {
+  // with `collapseWhitespace`; an `annotation-xml` encoding is matched as written,
+  // and with spaces taken out could make the element hold HTML
+  if (options.collapseAttributeWhitespace && !collapseAttributeWhitespaceExempt.has(attrName) && !(attrName === 'value' && valueWhitespaceExemptElements.has(tag)) && !(attrName.toLowerCase() === 'encoding' && tag.toLowerCase() === 'annotation-xml') && !isEventAttr) {
     attrValue = collapseAttributeValue(attrValue);
   }
 
@@ -1048,9 +1075,7 @@ function chooseAttributeQuote(attrValue, options) {
  */
 function normalizeAttr(attr, attrs, tag, tagOut, options, minifyHTML, markers) {
   const attrName = options.name(attr.name);
-  // The name to write and to hand to hooks: as in the source for HTML names
-  // under `caseSensitive`, as named otherwise (foreign names are named as written anyway)
-  const attrNameOut = options.namesAsWritten && options.name === lowercase ? attr.name : attrName;
+  const attrNameOut = nameAttrOut(attr, attrName, options);
   const attrValue = attr.value;
 
   // Entity decoding requires a lazy import—async only while that import is unresolved
@@ -1111,9 +1136,7 @@ function normalizeAttrContinue(attrName, attrNameOut, attrValue, attr, attrs, ta
  * @param {ProcessedOptions} options
  */
 function normalizeAttrFinish(attrName, attrNameOut, attrValue, attr, tag, tagOut, options) {
-  if (options.removeEmptyAttributes &&
-      canDeleteEmptyAttribute(tag, attrName, attrValue, options, tagOut, attrNameOut) &&
-      !isAttributeSelected(attrName, options)) {
+  if (removesEmptyAttribute(tag, attrName, attrValue, options, tagOut, attrNameOut)) {
     return;
   }
 
@@ -1275,6 +1298,8 @@ export {
   isStyleElement,
   isMetaWithoutEffect,
   hasAttrName,
+  nameAttrOut,
+  removesEmptyAttribute,
 
   // Cleaners
   normalizeAttr,
