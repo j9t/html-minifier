@@ -365,7 +365,8 @@ function mergeText(/** @type {any} */ node) {
 function isEmptyRemovable(/** @type {any} */ node, /** @type {any} */ options) {
   if (!isHTML(node) && node.tagName !== 'svg' && node.tagName !== 'math') return false;
   const tag = node.tagName;
-  if (ELEMENTS_NOT_EMPTIED.has(tag) || tag.includes('-') || attrValue(node, 'id') !== undefined) return false;
+  const id = attrValue(node, 'id');
+  if (ELEMENTS_NOT_EMPTIED.has(tag) || tag.includes('-') || (id !== undefined && (id.trim() || !options.removeEmptyAttributes))) return false;
   if (ELEMENTS_RECREATED.has(tag) && node.attrs.length) return false;
   if ((options.removeEmptyElementsExcept ?? []).some((/** @type {string} */ spec) => spec.replace(/[<>]/g, '').split(/\s/)[0] === tag)) return false;
   for (const { name, value } of node.attrs) {
@@ -469,12 +470,14 @@ function canonicalize(source, options, scripting) {
   const context = { hasBase, selected: findSelected(document) };
   if (options.removeComments) stripComments(document);
   // Where a comment ends up around the document’s elements does nothing, and it goes with an
-  // empty element it sits in
-  if (!options.removeEmptyElements) {
-    walk(document, node => {
-      if (node.nodeName === '#comment') comments.push(node.data);
-    });
-  }
+  // empty element it sits in; SVGO, which may remove them, reads an SVG whole
+  const collectComments = (/** @type {any} */ node) => {
+    for (const child of childrenOf(node)) {
+      if (child.nodeName === '#comment') comments.push(child.data);
+      else if (!(child.tagName === 'svg' && options.minifySVG)) collectComments(child);
+    }
+  };
+  if (!options.removeEmptyElements) collectComments(document);
   if (options.removeEmptyElements) pruneEmptyElements(document, options);
   mergeText(document);
   if (options.removeRedundantAttributes) canonicalizeMeta(document);
@@ -686,7 +689,8 @@ export function compareMarkup(input, output, options) {
     const canonicalIn = canonicalize(input, options, scripting);
     const canonicalOut = canonicalize(output, options, scripting);
     const differences = diffLines('tree', canonicalIn.lines, canonicalOut.lines);
-    if (options.collapseWhitespace || options.removeOptionalTags || options.removeEmptyElements) {
+    // An SVG SVGO reads is opaque to the tree, so its HTML is compared as rendered
+    if (options.collapseWhitespace || options.removeOptionalTags || options.removeEmptyElements || options.minifySVG) {
       differences.push(...diffLines('render', renderedText(canonicalIn.document, options), renderedText(canonicalOut.document, options)));
     }
     if (options.minifyJS) {

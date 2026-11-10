@@ -39,7 +39,8 @@ describe('Equivalence', () => {
       ['<a href="x"" id="y">b</a>', '<a href="x" id="y">b</a>', {}],
       ['<iframe>a</noscript></body></html>', '<iframe>a</noscript>', {}],
       ['<script>a();</script>\n<script>b()</script>', '<script>a();b()</script>', { mergeScripts: true }],
-      ['<script>a() // c</script><script>b()</script>', '<script>a() // c\n;b()</script>', { mergeScripts: true }]
+      ['<script>a() // c</script><script>b()</script>', '<script>a() // c\n;b()</script>', { mergeScripts: true }],
+      ['<svg><!-- a --><rect/></svg>', '<svg><rect/></svg>', { minifySVG: true }]
     ]);
     for (const [input, output, options] of cases) {
       assert.deepStrictEqual(compareMarkup(input, output, options), [], input);
@@ -61,7 +62,8 @@ describe('Equivalence', () => {
       ['<style>a{background:url(https://example.org/b.png)}</style>', '<style>a{background:url(https://example.org/c.png)}</style>', { minifyCSS: true, minifyURLs: 'https://example.org/dir/page.html' }, 'tree'],
       ['<style>a{background:url(http://example.org/b.png)}</style>', '<style>a{background:url(//example.org/b.png)}</style>', { minifyCSS: true, minifyURLs: 'https://example.org/dir/page.html' }, 'tree'],
       ['<a "target="_blank">b</a>', '<a target="_blank">b</a>', {}, 'tree'],
-      ['<script>a()</script><script>(b)()</script>', '<script>a()(b)()</script>', { mergeScripts: true }, 'tree']
+      ['<script>a()</script><script>(b)()</script>', '<script>a()(b)()</script>', { mergeScripts: true }, 'tree'],
+      ['<svg><foreignObject><p>a <b>b</b></p></foreignObject></svg>', '<svg><foreignObject><p>a<b>b</b></p></foreignObject></svg>', { minifySVG: true }, 'render']
     ]);
     for (const [input, output, options, kind] of cases) {
       assert.strictEqual(compareMarkup(input, output, options)[0]?.kind, kind, input);

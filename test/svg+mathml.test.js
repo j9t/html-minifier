@@ -429,6 +429,30 @@ describe('SVG and MathML', () => {
     );
   });
 
+  test('Keeps whitespace in HTML within SVG that SVGO reads', async () => {
+    assert.strictEqual(
+      await minify('<svg><rect width="10" height="10"/><foreignObject><p>a <b>b</b> c</p></foreignObject></svg>', { minifySVG: true }),
+      '<svg><path d="M0 0h10v10H0z"/><foreignObject><p>a <b>b</b> c</p></foreignObject></svg>'
+    );
+    assert.strictEqual(
+      await minify('<svg><rect width="10" height="10"/><foreignObject><p>a <b>b</b> c</p></foreignObject></svg>', { minifySVG: true, collapseWhitespace: true }),
+      '<svg><path d="M0 0h10v10H0z"/><foreignObject><p>a <b>b</b> c</p></foreignObject></svg>'
+    );
+    assert.strictEqual(
+      await minify('<svg><rect width="10" height="10"/><foreignObject><p><b>a</b> <i>b</i> &amp; c</p></foreignObject></svg>', { minifySVG: true }),
+      '<svg><path d="M0 0h10v10H0z"/><foreignObject><p><b>a</b> <i>b</i> &amp; c</p></foreignObject></svg>'
+    );
+    assert.strictEqual(
+      await minify('<svg><rect width="10" height="10"/><foreignObject><p>a <b>b</b></p></foreignObject></svg>', { minifySVG: true }),
+      '<svg><path d="M0 0h10v10H0z"/><foreignObject><p>a <b>b</b></p></foreignObject></svg>'
+    );
+    // SVG text elements keep their whitespace anyway
+    assert.strictEqual(
+      await minify('<svg><text>a <tspan>b</tspan></text></svg>', { minifySVG: true }),
+      '<svg><text>a <tspan>b</tspan></text></svg>'
+    );
+  });
+
   test('Keeps the quotes of attribute values wherever SVGO reads them', async () => {
     // An unquoted value is valid HTML the source may well be written in, and invalid XML
     assert.strictEqual(

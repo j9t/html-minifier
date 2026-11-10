@@ -698,6 +698,21 @@ function canDeleteEmptyAttribute(tag, attrName, attrValue, options, tagOut = tag
 }
 
 /**
+ * Whether `removeEmptyAttributes` removes the attribute
+ * @param {string} tag
+ * @param {string} attrName
+ * @param {string | undefined} attrValue
+ * @param {ProcessedOptions} options
+ * @param {string} [tagOut]
+ * @param {string} [attrNameOut]
+ */
+function removesEmptyAttribute(tag, attrName, attrValue, options, tagOut = tag, attrNameOut = attrName) {
+  return Boolean(options.removeEmptyAttributes) &&
+    canDeleteEmptyAttribute(tag, attrName, attrValue, options, tagOut, attrNameOut) &&
+    !isAttributeSelected(attrName, options);
+}
+
+/**
  * @param {string} name
  * @param {HTMLAttribute[]} attrs
  */
@@ -1111,9 +1126,7 @@ function normalizeAttrContinue(attrName, attrNameOut, attrValue, attr, attrs, ta
  * @param {ProcessedOptions} options
  */
 function normalizeAttrFinish(attrName, attrNameOut, attrValue, attr, tag, tagOut, options) {
-  if (options.removeEmptyAttributes &&
-      canDeleteEmptyAttribute(tag, attrName, attrValue, options, tagOut, attrNameOut) &&
-      !isAttributeSelected(attrName, options)) {
+  if (removesEmptyAttribute(tag, attrName, attrValue, options, tagOut, attrNameOut)) {
     return;
   }
 
@@ -1275,6 +1288,7 @@ export {
   isStyleElement,
   isMetaWithoutEffect,
   hasAttrName,
+  removesEmptyAttribute,
 
   // Cleaners
   normalizeAttr,

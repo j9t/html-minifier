@@ -66,7 +66,7 @@ const RE_EMPTY_ATTRIBUTE = new RegExp(
 // Inline element sets for whitespace handling
 
 // Non-empty elements that will maintain whitespace around them
-const inlineElementsToKeepWhitespaceAround = new Set(['a', 'abbr', 'acronym', 'audio', 'b', 'bdi', 'bdo', 'big', 'button', 'canvas', 'cite', 'code', 'data', 'del', 'dfn', 'em', 'embed', 'font', 'i', 'iframe', 'img', 'input', 'ins', 'kbd', 'label', 'map', 'mark', 'math', 'meter', 'nobr', 'object', 'output', 'picture', 'progress', 'q', 'rb', 'rp', 'rt', 'rtc', 'ruby', 's', 'samp', 'select', 'selectedcontent', 'slot', 'small', 'span', 'strike', 'strong', 'sub', 'sup', 'svg', 'textarea', 'textpath', 'time', 'tspan', 'tt', 'u', 'var', 'video', 'wbr']);
+const inlineElementsToKeepWhitespaceAround = new Set(['a', 'abbr', 'acronym', 'audio', 'b', 'bdi', 'bdo', 'big', 'button', 'canvas', 'cite', 'code', 'data', 'del', 'dfn', 'em', 'embed', 'font', 'i', 'iframe', 'img', 'input', 'ins', 'kbd', 'label', 'map', 'mark', 'marquee', 'math', 'meter', 'nobr', 'object', 'output', 'picture', 'progress', 'q', 'rb', 'rp', 'rt', 'rtc', 'ruby', 's', 'samp', 'select', 'selectedcontent', 'slot', 'small', 'span', 'strike', 'strong', 'sub', 'sup', 'svg', 'textarea', 'textpath', 'time', 'tspan', 'tt', 'u', 'var', 'video', 'wbr']);
 
 // Non-empty elements that will maintain whitespace within them
 const inlineElementsToKeepWhitespaceWithin = new Set(['a', 'abbr', 'acronym', 'b', 'bdi', 'bdo', 'big', 'cite', 'code', 'data', 'del', 'dfn', 'em', 'font', 'i', 'ins', 'kbd', 'label', 'map', 'mark', 'nobr', 'q', 'ruby', 's', 'samp', 'slot', 'small', 'span', 'strike', 'strong', 'sub', 'sup', 'textpath', 'time', 'tspan', 'tt', 'u', 'var']);
@@ -309,7 +309,8 @@ const descriptionElements = new Set(['dt', 'dd']);
 
 const pBlockElements = new Set(['address', 'article', 'aside', 'blockquote', 'details', 'dialog', 'div', 'dl', 'fieldset', 'figcaption', 'figure', 'footer', 'form', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'header', 'hgroup', 'hr', 'main', 'menu', 'nav', 'ol', 'p', 'pre', 'search', 'section', 'table', 'ul']);
 
-// Elements whose end tags close an open `p` in browsers, so that `</p>` may be omitted before them
+// Elements whose end tags close an open `p`, `li`, `dd`, or `dt` in browsers,
+// so that its end tag may be omitted before them
 const pClosingParents = new Set(['address', 'applet', 'article', 'aside', 'blockquote', 'body', 'button', 'caption', 'center', 'dd', 'details', 'dialog', 'dir', 'div', 'dl', 'dt', 'fieldset', 'figcaption', 'figure', 'footer', 'form', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'header', 'hgroup', 'html', 'li', 'listing', 'main', 'marquee', 'menu', 'nav', 'object', 'ol', 'pre', 'search', 'section', 'summary', 'td', 'template', 'th', 'ul']);
 
 const rubyEndTagOmission = new Set(['rb', 'rt', 'rtc', 'rp']); // `</rb>`, `</rt>`, `</rp>` can be omitted if followed by `<rb>`, `<rt>`, `<rtc>`, or `<rp>`
@@ -331,6 +332,9 @@ const compactElements = new Set(['html', 'body']);
 const looseElements = new Set(['head', 'colgroup', 'caption']);
 
 const trailingElements = new Set(['dt', 'thead']);
+
+// Special elements with optional end tags, which only `pClosingParents` end tags close
+const specialOptionalEndTags = new Set(['p', 'li', 'dd', 'dt']);
 
 const htmlElements = new Set(['a', 'abbr', 'acronym', 'address', 'applet', 'area', 'article', 'aside', 'audio', 'b', 'base', 'basefont', 'bdi', 'bdo', 'bgsound', 'big', 'blink', 'blockquote', 'body', 'br', 'button', 'canvas', 'caption', 'center', 'cite', 'code', 'col', 'colgroup', 'command', 'content', 'data', 'datalist', 'dd', 'del', 'details', 'dfn', 'dialog', 'dir', 'div', 'dl', 'dt', 'element', 'em', 'embed', 'fieldset', 'figcaption', 'figure', 'font', 'footer', 'form', 'frame', 'frameset', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'head', 'header', 'hgroup', 'hr', 'html', 'i', 'iframe', 'image', 'img', 'input', 'ins', 'isindex', 'kbd', 'keygen', 'label', 'legend', 'li', 'link', 'listing', 'main', 'map', 'mark', 'marquee', 'menu', 'menuitem', 'meta', 'meter', 'multicol', 'nav', 'nobr', 'noembed', 'noframes', 'noscript', 'object', 'ol', 'optgroup', 'option', 'output', 'p', 'param', 'picture', 'plaintext', 'pre', 'progress', 'q', 'rb', 'rp', 'rt', 'rtc', 'ruby', 's', 'samp', 'script', 'search', 'section', 'select', 'selectedcontent', 'shadow', 'small', 'source', 'spacer', 'span', 'strike', 'strong', 'style', 'sub', 'summary', 'sup', 'table', 'tbody', 'td', 'template', 'textarea', 'tfoot', 'th', 'thead', 'time', 'title', 'tr', 'track', 'tt', 'u', 'ul', 'var', 'video', 'wbr', 'xmp']);
 
@@ -515,6 +519,7 @@ export {
   compactElements,
   looseElements,
   trailingElements,
+  specialOptionalEndTags,
   htmlElements,
 
   // Doctype identifiers

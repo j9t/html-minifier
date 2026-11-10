@@ -2,7 +2,7 @@ import { HTMLParser } from './htmlparser.js';
 import TokenChain from './tokenchain.js';
 import { presets, getPreset, getPresetNames } from './presets.js';
 
-import { LRU, decodeForeignText, describeDependencyFailure, escapeXML, findTagEnd, identity, isThenable, lowercase, uniqueId } from './lib/utils.js';
+import { LRU, decodeForeignText, describeDependencyFailure, escapeXML, findTagEnd, identity, isThenable, lowercase, replaceNUL, uniqueId } from './lib/utils.js';
 import { collectUsage } from './lib/unused-css.js';
 
 import {
@@ -34,6 +34,7 @@ import {
   compactElements,
   looseElements,
   trailingElements,
+  specialOptionalEndTags,
   pClosingParents,
   namesForeignMixedCase,
   integrationPointsForeign,
@@ -829,13 +830,14 @@ function mergeConsecutiveScripts(html, hasMathML = false) {
       }
       if (boolConflict || a1.nonce !== a2.nonce || (!mergedAny && insideMath(m1.index))) break;
 
-      // Join with a semicolon, after a newline where the first may end in a `//` comment
+      // Join with a semicolon, after a newline where the first may end in a `//`, `<!--`,
+      // or `-->` comment, all of which browsers read as running to the end of the line
       const content2 = html.slice(tagEnd2 + 1, close2.index);
       const c1 = mergedContent.trim();
       const c2 = content2.trim();
       if (c1 && c2) {
         const lastLine = c1.slice(c1.lastIndexOf('\n') + 1);
-        const separator = lastLine.includes('//') ? '\n;' : (c1.endsWith(';') ? '' : ';');
+        const separator = /\/\/|<!--|-->/.test(lastLine) ? '\n;' : (c1.endsWith(';') ? '' : ';');
         mergedContent = c1 + separator + c2;
       } else {
         mergedContent = c1 || c2;
@@ -1974,9 +1976,16 @@ async function minifyHTML(value, options, partialMarkup) {
     }
     if (text && options.insideSVG && options.minifySVG) {
       // SVGO reads XML, so text is escaped for it, while raw text, which XML cannot read as
-      // HTML does (as in `foreignObject`), passes SVGO as a placeholder
+      // HTML does (as in `foreignObject`), passes SVGO as a placeholder—as does HTML text
+      // with whitespace at an end, which SVGO trims (`trim()`, so no-break spaces, too)
+      // outside SVG text elements
       if (!rawText) {
         text = escapeXML(text);
+        if (!options.insideForeignContent && /^\s|\s$/.test(text)) {
+          uidSVGRawText ||= uniqueId(value);
+          svgRawTexts.push(text);
+          text = '/*!' + uidSVGRawText + (svgRawTexts.length - 1) + '*/';
+        }
       } else if (text.indexOf('&') !== -1 || text.indexOf('<') !== -1 || text.indexOf(']]>') !== -1) {
         uidSVGRawText ||= uniqueId(value);
         svgRawTexts.push(text);
@@ -2161,7 +2170,7 @@ async function minifyHTML(value, options, partialMarkup) {
       const trims = Boolean(options.collapseWhitespace) &&
         !options.conservativeCollapse && !options.preserveLineBreaks;
       for (const { code, isModule } of bodies) {
-        const body = trims ? code.trim() : code;
+        const body = replaceNUL(trims ? code.trim() : code);
         const key = (isModule ? 'm|' : '|') + body;
         if (jsPrewarmed.has(key)) {
           continue;
@@ -2618,13 +2627,14 @@ async function minifyHTML(value, options, partialMarkup) {
           startTagRemoved = true;
         }
         optionalStartTag = '';
-        // `</html>` or `</body>` may be omitted if not followed by comment
-        // `</head>` may be omitted if not followed by space or comment
-        // `</p>` may be omitted if no more content in parent, as long as the parent’s end tag
-        //   closes the `p` in browsers (`pClosingParents`)
-        // Except for `</dt>` or `</thead>`, end tags may be omitted if no more content in parent
+        // `</html>` or `</body>` may be omitted if not followed by comment;
+        // `</head>` may be omitted if not followed by space or comment;
+        // `</p>`, `</li>`, `</dd>`, and `</dt>` may be omitted if no more content
+        // in parent, as long as the parent’s end tag closes these special elements
+        // in browsers (`pClosingParents`); except for `</dt>` or `</thead>`,
+        // end tags may be omitted if no more content in parent
         // https://html.spec.whatwg.org/multipage/syntax.html#optional-tags
-        if (tag && optionalEndTag && optionalEndTagEmitted && !trailingElements.has(optionalEndTag) && (optionalEndTag !== 'p' || pClosingParents.has(tag))) {
+        if (tag && optionalEndTag && optionalEndTagEmitted && !trailingElements.has(optionalEndTag) && (!specialOptionalEndTags.has(optionalEndTag) || pClosingParents.has(tag))) {
           removeEndTag(insideNoTrim);
         }
         optionalEndTag = optionalEndTags.has(tag) && !endsImpliedStart && !holdsTable ? tag : '';
@@ -2633,7 +2643,7 @@ async function minifyHTML(value, options, partialMarkup) {
 
       let isElementRemoved = false;
       // A formatting element closed by a block is reopened after it by browsers, so it has to stay
-      if (options.removeEmptyElements && (isElementEmpty || isElementEmptied) && !options.insideForeignContent && canRemoveElement(tag, attrs) &&
+      if (options.removeEmptyElements && (isElementEmpty || isElementEmptied) && !options.insideForeignContent && canRemoveElement(tag, attrs, options) &&
           !(autoGenerated && formattingElements.has(tag)) && !openElement?.impliedEnds?.some(implied => !implied.text)) {
         let preserve = false;
         if (removeEmptyElementsExcept.length) {
@@ -2774,6 +2784,9 @@ async function minifyHTML(value, options, partialMarkup) {
         text = charsCollapse(text);
         if (needsProcessScript) {
           text = await processScript(text, options, currentTag, currentAttrs, minifyHTML);
+        }
+        if (needsMinifyJS || needsMinifyCSS) {
+          text = replaceNUL(text);
         }
         if (needsMinifyJS) {
           const prewarmed = jsPrewarmed?.get((isModuleScript ? 'm|' : '|') + text);

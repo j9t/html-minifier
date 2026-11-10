@@ -4,6 +4,17 @@ As of version 5.0.0, all notable changes to HTML Minifier (HM) are documented in
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+* Fixed `mergeScripts` joining scripts on one line after a last line holding `<!--` or `-->`, which browsers read as starting a comment, so that the next script didn’t run (e.g., `a()\n<!--b-->` before `c()`)
+* Fixed `removeOptionalTags` omitting `</li>`, `</dd>`, and `</dt>` before end tags that don’t close these elements in browsers, which moved what follows into them (e.g., `<span><li>a</li></span><li>b`)
+* Fixed `minifySVG` removing whitespace from HTML in `foreignObject` elements, which joined words (e.g., `<p>a <b>b</b> c</p>` rendered as “abc”)
+* Fixed `minifyJS` and `minifyCSS` turning `NUL` characters in scripts and style sheets into `\0`, where browsers read `U+FFFD`
+* Fixed `collapseWhitespace` removing spaces around `marquee` elements, which browsers render as inline blocks (e.g., `a <marquee>b</marquee> c`)
+* Fixed `removeEmptyElements` with `removeEmptyAttributes` keeping empty elements whose only reason to stay was an empty `id` that then got removed (e.g., `<div id=""></div>` became `<div></div>`)
+
 ## [5.0.3] - 2026-11-10
 
 ### Fixed

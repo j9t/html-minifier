@@ -134,6 +134,14 @@ function escapeXML(value, attribute = false) {
 }
 
 /**
+ * Script and style text as browsers read it, for code minifiers
+ * @param {string} text
+ */
+function replaceNUL(text) {
+  return text.indexOf('\0') === -1 ? text : text.replace(/\0/g, '\uFFFD');
+}
+
+/**
  * Read text in foreign content as HTML does: CDATA sections hold text as written,
  * while what surrounds them reads character references
  * @param {string} text
@@ -1011,6 +1019,7 @@ export {
   hashContent,
   uniqueId,
   escapeXML,
+  replaceNUL,
   decodeForeignText,
   identity,
   isQuirksDoctype,
