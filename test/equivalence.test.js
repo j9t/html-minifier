@@ -40,7 +40,8 @@ describe('Equivalence', () => {
       ['<iframe>a</noscript></body></html>', '<iframe>a</noscript>', {}],
       ['<script>a();</script>\n<script>b()</script>', '<script>a();b()</script>', { mergeScripts: true }],
       ['<script>a() // c</script><script>b()</script>', '<script>a() // c\n;b()</script>', { mergeScripts: true }],
-      ['<svg><!-- a --><rect/></svg>', '<svg><rect/></svg>', { minifySVG: true }]
+      ['<svg><!-- a --><rect/></svg>', '<svg><rect/></svg>', { minifySVG: true }],
+      ['<svg><!--! a --><rect/></svg>', '<svg><!--! a--><rect/></svg>', { minifySVG: true }]
     ]);
     for (const [input, output, options] of cases) {
       assert.deepStrictEqual(compareMarkup(input, output, options), [], input);
@@ -63,7 +64,11 @@ describe('Equivalence', () => {
       ['<style>a{background:url(http://example.org/b.png)}</style>', '<style>a{background:url(//example.org/b.png)}</style>', { minifyCSS: true, minifyURLs: 'https://example.org/dir/page.html' }, 'tree'],
       ['<a "target="_blank">b</a>', '<a target="_blank">b</a>', {}, 'tree'],
       ['<script>a()</script><script>(b)()</script>', '<script>a()(b)()</script>', { mergeScripts: true }, 'tree'],
-      ['<svg><foreignObject><p>a <b>b</b></p></foreignObject></svg>', '<svg><foreignObject><p>a<b>b</b></p></foreignObject></svg>', { minifySVG: true }, 'render']
+      ['<svg><foreignObject><p>a <b>b</b></p></foreignObject></svg>', '<svg><foreignObject><p>a<b>b</b></p></foreignObject></svg>', { minifySVG: true }, 'render'],
+      ['<svg><text>a <tspan>b</tspan></text></svg>', '<svg><text>a<tspan>b</tspan></text></svg>', { minifySVG: true }, 'render'],
+      ['<svg><text><textPath>a</textPath></text></svg>', '<svg><text><textPath>b</textPath></text></svg>', { minifySVG: true }, 'render'],
+      ['<svg><!--! a --><rect/></svg>', '<svg><rect/></svg>', { minifySVG: true }, 'tree'],
+      ['<style>[id]{top:0}</style><div id=""></div>x', '<style>[id]{top:0}</style>x', { removeEmptyAttributes: true, removeEmptyElements: true }, 'tree']
     ]);
     for (const [input, output, options, kind] of cases) {
       assert.strictEqual(compareMarkup(input, output, options)[0]?.kind, kind, input);

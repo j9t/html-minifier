@@ -2192,6 +2192,7 @@ describe('HTML', () => {
     assert.strictEqual(await minify('<div id="a"></div>x', { removeEmptyAttributes: true, removeEmptyElements: true }), '<div id="a"></div>x');
     assert.strictEqual(await minify('<style>[id]{top:0}</style><div id=""></div>x', { removeEmptyAttributes: true, removeEmptyElements: true }), '<style>[id]{top:0}</style><div id=""></div>x');
     assert.strictEqual(await minify('<div id=""></div>x', { removeEmptyAttributes: () => false, removeEmptyElements: true }), '<div id=""></div>x');
+    assert.strictEqual(await minify('<DIV ID=""></DIV>x', { caseSensitive: true, removeEmptyAttributes: (/** @type {string} */ name, /** @type {string} */ tag) => tag === 'DIV' && name === 'ID', removeEmptyElements: true }), 'x');
 
     input = '<p>foo<span>bar</span><span></span></p>';
     output = '<p>foo<span>bar</span></p>';

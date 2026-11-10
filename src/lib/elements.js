@@ -13,7 +13,7 @@ import {
   tableSectionElements,
   cellElements
 } from './constants.js';
-import { hasAttrName, removesEmptyAttribute } from './attributes.js';
+import { hasAttrName, nameAttrOut, removesEmptyAttribute } from './attributes.js';
 
 /** @import { HTMLAttribute } from './attributes.js' */
 /** @import { ProcessedOptions } from './options.js' */
@@ -96,8 +96,9 @@ function canRemovePrecedingTag(optionalEndTag, tag) {
  * @param {string} tag
  * @param {HTMLAttribute[]} attrs
  * @param {ProcessedOptions} options
+ * @param {string} [tagOut] - As hooks get it
  */
-function canRemoveElement(tag, attrs, options) {
+function canRemoveElement(tag, attrs, options, tagOut = tag) {
   // Elements with `id` attribute must never be removed—they serve as:
   // - Navigation targets (skip links, URL fragments)
   // - JavaScript selector targets (`getElementById`, `querySelector`)
@@ -106,7 +107,8 @@ function canRemoveElement(tag, attrs, options) {
   // - Portal mount points (React portals, etc.)
   // An empty one that `removeEmptyAttributes` removes does none of this
   const id = attrs.find(attr => attr.name.toLowerCase() === 'id');
-  if (id && !removesEmptyAttribute(tag, 'id', id.value, options, tag, id.name)) {
+  const idName = id && options.name(id.name);
+  if (id && !(idName === 'id' && removesEmptyAttribute(tag, idName, id.value, options, tagOut, nameAttrOut(id, idName, options)))) {
     return false;
   }
 

@@ -362,11 +362,11 @@ function mergeText(/** @type {any} */ node) {
   if (node.content) mergeText(node.content);
 }
 
-function isEmptyRemovable(/** @type {any} */ node, /** @type {any} */ options) {
+function isEmptyRemovable(/** @type {any} */ node, /** @type {any} */ options, /** @type {any} */ context) {
   if (!isHTML(node) && node.tagName !== 'svg' && node.tagName !== 'math') return false;
   const tag = node.tagName;
   const id = attrValue(node, 'id');
-  if (ELEMENTS_NOT_EMPTIED.has(tag) || tag.includes('-') || (id !== undefined && (id.trim() || !options.removeEmptyAttributes))) return false;
+  if (ELEMENTS_NOT_EMPTIED.has(tag) || tag.includes('-') || (id !== undefined && (id.trim() || !options.removeEmptyAttributes || context.selected.has('id')))) return false;
   if (ELEMENTS_RECREATED.has(tag) && node.attrs.length) return false;
   if ((options.removeEmptyElementsExcept ?? []).some((/** @type {string} */ spec) => spec.replace(/[<>]/g, '').split(/\s/)[0] === tag)) return false;
   for (const { name, value } of node.attrs) {
@@ -378,11 +378,11 @@ function isEmptyRemovable(/** @type {any} */ node, /** @type {any} */ options) {
   return !(tag === 'applet' && attrValue(node, 'code') !== undefined);
 }
 
-function pruneEmptyElements(/** @type {any} */ node, /** @type {any} */ options) {
+function pruneEmptyElements(/** @type {any} */ node, /** @type {any} */ options, /** @type {any} */ context) {
   if (node.childNodes) {
-    for (const child of node.childNodes) pruneEmptyElements(child, options);
+    for (const child of node.childNodes) pruneEmptyElements(child, options, context);
     node.childNodes = node.childNodes.filter((/** @type {any} */ child) => {
-      if (!child.tagName || !isEmptyRemovable(child, options)) return true;
+      if (!child.tagName || !isEmptyRemovable(child, options, context)) return true;
       // Styles can minify to nothing and then go
       if (child.tagName === 'style' && options.minifyCSS) return false;
       if (child.tagName === 'script' && options.minifyJS && isInertScript(child.childNodes[0]?.value ?? '')) return false;
@@ -390,7 +390,7 @@ function pruneEmptyElements(/** @type {any} */ node, /** @type {any} */ options)
       return content.some((/** @type {any} */ grandchild) => grandchild.nodeName !== '#text' || !isWsOnly(grandchild.value));
     });
   }
-  if (node.content) pruneEmptyElements(node.content, options);
+  if (node.content) pruneEmptyElements(node.content, options, context);
 }
 
 // Removing `meta` elements without effect and replacing the content-type pragma
@@ -470,15 +470,22 @@ function canonicalize(source, options, scripting) {
   const context = { hasBase, selected: findSelected(document) };
   if (options.removeComments) stripComments(document);
   // Where a comment ends up around the document’s elements does nothing, and it goes with an
-  // empty element it sits in; SVGO, which may remove them, reads an SVG whole
-  const collectComments = (/** @type {any} */ node) => {
+  // empty element it sits in; SVGO, which may remove them, reads an SVG whole and by default
+  // keeps those starting with `!`, trimmed
+  const keepsAllSVGComments = !options.minifySVG;
+  const keepsMarkedSVGComments = options.minifySVG === true || (typeof options.minifySVG === 'object' && !options.minifySVG.plugins);
+  const collectComments = (/** @type {any} */ node, /** @type {boolean} */ insideSVG) => {
     for (const child of childrenOf(node)) {
-      if (child.nodeName === '#comment') comments.push(child.data);
-      else if (!(child.tagName === 'svg' && options.minifySVG)) collectComments(child);
+      if (child.nodeName === '#comment') {
+        if (!insideSVG || keepsAllSVGComments) comments.push(child.data);
+        else if (keepsMarkedSVGComments && trim(child.data).startsWith('!')) comments.push(trim(child.data));
+      } else {
+        collectComments(child, insideSVG || child.tagName === 'svg');
+      }
     }
   };
-  if (!options.removeEmptyElements) collectComments(document);
-  if (options.removeEmptyElements) pruneEmptyElements(document, options);
+  if (!options.removeEmptyElements) collectComments(document, false);
+  if (options.removeEmptyElements) pruneEmptyElements(document, options, context);
   mergeText(document);
   if (options.removeRedundantAttributes) canonicalizeMeta(document);
   const body = document.childNodes.find(child => child.nodeName === 'html')?.childNodes.find((/** @type {any} */ child) => child.tagName === 'body');
@@ -596,7 +603,9 @@ function renderedText(root, options) {
       const pathChild = `${path}/${tag}`;
       if (!isHTML(child)) {
         if (tag === 'svg' || tag === 'math') parts.push(REPLACED);
-        foreign(child, pathChild);
+        // Text within SVG text runs on in these
+        if (tag === 'tspan' || tag === 'textPath') inline(child);
+        else foreign(child, pathChild);
       } else if (tag === 'template') {
         block(child.content, pathChild);
       } else if (ELEMENTS_NOT_RENDERED.has(tag) || (tag === 'input' && trim(attrValue(child, 'type') ?? '').toLowerCase() === 'hidden')) {
