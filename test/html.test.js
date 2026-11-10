@@ -6678,6 +6678,10 @@ describe('HTML', () => {
     output = '<article title="foo  bar" data-selector="teaser-object parent-image-label picture-article" data-external-selector="teaser-object parent-image-label"></article>';
     assert.strictEqual(await minify(input, { collapseAttributeWhitespace: true }), output);
 
+    // An `annotation-xml` encoding with spaces doesn’t make it hold HTML
+    input = '<math><annotation-xml encoding=" text/html "><foo>a</foo></annotation-xml></math>';
+    assert.strictEqual(await minify(input, { collapseAttributeWhitespace: true }), input);
+
     // Multiple spaces in `alt` attribute
     input = '<img src="example" alt="Dieser Blick könnte Rückschlüsse auf Jane Austens Skepsis nahelegen, doch das Miniaturbild  ist  postum entstanden, Ende des neunzehnten Jahrhunderts.">';
     assert.strictEqual(await minify(input, { collapseWhitespace: true }), input);

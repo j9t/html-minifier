@@ -14,6 +14,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 * Fixed `removeOptionalTags` omitting `</li>`, `</dd>`, and `</dt>` before end tags that don’t close these elements in browsers, which moved what follows into them (e.g., `<span><li>a</li></span><li>b`)
 * Fixed `minifySVG` removing whitespace from HTML in `foreignObject` elements, which joined words (e.g., `<p>a <b>b</b> c</p>` rendered as “abc”)
 * Fixed `minifyJS` and `minifyCSS` turning `NUL` characters in scripts and style sheets into `\0`, where browsers read `U+FFFD`
+* Fixed `collapseAttributeWhitespace` trimming the `encoding` of `annotation-xml` elements, which browsers match as written, so that the element came to hold HTML rather than MathML (e.g., `encoding=" text/html "`)
 * Fixed `collapseWhitespace` removing spaces around `marquee` elements, which browsers render as inline blocks (e.g., `a <marquee>b</marquee> c`)
 * Fixed `removeEmptyElements` with `removeEmptyAttributes` keeping empty elements whose only reason to stay was an empty `id` that then got removed (e.g., `<div id=""></div>` became `<div></div>`)
 

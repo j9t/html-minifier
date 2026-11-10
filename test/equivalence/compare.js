@@ -249,7 +249,7 @@ function canonicalizeValue(/** @type {any} */ node, /** @type {string} */ name, 
   const tag = node.tagName;
   const html = isHTML(node);
   let value = raw;
-  if (options.collapseAttributeWhitespace && !ATTRIBUTES_WHITESPACE_KEPT.has(name) && !(name === 'value' && ELEMENTS_VALUE_KEPT.has(tag)) && !isEventAttribute(name)) {
+  if (options.collapseAttributeWhitespace && !ATTRIBUTES_WHITESPACE_KEPT.has(name) && !(name === 'value' && ELEMENTS_VALUE_KEPT.has(tag)) && !(name === 'encoding' && tag === 'annotation-xml') && !isEventAttribute(name)) {
     value = trim(value).replace(RE_WS_RUN, ' ');
   }
   if (options.collapseBooleanAttributes && html && !tag.includes('-')) {
@@ -367,9 +367,9 @@ function mergeText(/** @type {any} */ node) {
   if (node.content) mergeText(node.content);
 }
 
-// Where foreign content holds HTML, as for the minifier
+// Where foreign content holds HTML, with the encoding matched as written, as browsers do
 const holdsHTML = (/** @type {any} */ node) => !node.namespaceURI || isHTML(node) || node.tagName === 'foreignObject' ||
-  (node.tagName === 'annotation-xml' && /^(?:text\/html|application\/xhtml\+xml)$/i.test(trim(attrValue(node, 'encoding') ?? '')));
+  (node.tagName === 'annotation-xml' && /^(?:text\/html|application\/xhtml\+xml)$/i.test(attrValue(node, 'encoding') ?? ''));
 
 function isEmptyRemovable(/** @type {any} */ node, /** @type {any} */ parent, /** @type {any} */ options, /** @type {any} */ context) {
   // Only SVG and MathML roots in HTML go, not ones nested in foreign content
