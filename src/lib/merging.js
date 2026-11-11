@@ -2,8 +2,9 @@
  * Script and style merging
  */
 
-import { RE_WS_END, RE_WS_START } from './constants.js';
+import { RE_WS_END, RE_WS_START, executableScriptsMimetypes } from './constants.js';
 import { isStyleLinkTypeAttribute } from './attributes.js';
+import { trimWhitespace } from './whitespace.js';
 
 // Rules that only work at the start of a style sheet, and those that apply to the rest of it,
 // each also as any at-rule whose name holds an escape (a stray one in a string or comment
@@ -15,7 +16,6 @@ const RE_NAMESPACE_RULE = /@namespace|@[\w-]*\\/i;
 const RE_SCRIPT_START_TEXT = /<script[\t\n\f\r />]/i;
 // What browsers read as a comment running to the end of the line
 const RE_SCRIPT_LINE_COMMENT = /\/\/|<!--|-->/;
-const SCRIPT_TYPES_CLASSIC = new Set(['', 'text/javascript', 'application/javascript']);
 
 /** @typedef {{name: string, value?: string, customAssign?: string, customOpen?: string}} MergeAttribute */
 
@@ -42,6 +42,18 @@ function readAttrs(attrs, resolve) {
 }
 
 /**
+ * Whether a `type` makes a classic script: none, or a JavaScript MIME type as is,
+ * as one with parameters makes a data block
+ *
+ * @param {string | undefined} type
+ * @returns {boolean}
+ */
+function isClassicScriptType(type) {
+  const typeLower = trimWhitespace(type ?? '').toLowerCase();
+  return typeLower === '' || (typeLower !== 'module' && executableScriptsMimetypes.has(typeLower));
+}
+
+/**
  * What a `script` or `style` element’s attributes make of it, equal for elements that may be
  * merged: classic inline scripts and CSS style sheets whose attributes match, as tools that
  * rewrite the page in the browser or at the edge may read them (e.g., `data-cfasync`); `null`
@@ -56,7 +68,7 @@ function getMergeKey(kind, attrs, resolve) {
   const values = readAttrs(attrs, resolve);
   if (!values || 'id' in values) return null;
   if (kind === 'script'
-    ? 'src' in values || !SCRIPT_TYPES_CLASSIC.has((values.type ?? '').trim().toLowerCase())
+    ? 'src' in values || !isClassicScriptType(values.type)
     : 'type' in values && !isStyleLinkTypeAttribute(values.type)) {
     return null;
   }

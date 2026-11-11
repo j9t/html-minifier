@@ -4405,6 +4405,12 @@ describe('HTML', () => {
     input = '<script type="application/ld+json">{"@type":"Thing"}</script><script type="application/ld+json">{"@type":"Person"}</script>';
     assert.strictEqual(await minify(input, { mergeScripts: true }), input);
 
+    // Any JavaScript type counts, but not one with parameters, which makes a data block
+    input = '<script type="text/ecmascript">a()</script><script type="TEXT/JSCRIPT">b()</script>';
+    assert.strictEqual(await minify(input, { mergeScripts: true }), '<script type="text/ecmascript">a();b()</script>');
+    input = '<script type="text/javascript; charset=utf-8">a()</script><script type="text/javascript; charset=utf-8">b()</script>';
+    assert.strictEqual(await minify(input, { mergeScripts: true }), input.replaceAll('; ', ';'));
+
     // Merge scripts where both have default JS type (explicit vs implicit)
     input = '<script type="text/javascript">let a=1</script><script>let b=2</script>';
     output = '<script type="text/javascript">let a=1;let b=2</script>';

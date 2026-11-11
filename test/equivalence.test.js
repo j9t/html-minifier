@@ -71,6 +71,8 @@ describe('Equivalence', () => {
       ['<a "target="_blank">b</a>', '<a target="_blank">b</a>', {}, 'tree'],
       ['<script>a()</script><script>(b)()</script>', '<script>a()(b)()</script>', { mergeScripts: true }, 'tree'],
       ['<style>a{top:0</style><style>b{top:0}</style>', '<style>a{top:0b{top:0}</style>', { mergeStyles: true, minifyCSS: true }, 'tree'],
+      ['<style>a{top:0}</style><style>@import "b.css";c{top:0}</style>', '<style>a{top:0}@import "b.css";c{top:0}</style>', { mergeStyles: true }, 'tree'],
+      ['<script>a="<!--"</script><script>b="<script>"</script><p>c', '<script>a="<!--";b="<script>"</script><p>c', { mergeScripts: true }, 'tree'],
       ['<svg><foreignObject><p>a <b>b</b></p></foreignObject></svg>', '<svg><foreignObject><p>a<b>b</b></p></foreignObject></svg>', { minifySVG: true }, 'render'],
       ['<svg><text>a <tspan>b</tspan></text></svg>', '<svg><text>a<tspan>b</tspan></text></svg>', { minifySVG: true }, 'render'],
       ['<svg><text><textPath>a</textPath></text></svg>', '<svg><text><textPath>b</textPath></text></svg>', { minifySVG: true }, 'render'],

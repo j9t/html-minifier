@@ -7,6 +7,8 @@ import { parse } from 'parse5';
 import { minify_sync as terser } from 'terser';
 // Too long to restate here, so a wrong entry goes unnoticed; HTML’s defaults are restated below
 import { tagDefaultsSVG } from '../../src/lib/constants.js';
+// Likewise, so that what merges is judged by the minifier’s rules, while the merging is checked
+import { canScriptFollow, canStyleSheetsJoin } from '../../src/lib/merging.js';
 
 const NS_HTML = 'http://www.w3.org/1999/xhtml';
 const NS_SVG = 'http://www.w3.org/2000/svg';
@@ -321,8 +323,10 @@ function canonicalizeRaw(/** @type {any} */ node, /** @type {string} */ text, /*
 // Elements that may merge, as one: classic scripts (not in MathML, where they are text) and
 // style sheets whose attributes match, other than a JavaScript or CSS `type` and `media` that
 // matches all, none with an `id`; what options remove of them isn’t compared, as the output
-// lacks it. Merged scripts are compared loosely; style sheets, with CSS minified, as CSS that
-// minifies alike, and without, leaving out whitespace around each.
+// lacks it. As in the minifier, a style sheet only joins one that ends cleanly and can be
+// followed, and a script holding `<script` doesn’t follow one holding `<!--`.
+// Merged scripts are compared loosely; style sheets, with CSS minified, as CSS that minifies
+// alike, and without, leaving out whitespace around each.
 function mergeAdjacent(/** @type {any[]} */ children, /** @type {any} */ options, /** @type {any} */ context) {
   const keyOf = (/** @type {any} */ node) => {
     const kind = node.tagName;
@@ -343,6 +347,15 @@ function mergeAdjacent(/** @type {any[]} */ children, /** @type {any} */ options
     return JSON.stringify([kind, ...Object.entries(values).sort(([nameA], [nameB]) => nameA < nameB ? -1 : 1)]);
   };
   const canonicalCSS = (/** @type {string} */ text) => options.minifyCSS && !options.removeUnusedCSS ? normalizeCSS(text) : trim(text);
+  const textOf = (/** @type {any} */ node) => node.childNodes[0]?.value ?? '';
+  // For a merged style sheet, its last CSS that isn’t blank; for a merged script, whether it
+  // holds `<!--`
+  /** @type {Map<any, string>} */
+  const tails = new Map();
+  const tailOf = (/** @type {any} */ node) => tails.get(node) ?? (node.tagName === 'style' ? canonicalCSS(textOf(node)) : textOf(node));
+  const canJoin = (/** @type {any} */ last, /** @type {any} */ next) => next.tagName === 'style'
+    ? canStyleSheetsJoin(tailOf(last), canonicalCSS(textOf(next)))
+    : canScriptFollow(tailOf(last).includes('<!--'), textOf(next));
   /** @type {any[]} */
   const merged = [];
   for (const [index, child] of children.entries()) {
@@ -352,17 +365,21 @@ function mergeAdjacent(/** @type {any[]} */ children, /** @type {any} */ options
     if (child.nodeName === '#text' && isWsOnly(child.value) && keyLast !== undefined) {
       let indexNext = index + 1;
       while (children[indexNext]?.nodeName === '#text' && isWsOnly(children[indexNext].value)) indexNext++;
-      if (children[indexNext] && keyOf(children[indexNext]) === keyLast) continue;
+      const next = children[indexNext];
+      if (next && keyOf(next) === keyLast && canJoin(last, next)) continue;
     }
-    if (keyLast !== undefined && keyOf(child) === keyLast) {
-      const text = child.childNodes[0]?.value ?? '';
+    if (keyLast !== undefined && keyOf(child) === keyLast && canJoin(last, child)) {
+      const text = textOf(child);
+      const tail = tailOf(last);
       if (child.tagName === 'style') {
-        const css = canonicalCSS(last.childNodes[0]?.value ?? '') + canonicalCSS(text);
-        last.childNodes = css ? [{ nodeName: '#text', value: css }] : [];
-      } else if (last.childNodes[0]) {
-        last.childNodes[0].value += ';\n' + text;
-      } else if (text) {
-        last.childNodes = child.childNodes;
+        const css = canonicalCSS(text);
+        const cssMerged = canonicalCSS(textOf(last)) + css;
+        last.childNodes = cssMerged ? [{ nodeName: '#text', value: cssMerged }] : [];
+        tails.set(last, css ? css : tail);
+      } else {
+        if (last.childNodes[0]) last.childNodes[0].value += ';\n' + text;
+        else if (text) last.childNodes = child.childNodes;
+        tails.set(last, text.includes('<!--') ? '<!--' : tail);
       }
       continue;
     }
