@@ -381,7 +381,8 @@ function mergeAdjacent(/** @type {any[]} */ children, /** @type {any} */ options
         last.childNodes = cssMerged ? [{ nodeName: '#text', value: cssMerged }] : [];
         tails.set(last, css ? css : tail);
       } else {
-        if (last.childNodes[0]) last.childNodes[0].value += ';\n' + text;
+        // On lines of their own, so that a line comment can’t take the semicolon along
+        if (last.childNodes[0]) last.childNodes[0].value += '\n;\n' + text;
         else if (text) last.childNodes = child.childNodes;
         tails.set(last, text.includes('<!--') ? '<!--' : tail);
       }

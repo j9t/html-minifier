@@ -13,8 +13,6 @@ const RE_NAMESPACE_RULE = /@namespace|@[\w-]*\\/i;
 
 // After `<!--`, `<script` opens a state `</script>` doesn’t end
 const RE_SCRIPT_START_TEXT = /<script[\t\n\f\r />]/i;
-// What browsers read as a comment running to the end of the line
-const RE_SCRIPT_LINE_COMMENT = /\/\/|<!--|-->/;
 
 /** @typedef {{name: string, value?: string, customAssign?: string, customOpen?: string}} MergeAttribute */
 
@@ -100,7 +98,9 @@ function joinScripts(parts, markers) {
     if (!code) continue;
     if (codePrev) {
       const lastLine = codePrev.slice(codePrev.lastIndexOf('\n') + 1);
-      const endsWithComment = RE_SCRIPT_LINE_COMMENT.test(lastLine) || markers.some(marker => codePrev.endsWith(marker));
+      // What JavaScript reads as a comment running to the end of the line
+      const endsWithComment = lastLine.includes('//') || lastLine.includes('<!--') || lastLine.includes('-->') ||
+        markers.some(marker => codePrev.endsWith(marker));
       const startsWithComment = code.startsWith('-->') || markers.some(marker => code.startsWith(marker));
       pieces.push((endsWithComment ? '\n;' : (codePrev.endsWith(';') ? '' : ';')) + (startsWithComment ? '\n' : ''));
     }

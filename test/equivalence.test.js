@@ -70,6 +70,7 @@ describe('Equivalence', () => {
       ['<style>a{background:url(http://example.org/b.png)}</style>', '<style>a{background:url(//example.org/b.png)}</style>', { minifyCSS: true, minifyURLs: 'https://example.org/dir/page.html' }, 'tree'],
       ['<a "target="_blank">b</a>', '<a target="_blank">b</a>', {}, 'tree'],
       ['<script>a()</script><script>(b)()</script>', '<script>a()(b)()</script>', { mergeScripts: true }, 'tree'],
+      ['<script>a() // c</script><script>(b)()</script>', '<script>a() // c\n(b)()</script>', { mergeScripts: true }, 'tree'],
       ['<style>a{top:0</style><style>b{top:0}</style>', '<style>a{top:0b{top:0}</style>', { mergeStyles: true, minifyCSS: true }, 'tree'],
       ['<style>a{top:0}</style><style>@import "b.css";c{top:0}</style>', '<style>a{top:0}@import "b.css";c{top:0}</style>', { mergeStyles: true }, 'tree'],
       ['<script>a="<!--"</script><script>b="<script>"</script><p>c', '<script>a="<!--";b="<script>"</script><p>c', { mergeScripts: true }, 'tree'],
