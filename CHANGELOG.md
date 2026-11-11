@@ -4,6 +4,16 @@ As of version 5.0.0, all notable changes to HTML Minifier (HM) are documented in
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.1.0] - 2026-11-11
+
+### Fixed
+
+* Fixed `removeUnusedCSS` keeping style sheets of which nothing is used as written, unminified, where they held a word of ten or more lowercase letters (e.g., `background`; taken for a custom-fragment placeholder)
+
+### Added
+
+* Added `mergeStyles` (part of the `comprehensive` preset) to merge consecutive `style` elements with compatible style sheets into one, which `minifyCSS` then minifies as one (e.g., `<style>a{color:red}</style><style>a{color:blue}</style>` becomes `<style>a{color:#00f}</style>`)
+
 ## [5.0.4] - 2026-11-11
 
 ### Fixed

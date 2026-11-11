@@ -24,6 +24,7 @@ export const presets = {
     collapseWhitespace: true,
     decodeEntities: true,
     mergeScripts: true,
+    mergeStyles: true,
     minifyCSS: true,
     minifyJS: true,
     minifyJSON: true,

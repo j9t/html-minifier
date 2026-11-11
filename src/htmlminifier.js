@@ -81,7 +81,8 @@ import {
   processScript
 } from './lib/content.js';
 
-import { processOptions } from './lib/options.js';
+import { declinesMinify, processOptions } from './lib/options.js';
+import { canStyleSheetFollow, getStyleMergeKey, isStyleSheetClosed, joinStyleSheets } from './lib/merging.js';
 import { toFragment, replaceCustomFragments, isMinifiedCodeSafe } from './lib/fragments.js';
 
 /** @import { ProcessedOptions } from './lib/options.js' */
@@ -97,6 +98,18 @@ import { toFragment, replaceCustomFragments, isMinifiedCodeSafe } from './lib/fr
  * @prop {string} [customAssign]
  * @prop {string} [customOpen]
  * @prop {string} [customClose]
+ */
+
+/**
+ * @typedef {Object} StyleRecord
+ *  A `style` element for `mergeStyles`, by where its parts sit in the output buffer.
+ *
+ * @prop {number} start - Index of the start tag’s first entry
+ * @prop {number} content - Index of the first content entry
+ * @prop {number} end - Index of the end tag
+ * @prop {string | null} key - What its attributes make of the style sheet (`null` to keep it apart)
+ * @prop {string} tail - The last CSS of its run that isn’t blank, once parsed
+ * @prop {boolean} deferred - Whether its CSS is left to be minified with its run’s
  */
 
 /**
@@ -338,6 +351,14 @@ import { toFragment, replaceCustomFragments, isMinifiedCodeSafe } from './lib/fr
  *  When true, consecutive inline `<script>` elements are merged into one.
  *  Only merges compatible scripts (same `type`, matching `async`/`defer`/
  *  `nomodule`/`nonce` attributes). Does not merge external scripts (with `src`).
+ *
+ *  Default: `false`
+ *
+ * @prop {boolean} [mergeStyles]
+ *  When true, consecutive `<style>` elements are merged into one. Only merges
+ *  compatible style sheets (no attributes other than matching `media`,
+ *  `nonce`, and `blocking`, and a CSS `type`) where the first ends cleanly
+ *  and the next doesn’t start with `@import` or `@namespace`.
  *
  *  Default: `false`
  *
@@ -722,6 +743,7 @@ function nameForeign(name) {
   return namesForeignMixedCase.get(nameLower) ?? nameLower;
 }
 
+// @@ Merge in the parse buffer, as `mergeStyles` does, to skip comments, RCDATA, and ignored markup
 /**
  * Merge consecutive inline script tags into one.
  * Only merges scripts that are compatible:
@@ -1137,6 +1159,15 @@ async function minifyHTML(value, options, partialMarkup) {
   let trimSettledIndex = -1;
   // Parallel to `buffer`: whether the entry is a tag—the only place lines may break
   const bufferTags = options.maxLineLength ? /** @type {boolean[]} */ ([]) : null;
+  // Under `mergeStyles`, the `style` elements whose style sheets apply to the document as
+  // written (not in `template`, `noscript`, or foreign content), by where their start tag,
+  // content, and end tag sit in `buffer`; the one being parsed; and how deep parsing is in
+  // `template` and `noscript` elements
+  /** @type {StyleRecord[] | null} */
+  const styleRecords = options.mergeStyles ? [] : null;
+  /** @type {StyleRecord | null} */
+  let styleRecord = null;
+  let inertDepth = 0;
   /** @type {string} */
   let charsPrevTag = '';
   let currentChars = '';
@@ -1446,6 +1477,24 @@ async function minifyHTML(value, options, partialMarkup) {
     buffer.splice(index, 1);
     bufferTags?.splice(index, 1);
     if (index <= trimSettledIndex) trimSettledIndex = -1;
+    if (styleRecords) {
+      // Recorded in buffer order, so those before `index` stay as they are
+      for (let i = styleRecords.length - 1; i >= 0; i--) {
+        const record = /** @type {StyleRecord} */ (styleRecords[i]);
+        if (record.end < index) break;
+        shiftStyleRecord(record, index);
+      }
+      if (styleRecord) shiftStyleRecord(styleRecord, index);
+    }
+  }
+
+  function shiftStyleRecord(/** @type {StyleRecord} */ record, /** @type {number} */ index) {
+    if (record.start === index || record.content === index || record.end === index) {
+      record.key = null;
+    }
+    if (record.start > index) record.start--;
+    if (record.content > index) record.content--;
+    if (record.end > index) record.end--;
   }
 
   function bufferTruncate(/** @type {number} */ length) {
@@ -1455,6 +1504,13 @@ async function minifyHTML(value, options, partialMarkup) {
     if (transparentGapIndex >= buffer.length) transparentGapIndex = -1;
     if (noTrimEndIndex >= buffer.length) noTrimEndIndex = -1;
     if (noCollapseEndIndex >= buffer.length) noCollapseEndIndex = -1;
+    if (styleRecords) {
+      while (styleRecords.length && /** @type {StyleRecord} */ (styleRecords[styleRecords.length - 1]).end >= buffer.length) {
+        styleRecords.pop();
+      }
+      if (styleRecord && styleRecord.start >= buffer.length) styleRecord = null;
+      else if (styleRecord && styleRecord.content >= buffer.length) styleRecord.content = -1;
+    }
     removed = true;
   }
 
@@ -1470,6 +1526,120 @@ async function minifyHTML(value, options, partialMarkup) {
       after++;
     }
     return [before, after];
+  }
+
+  function styleContentOf(/** @type {StyleRecord} */ record) {
+    return buffer.slice(record.content, record.end).join('');
+  }
+
+  // Whether the entries from `from` to `to` (exclusive) are whitespace that may sit between
+  // merged `style` elements
+  function isStyleGap(/** @type {number} */ from, /** @type {number} */ to) {
+    for (let i = from; i < to; i++) {
+      const entry = buffer[i] ?? '';
+      if (entry && !RE_WS_ONLY.test(entry)) return false;
+    }
+    return true;
+  }
+
+  // Whether the `style` element being parsed, holding `css`, joins the last one recorded
+  // (or its run), so that its CSS is minified with the run’s rather than on its own
+  function joinsStyleRun(/** @type {StyleRecord} */ record, /** @type {string} */ css) {
+    const recordPrev = styleRecords?.[styleRecords.length - 1];
+    return recordPrev !== undefined && record.key !== null && record.key === recordPrev.key &&
+      record.start > recordPrev.end && isStyleGap(recordPrev.end + 1, record.start) &&
+      isStyleSheetClosed(recordPrev.tail) && canStyleSheetFollow(css);
+  }
+
+  // Merge each run of `style` elements that only whitespace separates into its first, as long
+  // as their style sheets are compatible; whitespace that may separate text goes after it. CSS
+  // whose minification was deferred to the run is minified here.
+  async function mergeStyleElements(/** @type {StyleRecord[]} */ records) {
+    /** @type {Array<{records: StyleRecord[], parts: string[]}>} */
+    const runs = [];
+    /** @type {{records: StyleRecord[], parts: string[]} | null} */
+    let run = null;
+    /** @type {StyleRecord | null} */
+    let recordPrev = null;
+    // The last CSS of the run that isn’t blank, which decides whether more may follow
+    let cssTail = '';
+    for (const record of records) {
+      const isUsable = record.key !== null && RE_START_TAG.test(buffer[record.start] ?? '') && RE_END_TAG.test(buffer[record.end] ?? '');
+      const css = styleContentOf(record);
+      if (run && isUsable && recordPrev && record.key === recordPrev.key && record.start > recordPrev.end &&
+          isStyleGap(recordPrev.end + 1, record.start) && isStyleSheetClosed(cssTail) && canStyleSheetFollow(css)) {
+        run.records.push(record);
+        run.parts.push(css);
+      } else {
+        // Where what was to be merged no longer is, the CSS is still to be minified
+        run = isUsable || record.deferred ? { records: [record], parts: [css] } : null;
+        if (run) runs.push(run);
+        cssTail = '';
+      }
+      if (css.trim()) cssTail = css;
+      recordPrev = isUsable ? record : null;
+    }
+
+    /** @type {Promise<void>[]} */
+    const pending = [];
+    for (const { records: merged, parts } of runs) {
+      const first = /** @type {StyleRecord} */ (merged[0]);
+      if (merged.length < 2) {
+        if (first.deferred) {
+          pending.push((async () => {
+            const css = await options.minifyCSS(parts[0] ?? '', undefined, options.cssContext);
+            for (let i = first.content + 1; i < first.end; i++) bufferSet(i, '');
+            bufferSet(first.content, css);
+          })());
+        }
+        continue;
+      }
+      const last = /** @type {StyleRecord} */ (merged[merged.length - 1]);
+      // The first whitespace between the elements stays, right after the first one
+      let gapFrom = -1;
+      let gapTo = -1;
+      for (let i = 1; i < merged.length && gapFrom === -1; i++) {
+        const from = /** @type {StyleRecord} */ (merged[i - 1]).end + 1;
+        const to = /** @type {StyleRecord} */ (merged[i]).start;
+        if (buffer.slice(from, to).join('')) {
+          gapFrom = from;
+          gapTo = to;
+        }
+      }
+      for (let i = first.end + 1; i <= last.end; i++) {
+        if (i < gapFrom || i >= gapTo) bufferSet(i, '');
+      }
+      // Unless nothing or whitespace is on either side anyway
+      if (gapFrom !== -1) {
+        const [before] = findNeighbors(first.start);
+        const [, after] = findNeighbors(last.end + 1);
+        const textBefore = buffer[before] ?? '';
+        const textAfter = buffer[after] ?? '';
+        if (before < 0 || after >= buffer.length || RE_WS_END.test(textBefore) || RE_WS_START.test(textAfter)) {
+          for (let i = gapFrom; i < gapTo; i++) bufferSet(i, '');
+        }
+      }
+      for (let i = first.content + 1; i < first.end; i++) bufferSet(i, '');
+      const css = joinStyleSheets(parts);
+      bufferSet(first.content, css);
+      if (options.minifyCSS === identity) continue;
+      pending.push((async () => {
+        // Minified as one, the style sheets may share rules—unless CSS of them is to stay as it is
+        if (!parts.some(part => part.trim() && declinesMinify(options, 'canMinifyCSS', part, undefined))) {
+          const minified = await options.minifyCSS(css, undefined, options.cssContext);
+          // Where the whole is left as is, CSS left to it may still be minified on its own
+          if (minified !== css || !merged.some(record => record.deferred)) {
+            bufferSet(first.content, minified);
+            return;
+          }
+        }
+        const minified = await Promise.all(merged.map((record, i) => record.deferred
+          ? options.minifyCSS(parts[i] ?? '', undefined, options.cssContext)
+          : parts[i] ?? ''));
+        bufferSet(first.content, joinStyleSheets(minified));
+      })());
+    }
+    await Promise.all(pending);
   }
 
   // With whitespace kept as is, a removed node must not leave a line of nothing but
@@ -2507,6 +2677,16 @@ async function minifyHTML(value, options, partialMarkup) {
       const optionsTag = useNameParentForTag ? optionsParent : options;
       const hasUnarySlash = needsXMLSlash || (unarySlash && optionsTag.keepClosingSlash);
 
+      // Only names as long as `style`, `template`, and `noscript` need a look
+      if (styleRecords && (tag.length === 5 || tag.length === 8)) {
+        const tagLower = tag.toLowerCase();
+        if (tagLower === 'template' || tagLower === 'noscript') {
+          if (!unary) inertDepth++;
+        } else if (tagLower === 'style' && !inertDepth && !options.namespaceForeign) {
+          styleRecord = { start: buffer.length, content: -1, end: -1, key: getStyleMergeKey(attrs, markers), tail: '', deferred: false };
+        }
+      }
+
       bufferPush(openTag, true);
 
       if (options.removeEmptyElements) {
@@ -2590,6 +2770,15 @@ async function minifyHTML(value, options, partialMarkup) {
       // As in `start`
       const tagOut = namesAsWritten && name === lowercase ? tagSource : tag;
       let endTagText = '</' + tagOut + '>';
+      const endsStyleRecord = styleRecord !== null && tag.length === 5 && tag.toLowerCase() === 'style';
+      if (endsStyleRecord && styleRecord && styleRecord.content === -1) {
+        // A place for the content of what is merged into this one
+        styleRecord.content = buffer.length;
+        bufferPush('', false);
+      } else if (inertDepth && tag.length === 8) {
+        const tagLower = tag.toLowerCase();
+        if (tagLower === 'template' || tagLower === 'noscript') inertDepth--;
+      }
       // Custom fragments after the name are kept, next to it if they were in the source
       if (rest && uidAttr && rest.includes(uidAttr)) {
         markTagFragments(rest);
@@ -2766,6 +2955,21 @@ async function minifyHTML(value, options, partialMarkup) {
         markOpenElementFilled();
       }
 
+      if (endsStyleRecord) {
+        if (styleRecords && styleRecord && buffer.length - 1 > styleRecord.content && RE_END_TAG.test(buffer[buffer.length - 1] ?? '')) {
+          styleRecord.end = buffer.length - 1;
+          const css = styleContentOf(styleRecord);
+          styleRecord.tail = css.trim() || !styleRecord.deferred ? css : styleRecords[styleRecords.length - 1]?.tail ?? '';
+          styleRecords.push(styleRecord);
+        } else if (styleRecords && styleRecord && styleRecord.deferred && styleRecord.content < buffer.length) {
+          // Without an end tag, it stays apart, but its CSS is still to be minified
+          styleRecord.key = null;
+          styleRecord.end = buffer.length;
+          styleRecords.push(styleRecord);
+        }
+        styleRecord = null;
+      }
+
       // SVG subtree capture: Record end position for post-processing with SVGO
       if (lowerTag === 'svg' && options.minifySVG && svgDepth > 0) {
         svgDepth--;
@@ -2776,6 +2980,11 @@ async function minifyHTML(value, options, partialMarkup) {
       }
     },
     chars: function (/** @type {string} */ text, /** @type {string} */ prevTag, /** @type {string} */ nextTag, /** @type {HTMLAttribute[]} */ prevAttrs, /** @type {HTMLAttribute[]} */ nextAttrs, /** @type {boolean} */ source) {
+      if (styleRecord) {
+        if (styleRecord.content === -1) styleRecord.content = buffer.length;
+        // Custom fragments may be restored on the way, and may hold anything
+        if (markers.length && markers.some(marker => text.includes(marker))) styleRecord.key = null;
+      }
       // Publish this node’s context for the `charsCollapse`/`charsFinalize` phases
       textPrevTag = prevTag === '' ? 'comment' : prevTag;
       textNextTag = nextTag === '' ? 'comment' : nextTag;
@@ -2827,7 +3036,14 @@ async function minifyHTML(value, options, partialMarkup) {
           text = prewarmed ? await prewarmed : await options.minifyJS(text, false, isModuleScript);
         }
         if (needsMinifyCSS) {
-          text = await options.minifyCSS(text, undefined, options.cssContext);
+          // Style sheets that may be merged are minified once that is known, by run; except
+          // under `removeEmptyElements`, which needs to know now whether CSS minifies to nothing,
+          // where that only goes for CSS that joins a run
+          if (styleRecord && styleRecord.key !== null && (!options.removeEmptyElements || joinsStyleRun(styleRecord, text))) {
+            styleRecord.deferred = true;
+          } else {
+            text = await options.minifyCSS(text, undefined, options.cssContext);
+          }
         }
         charsFinalize(text);
       })();
@@ -2872,6 +3088,10 @@ async function minifyHTML(value, options, partialMarkup) {
   // Nothing follows at the end, so pending whitespace goes (before SVG blocks shift the buffer)
   if (transparentGapIndex !== -1) {
     settleTransparentGap(Boolean(options.conservativeCollapse));
+  }
+
+  if (styleRecords && (styleRecords.length > 1 || styleRecords[0]?.deferred)) {
+    await mergeStyleElements(styleRecords);
   }
 
   // Post-processing: Optimize SVG blocks with SVGO

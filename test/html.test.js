@@ -4462,6 +4462,161 @@ describe('HTML', () => {
     assert.strictEqual(await minify(input), input);
   });
 
+  test('Merges consecutive `style` elements', async () => {
+    let input, output;
+
+    input = '<style>a{color:red}</style><style>a{color:blue}</style>';
+    assert.strictEqual(await minify(input, { mergeStyles: true }), '<style>a{color:red}a{color:blue}</style>');
+    // The merged style sheet is minified as one
+    assert.strictEqual(await minify(input, { mergeStyles: true, minifyCSS: true }), '<style>a{color:#00f}</style>');
+
+    input = '<style>a{}</style>\n  <style>b{}</style>\n<style>c{}</style>';
+    assert.strictEqual(await minify(input, { mergeStyles: true }), '<style>a{}b{}c{}</style>');
+    // Whitespace where the style sheets meet goes, but not a no-break space, part of a name
+    input = '<style>\n  a{}\n</style><style>\n  b{}\n</style><style>\u00A0c{}</style>';
+    assert.strictEqual(await minify(input, { mergeStyles: true }), '<style>\n  a{}b{}\u00A0c{}</style>');
+
+    // Whitespace that may separate text moves after the merged element
+    input = '<p>a<style>x{}</style> <style>y{}</style>b</p>';
+    output = '<p>a<style>x{}y{}</style> b</p>';
+    assert.strictEqual(await minify(input, { mergeStyles: true }), output);
+    assert.strictEqual(await minify(input, { mergeStyles: true, collapseWhitespace: true }), output);
+    input = '<p>a <style>x{}</style>\n<style>y{}</style>b</p>';
+    assert.strictEqual(await minify(input, { mergeStyles: true }), '<p>a <style>x{}y{}</style>b</p>');
+
+    input = '<html><head>\n<style>a{}</style>\n<style>b{}</style>\n</head><body><p>x</p></body></html>';
+    assert.strictEqual(await minify(input, { mergeStyles: true, collapseWhitespace: true, removeOptionalTags: true }), '<style>a{}b{}</style><p>x');
+
+    input = '<STYLE>a{}</STYLE><STYLE>b{}</STYLE>';
+    assert.strictEqual(await minify(input, { mergeStyles: true }), '<style>a{}b{}</style>');
+
+    input = '<style></style><style>b{}</style>';
+    assert.strictEqual(await minify(input, { mergeStyles: true }), '<style>b{}</style>');
+    // Without an end tag written, the style sheet is still minified
+    input = '<p>x</p><style>a { color: red }';
+    assert.strictEqual(await minify(input, { mergeStyles: true, minifyCSS: true }), '<p>x</p><style>a{color:red}');
+    input = '<style>a{}</style><style></style>';
+    assert.strictEqual(await minify(input, { mergeStyles: true }), '<style>a{}</style>');
+
+    // Attributes that the style sheets share
+    input = '<style media="print">a{}</style><style media="print">b{}</style>';
+    assert.strictEqual(await minify(input, { mergeStyles: true }), '<style media="print">a{}b{}</style>');
+    input = '<style nonce="abc">a{}</style><style nonce="abc">b{}</style>';
+    assert.strictEqual(await minify(input, { mergeStyles: true }), '<style nonce="abc">a{}b{}</style>');
+    input = '<style media=" all ">a{}</style><style media="">b{}</style><style>c{}</style>';
+    assert.strictEqual(await minify(input, { mergeStyles: true }), '<style media="all">a{}b{}c{}</style>');
+    input = '<style type="text/css">a{}</style><style>b{}</style>';
+    assert.strictEqual(await minify(input, { mergeStyles: true }), '<style type="text/css">a{}b{}</style>');
+
+    // Attributes that differ, or that may set the style sheets apart
+    for (input of [
+      '<style media="print">a{}</style><style media="screen">b{}</style>',
+      '<style media="print">a{}</style><style>b{}</style>',
+      '<style nonce="abc">a{}</style><style nonce="xyz">b{}</style>',
+      '<style>a{}</style><style type="text/plain">b{}</style>',
+      '<style id="a">a{}</style><style>b{}</style>',
+      '<style>a{}</style><style id="b">b{}</style>',
+      '<style title="a">a{}</style><style title="a">b{}</style>',
+      '<style class="a">a{}</style><style class="a">b{}</style>',
+      '<style data-a>a{}</style><style data-a>b{}</style>'
+    ]) {
+      assert.strictEqual(await minify(input, { mergeStyles: true }), input);
+    }
+
+    // What lies between the style sheets
+    input = '<style>a{}</style><div></div><style>b{}</style>';
+    assert.strictEqual(await minify(input, { mergeStyles: true }), input);
+    input = '<style>a{}</style><!-- c --><style>b{}</style>';
+    assert.strictEqual(await minify(input, { mergeStyles: true }), input);
+    assert.strictEqual(await minify(input, { mergeStyles: true, removeComments: true }), '<style>a{}b{}</style>');
+
+    // `@import` and `@namespace` only work at the start of a style sheet
+    input = '<style>a{}</style><style>@import "b.css";c{}</style>';
+    assert.strictEqual(await minify(input, { mergeStyles: true }), input);
+    input = '<style>a{}</style><style>@namespace svg url(http://www.w3.org/2000/svg);c{}</style>';
+    assert.strictEqual(await minify(input, { mergeStyles: true }), input);
+    input = '<style>@import "a.css";b{}</style><style>c{}</style>';
+    assert.strictEqual(await minify(input, { mergeStyles: true }), '<style>@import "a.css";b{}c{}</style>');
+
+    // A style sheet whose end would run into the next one
+    for (input of [
+      '<style>a{color:red</style><style>b{}</style>',
+      '<style>a{}/* c</style><style>b{}</style>',
+      '<style>a{content:"x</style><style>b{}</style>',
+      '<style>a</style><style>b{}</style>',
+      '<style>a;</style><style>b{}</style>',
+      '<style>@import "a.css"</style><style>b{}</style>',
+      '<style>a{}\\</style><style>b{}</style>',
+      '<style>@import "a.css";"x";</style><style>b{}</style>',
+      '<style>"a") b;}</style><style>c{}</style>',
+      '<style>a{}}</style><style>b{}</style>'
+    ]) {
+      assert.strictEqual(await minify(input, { mergeStyles: true }), input);
+    }
+    input = '<style>@media print{a:is(b,[c]){content:"}"}}</style><style>d{}</style>';
+    assert.strictEqual(await minify(input, { mergeStyles: true }), '<style>@media print{a:is(b,[c]){content:"}"}}d{}</style>');
+    input = '<style>@import "a.css";</style><style>b{}</style>';
+    assert.strictEqual(await minify(input, { mergeStyles: true }), '<style>@import "a.css";b{}</style>');
+    input = '<style>a{}/* c */ <!-- --></style><style>b{}</style>';
+    assert.strictEqual(await minify(input, { mergeStyles: true }), '<style>a{}/* c */ <!-- -->b{}</style>');
+    input = '<style>a{color:red</style><style>b{color:blue}</style>';
+    assert.strictEqual(await minify(input, { mergeStyles: true, minifyCSS: true }), '<style>a{color:red}</style><style>b{color:#00f}</style>');
+
+    // Where style sheets don’t apply to the document, or are not style sheets
+    for (input of [
+      '<svg><style>a{}</style><style>b{}</style></svg>',
+      '<math><style>a{}</style><style>b{}</style></math>',
+      '<template><style>a{}</style><style>b{}</style></template>',
+      '<noscript><style>a{}</style><style>b{}</style></noscript>',
+      '<textarea><style>a{}</style><style>b{}</style></textarea>',
+      '<script>"<style>a{}</style><style>b{}</style>"</script>'
+    ]) {
+      assert.strictEqual(await minify(input, { mergeStyles: true }), input);
+    }
+    input = '<template><style>a{}</style></template><style>b{}</style><style>c{}</style>';
+    assert.strictEqual(await minify(input, { mergeStyles: true }), '<template><style>a{}</style></template><style>b{}c{}</style>');
+
+    // Ignored markup and custom fragments stay as they are
+    input = '<!-- htmlmin:ignore --><style>a{}</style><style>b{}</style><!-- htmlmin:ignore -->';
+    assert.strictEqual(await minify(input, { mergeStyles: true }), '<style>a{}</style><style>b{}</style>');
+    input = '<!-- htmlmin:ignore --><style>a{}</style><!-- htmlmin:ignore --><style>b{}</style>';
+    assert.strictEqual(await minify(input, { mergeStyles: true }), '<style>a{}</style><style>b{}</style>');
+    input = '<style>a{color:<?= $c ?>}</style><style>b{}</style>';
+    assert.strictEqual(await minify(input, { mergeStyles: true }), input);
+
+    // CSS that `canMinifyCSS` exempts isn’t minified with the rest
+    input = '<style>/* keep */ a { color: red }</style><style>b { color: blue }</style>';
+    output = '<style>/* keep */ a { color: red }b{color:#00f}</style>';
+    assert.strictEqual(await minify(input, { mergeStyles: true, minifyCSS: true, canMinifyCSS: text => !text.includes('keep') }), output);
+
+    // CSS whose minification was left to the merged style sheet is minified on its own where that
+    // style sheet is left as is
+    const minifyUnlessKept = (/** @type {string} */ text) => text.includes('keep') ? text : text.replace(/\s+/g, '');
+    input = '<style>/* keep */ a { }</style><style>b { }</style>';
+    assert.strictEqual(await minify(input, { mergeStyles: true, minifyCSS: minifyUnlessKept }), '<style>/* keep */ a { }b{}</style>');
+
+    input = '<style>.a{color:red}</style><style>.b{color:blue}</style><p class="a">x</p>';
+    output = '<style>.a{color:red}</style><p class="a">x</p>';
+    assert.strictEqual(await minify(input, { mergeStyles: true, minifyCSS: true, removeUnusedCSS: true }), output);
+
+    // Style sheets emptied on their own go with `removeEmptyElements`, merged or not
+    const optionsEmpty = { mergeStyles: true, minifyCSS: true, removeUnusedCSS: true, removeEmptyElements: true };
+    input = '<style>.b{color:red}</style><style>p{color:blue}</style><p>x</p>';
+    assert.strictEqual(await minify(input, optionsEmpty), '<style>p{color:#00f}</style><p>x</p>');
+    input = '<style>p{color:red}</style><style>.b{color:blue}</style><p>x</p>';
+    assert.strictEqual(await minify(input, optionsEmpty), '<style>p{color:red}</style><p>x</p>');
+    input = '<style>.b{color:red}</style><style>.c{color:blue}</style><p>x</p>';
+    assert.strictEqual(await minify(input, optionsEmpty), '<p>x</p>');
+
+    input = '<style>a{}</style><style>b{}</style><script>x()</script><script>y()</script>';
+    assert.strictEqual(await minify(input, { mergeScripts: true, mergeStyles: true }), '<style>a{}b{}</style><script>x();y()</script>');
+
+    // Disabled by default
+    input = '<style>a{}</style><style>b{}</style>';
+    assert.strictEqual(await minify(input), input);
+    assert.strictEqual(getPreset('comprehensive')?.mergeStyles, true);
+  });
+
   test('Minifies `style` elements with custom fragments', async () => {
     let input;
 

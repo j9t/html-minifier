@@ -344,6 +344,32 @@ function mergeAdjacentScripts(/** @type {any[]} */ children) {
   return merged;
 }
 
+// Style sheets that may merge, as one style sheet: With code minified, CSS that minifies alike
+// joins alike, and without, whitespace around each is left out
+function mergeAdjacentStyles(/** @type {any[]} */ children, /** @type {any} */ options) {
+  const keyOf = (/** @type {any} */ style) => {
+    if (!isHTML(style) || style.attrs.some((/** @type {any} */ attr) => !['blocking', 'media', 'nonce', 'type'].includes(attr.name))) return undefined;
+    const type = trim(attrValue(style, 'type') ?? '').toLowerCase();
+    if (type && type !== 'text/css') return undefined;
+    const media = trim(attrValue(style, 'media') ?? '');
+    return JSON.stringify([attrValue(style, 'blocking'), media.toLowerCase() === 'all' ? '' : media, attrValue(style, 'nonce')]);
+  };
+  const canonical = (/** @type {string} */ text) => options.minifyCSS && !options.removeUnusedCSS ? normalizeCSS(text) : trim(text);
+  /** @type {any[]} */
+  const merged = [];
+  for (const child of children) {
+    const last = merged[merged.length - 1];
+    if (child.nodeName === '#text' && isWsOnly(child.value) && last?.tagName === 'style' && keyOf(last) !== undefined) continue;
+    if (child.tagName === 'style' && last?.tagName === 'style' && keyOf(child) !== undefined && keyOf(child) === keyOf(last)) {
+      const text = canonical(last.childNodes[0]?.value ?? '') + canonical(child.childNodes[0]?.value ?? '');
+      last.childNodes = text ? [{ nodeName: '#text', value: text }] : [];
+      continue;
+    }
+    merged.push(child);
+  }
+  return merged;
+}
+
 function stripComments(/** @type {any} */ node) {
   if (node.childNodes) {
     node.childNodes = node.childNodes.filter((/** @type {any} */ child) => child.nodeName !== '#comment');
@@ -503,7 +529,8 @@ function canonicalize(source, options, scripting) {
 
   function visit(/** @type {any} */ node, /** @type {string} */ path, /** @type {boolean} */ preformatted) {
     const parent = node.tagName;
-    const children = options.mergeScripts ? mergeAdjacentScripts(childrenOf(node)) : childrenOf(node);
+    let children = options.mergeScripts ? mergeAdjacentScripts(childrenOf(node)) : childrenOf(node);
+    if (options.mergeStyles) children = mergeAdjacentStyles(children, options);
     for (const child of children) {
       if (child.nodeName === '#documentType') {
         lines.push(options.useShortDoctype ? 'doctype:' + child.name.toLowerCase() : `doctype:${child.name}|${child.publicId ?? ''}|${child.systemId ?? ''}`);

@@ -116,6 +116,10 @@ const optionDefinitions = {
     description: 'Merge consecutive inline `script` elements into one',
     type: 'boolean'
   },
+  mergeStyles: {
+    description: 'Merge consecutive `style` elements into one',
+    type: 'boolean'
+  },
   minifyCSS: {
     description: 'Minify CSS in `style` elements and attributes (uses Lightning CSS)',
     type: 'jsonObject'

@@ -1296,6 +1296,7 @@ export {
   isIgnoredComment,
   isExecutableScript,
   isStyleElement,
+  isStyleLinkTypeAttribute,
   isMetaWithoutEffect,
   hasAttrName,
   nameAttrOut,

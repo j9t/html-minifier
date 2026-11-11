@@ -751,6 +751,13 @@ describe('CSS', () => {
       );
     });
 
+    test('Empties style sheets of which nothing is used', async () => {
+      // Long words used to pass for custom-fragment placeholders, which kept the CSS as written
+      const input = '<style>.unused { background: red; transition: all .2s }</style><p>x</p>';
+      assert.strictEqual(await minify(input, { minifyCSS: true, removeUnusedCSS: true }), '<style></style><p>x</p>');
+      assert.strictEqual(await minify(input, { minifyCSS: true, removeUnusedCSS: true, removeEmptyElements: true }), '<p>x</p>');
+    });
+
     test('Removes unused selectors from a list and keeps the rule for the rest', async () => {
       const options = { minifyCSS: true, removeUnusedCSS: true };
 
