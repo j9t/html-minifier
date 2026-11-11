@@ -22,6 +22,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 ### Changed
 
 * Made `mergeScripts` faster, as it merges what the minifier writes rather than scanning its output again
+* Made `mergeScripts` merge scripts of any JavaScript type (e.g., `text/ecmascript`), not just of `text/javascript` and `application/javascript`
 * Made `minifyJS`, `removeDefaultTypeAttributes`, and `mergeScripts` treat the remaining JavaScript types browsers run as such (`text/javascript1.0` to `text/javascript1.5`, and `text/livescript`)
 
 ## [5.0.4] - 2026-11-11

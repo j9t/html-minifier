@@ -4502,6 +4502,10 @@ describe('HTML', () => {
     input = '<!-- htmlmin:ignore --><script>a()</script><script>b()</script><!-- htmlmin:ignore -->';
     assert.strictEqual(await minify(input, { mergeScripts: true }), '<script>a()</script><script>b()</script>');
 
+    // Nor do scripts whose attributes custom fragments wrap, even where only a closing one does
+    input = '<script x{{/if}}>a()</script><script x{{/if}}>b()</script>';
+    assert.strictEqual(await minify(input, { mergeScripts: true, customAttrSurround: [[/(?:)/, /\{\{\/if\}\}/]] }), input);
+
     // Custom fragments merge as written, on a line of their own where they may end one
     input = '<script nonce="<?= $n ?>">a(<?= $x ?>)</script><script nonce="<?= $n ?>">b()</script>';
     output = '<script nonce="<?= $n ?>">a(<?= $x ?>);b()</script>';

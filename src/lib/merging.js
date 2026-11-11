@@ -15,11 +15,12 @@ const RE_NAMESPACE_RULE = /@namespace|@[\w-]*\\/i;
 const RE_SCRIPT_START_TEXT = /<script[\t\n\f\r />]/i;
 const RE_SCRIPT_HASHBANG = /^\s*#!/;
 
-/** @typedef {{name: string, value?: string, customAssign?: string, customOpen?: string}} MergeAttribute */
+/** @typedef {{name: string, value?: string, customAssign?: string, customOpen?: string, customClose?: string}} MergeAttribute */
 
 /**
  * Attribute values by lowercased name, the first of repeated attributes counting, with custom
- * fragments as written; `null` where a custom fragment stands for attributes, or assigns one
+ * fragments as written; `null` where a custom fragment stands for attributes, wraps one (even
+ * on one side only), or assigns one
  *
  * @param {MergeAttribute[]} attrs
  * @param {(text: string) => string} resolve - Restores custom fragments
@@ -30,7 +31,7 @@ function readAttrs(attrs, resolve) {
   /** @type {Record<string, string>} */
   const values = Object.create(null);
   for (const attr of attrs) {
-    if ((attr.customAssign && attr.customAssign !== '=') || attr.customOpen) return null;
+    if ((attr.customAssign && attr.customAssign !== '=') || attr.customOpen || attr.customClose) return null;
     const name = resolve(attr.name);
     if (name !== attr.name) return null;
     const nameLower = name.toLowerCase();

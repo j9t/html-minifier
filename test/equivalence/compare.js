@@ -325,22 +325,18 @@ function canonicalizeRaw(/** @type {any} */ node, /** @type {string} */ text, /*
   return (SCRIPT_TYPES_JS.has(type) && normalizeJS(text)) || text.replace(/[;\s]+/g, '');
 }
 
-// Elements that may merge, as one: classic scripts (not in MathML, where they are text) and
-// style sheets whose attributes match, other than a JavaScript or CSS `type` and `media` that
-// matches all, none with an `id`; what options remove of them isn’t compared, as the output
-// lacks it. As in the minifier, a style sheet only joins one that ends cleanly and can be
-// followed, a script holding `<script` doesn’t follow one holding `<!--`, and one starting with
-// a hashbang stays apart; the first whitespace between merged elements goes after them, unless
-// whitespace is next to them anyway. Merged scripts are compared loosely; style sheets, with CSS
-// minified, as CSS that minifies alike, and without, leaving out whitespace around each. What
-// merges is copied, so that the tree stays as parsed.
-function mergeAdjacent(/** @type {any[]} */ children, /** @type {any} */ options, /** @type {any} */ context) {
+// Adjacent scripts and style sheets, merged as the minifier merges them so that both sides
+// compare alike: by their attributes as the output has them, under the minifier’s own checks,
+// with whitespace between them moved after them, and their code compared loosely. What merges
+// is copied, so that the tree stays as parsed for the syntax check.
+function mergeAdjacent(/** @type {any[]} */ children, /** @type {any} */ options, /** @type {any} */ context, /** @type {boolean} */ inert) {
   const textOf = (/** @type {any} */ node) => node.childNodes[0]?.value ?? '';
   const keyOf = (/** @type {any} */ node) => {
     const kind = node.tagName;
+    // MathML scripts are text, and style sheets in `template` or `noscript` don’t apply as written
     const isMergeable = kind === 'script'
       ? options.mergeScripts && !node.namespaceURI.endsWith('MathML')
-      : kind === 'style' && options.mergeStyles && isHTML(node);
+      : kind === 'style' && options.mergeStyles && isHTML(node) && !inert;
     if (!isMergeable) return undefined;
     /** @type {Record<string, string>} */
     const values = Object.fromEntries(node.attrs
@@ -578,9 +574,10 @@ function canonicalize(source, options, scripting) {
   const body = document.childNodes.find(child => child.nodeName === 'html')?.childNodes.find((/** @type {any} */ child) => child.tagName === 'body');
   if (body) trimDocumentEnd(body);
 
-  function visit(/** @type {any} */ node, /** @type {string} */ path, /** @type {boolean} */ preformatted) {
+  // `inert` is whether `node` sits in a `template` or `noscript` element (or is one)
+  function visit(/** @type {any} */ node, /** @type {string} */ path, /** @type {boolean} */ preformatted, /** @type {boolean} */ inert) {
     const parent = node.tagName;
-    const children = options.mergeScripts || options.mergeStyles ? mergeAdjacent(childrenOf(node), options, context) : childrenOf(node);
+    const children = options.mergeScripts || options.mergeStyles ? mergeAdjacent(childrenOf(node), options, context, inert) : childrenOf(node);
     for (const child of children) {
       if (child.nodeName === '#documentType') {
         lines.push(options.useShortDoctype ? 'doctype:' + child.name.toLowerCase() : `doctype:${child.name}|${child.publicId ?? ''}|${child.systemId ?? ''}`);
@@ -592,7 +589,7 @@ function canonicalize(source, options, scripting) {
         const namespace = isHTML(child) ? '' : (child.namespaceURI.split('/').pop() ?? '');
         lines.push(`${pathChild}@${namespace}${isOpaque ? '«SVG»' : JSON.stringify(canonicalizeAttributes(child, options, context))}`);
         if (!isOpaque) {
-          visit(child, pathChild, preformatted || isPreformatted(child));
+          visit(child, pathChild, preformatted || isPreformatted(child), inert || child.tagName === 'template' || child.tagName === 'noscript');
           lines.push(`${pathChild}/end`);
         }
       }
@@ -629,7 +626,7 @@ function canonicalize(source, options, scripting) {
     }
   }
 
-  visit(document, '', false);
+  visit(document, '', false, false);
   lines.push('comments:' + JSON.stringify(comments.sort()));
   return { document, lines };
 }

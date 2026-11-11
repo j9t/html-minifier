@@ -74,6 +74,8 @@ describe('Equivalence', () => {
       ['<script>a()</script><script>(b)()</script>', '<script>a()(b)()</script>', { mergeScripts: true }, 'tree'],
       ['<script>a() // c</script><script>(b)()</script>', '<script>a() // c\n(b)()</script>', { mergeScripts: true }, 'tree'],
       ['<script>a()</script><script>#!b\nc()</script>', '<script>a();#!b\nc()</script>', { mergeScripts: true }, 'tree'],
+      ['<template><style>a{top:0}</style><style>b{top:0}</style></template>', '<template><style>a{top:0}b{top:0}</style></template>', { mergeStyles: true }, 'tree'],
+      ['<noscript><style>a{top:0}</style><style>b{top:0}</style></noscript>', '<noscript><style>a{top:0}b{top:0}</style></noscript>', { mergeStyles: true }, 'tree'],
       ['<style>a{top:0</style><style>b{top:0}</style>', '<style>a{top:0b{top:0}</style>', { mergeStyles: true, minifyCSS: true }, 'tree'],
       ['<style>a{top:0}</style><style>@import "b.css";c{top:0}</style>', '<style>a{top:0}@import "b.css";c{top:0}</style>', { mergeStyles: true }, 'tree'],
       ['<script>a="<!--"</script><script>b="<script>"</script><p>c', '<script>a="<!--";b="<script>"</script><p>c', { mergeScripts: true }, 'tree'],
