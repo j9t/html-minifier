@@ -2,47 +2,110 @@
  * Script and style merging
  */
 
+import { RE_WS_END, RE_WS_START } from './constants.js';
 import { isStyleLinkTypeAttribute } from './attributes.js';
 
 // Rules that only work at the start of a style sheet (a stray one in a string or comment
 // merely keeps the style sheets apart)
 const RE_LEADING_AT_RULE = /@(?:import|namespace)/i;
 
-const RE_CSS_WS_START = /^[ \t\n\f\r]+/;
-const RE_CSS_WS_END = /[ \t\n\f\r]+$/;
+// After `<!--`, `<script` opens a state `</script>` doesn’t end
+const RE_SCRIPT_START_TEXT = /<script[\t\n\f\r />]/i;
+// What browsers read as a comment running to the end of the line
+const RE_SCRIPT_LINE_COMMENT = /\/\/|<!--|-->/;
+const SCRIPT_TYPES_CLASSIC = new Set(['', 'text/javascript', 'application/javascript']);
 
-const ATTRS_MERGEABLE = new Set(['blocking', 'media', 'nonce', 'type']);
+/** @typedef {{name: string, value?: string, customAssign?: string, customOpen?: string}} MergeAttribute */
 
 /**
- * What a `style` element’s attributes make of its style sheet, equal for style sheets that
- * may be merged, or `null` for one that is to stay apart
+ * Attribute values by lowercased name, the first of repeated attributes counting, with custom
+ * fragments as written; `null` where a custom fragment stands for attributes, or assigns one
  *
- * @param {Array<{name: string, value?: string, customAssign?: string, customOpen?: string}>} attrs
- * @param {string[]} markers - Custom fragment and `htmlmin:ignore` placeholder markers
- * @returns {string | null}
+ * @param {MergeAttribute[]} attrs
+ * @param {(text: string) => string} resolve - Restores custom fragments
+ * @returns {Record<string, string> | null}
  */
-function getStyleMergeKey(attrs, markers) {
+function readAttrs(attrs, resolve) {
   /** @type {Record<string, string>} */
   const values = {};
   for (const attr of attrs) {
-    const name = attr.name.toLowerCase();
-    const value = attr.value ?? '';
-    if (!ATTRS_MERGEABLE.has(name) || (attr.customAssign && attr.customAssign !== '=') || attr.customOpen ||
-        markers.some(marker => name.includes(marker) || value.includes(marker))) {
-      return null;
-    }
-    // The first of repeated attributes counts
-    if (name in values) continue;
-    if (name === 'type') {
-      if (!isStyleLinkTypeAttribute(value)) return null;
-      continue;
-    }
-    values[name] = value;
+    if ((attr.customAssign && attr.customAssign !== '=') || attr.customOpen) return null;
+    const name = resolve(attr.name);
+    if (name !== attr.name) return null;
+    const nameLower = name.toLowerCase();
+    if (!(nameLower in values)) values[nameLower] = resolve(attr.value ?? '');
   }
+  return values;
+}
+
+/**
+ * What a `script` or `style` element’s attributes make of it, equal for elements that may be
+ * merged: classic inline scripts and CSS style sheets whose attributes match, as tools that
+ * rewrite the page in the browser or at the edge may read them (e.g., `data-cfasync`); `null`
+ * for one that is to stay apart, as one with an `id`, which two elements can’t share
+ *
+ * @param {'script' | 'style'} kind
+ * @param {MergeAttribute[]} attrs
+ * @param {(text: string) => string} resolve - Restores custom fragments
+ * @returns {string | null}
+ */
+function getMergeKey(kind, attrs, resolve) {
+  const values = readAttrs(attrs, resolve);
+  if (!values || 'id' in values) return null;
+  if (kind === 'script'
+    ? 'src' in values || !SCRIPT_TYPES_CLASSIC.has((values.type ?? '').trim().toLowerCase())
+    : 'type' in values && !isStyleLinkTypeAttribute(values.type)) {
+    return null;
+  }
+  delete values.type;
   // As written, without one, or empty, the media query list matches all
-  const media = values.media?.trim();
-  values.media = media && media.toLowerCase() !== 'all' ? media : '';
-  return JSON.stringify([values.blocking, values.media, values.nonce]);
+  if ('media' in values) {
+    const media = (values.media ?? '').trim();
+    if (media && media.toLowerCase() !== 'all') values.media = media;
+    else delete values.media;
+  }
+  return JSON.stringify([kind, ...Object.entries(values).sort(([nameA], [nameB]) => nameA < nameB ? -1 : 1)]);
+}
+
+/**
+ * Whether a script may follow merged script code, which, holding `<!--`, would not end at
+ * `</script>` after one holding `<script`
+ *
+ * @param {boolean} holdsCommentStart - Whether the merged script holds `<!--` so far
+ * @param {string} next
+ * @returns {boolean}
+ */
+function canScriptFollow(holdsCommentStart, next) {
+  return !holdsCommentStart || !RE_SCRIPT_START_TEXT.test(next);
+}
+
+/**
+ * Scripts joined as one, with a semicolon: after a newline where the last line may end in a
+ * comment (`//`, `<!--`, or `-->`, all of which browsers read as running to the end of the
+ * line), and before one where the next starts with `-->`, a comment only there. A custom
+ * fragment at either end may write any of these.
+ *
+ * @param {string[]} parts
+ * @param {string[]} markers - Custom fragment placeholder markers
+ * @returns {string}
+ */
+function joinScripts(parts, markers) {
+  /** @type {string[]} */
+  const pieces = [];
+  let codePrev = '';
+  for (const part of parts) {
+    const code = part.trim();
+    if (!code) continue;
+    if (codePrev) {
+      const lastLine = codePrev.slice(codePrev.lastIndexOf('\n') + 1);
+      const endsWithComment = RE_SCRIPT_LINE_COMMENT.test(lastLine) || markers.some(marker => codePrev.endsWith(marker));
+      const startsWithComment = code.startsWith('-->') || markers.some(marker => code.startsWith(marker));
+      pieces.push((endsWithComment ? '\n;' : (codePrev.endsWith(';') ? '' : ';')) + (startsWithComment ? '\n' : ''));
+    }
+    pieces.push(code);
+    codePrev = code;
+  }
+  return pieces.join('');
 }
 
 /**
@@ -127,8 +190,8 @@ function isStyleSheetClosed(css) {
 function joinStyleSheets(parts) {
   const last = parts.length - 1;
   return parts.map((part, i) => {
-    if (i > 0) part = part.replace(RE_CSS_WS_START, '');
-    return i < last ? part.replace(RE_CSS_WS_END, '') : part;
+    if (i > 0) part = part.replace(RE_WS_START, '');
+    return i < last ? part.replace(RE_WS_END, '') : part;
   }).join('');
 }
 
@@ -143,8 +206,10 @@ function canStyleSheetFollow(css) {
 }
 
 export {
+  canScriptFollow,
   canStyleSheetFollow,
-  getStyleMergeKey,
+  getMergeKey,
   isStyleSheetClosed,
+  joinScripts,
   joinStyleSheets
 };

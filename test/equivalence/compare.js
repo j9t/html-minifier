@@ -318,51 +318,47 @@ function canonicalizeRaw(/** @type {any} */ node, /** @type {string} */ text, /*
   return (SCRIPT_TYPES_JS.has(type) && normalizeJS(text)) || text.replace(/[;\s]+/g, '');
 }
 
-// Only classic scripts merge, and only with the same loading behavior
-function isSameScriptKind(/** @type {any} */ scriptA, /** @type {any} */ scriptB) {
-  const typeOf = (/** @type {any} */ script) => {
-    const type = trim(attrValue(script, 'type') ?? '').toLowerCase();
-    return SCRIPT_TYPES_JS.has(type) ? '' : type;
+// Elements that may merge, as one: classic scripts (not in MathML, where they are text) and
+// style sheets whose attributes match, other than a JavaScript or CSS `type` and `media` that
+// matches all, none with an `id`; what options remove of them isn’t compared, as the output
+// lacks it. Merged scripts are compared loosely; style sheets, with CSS minified, as CSS that
+// minifies alike, and without, leaving out whitespace around each.
+function mergeAdjacent(/** @type {any[]} */ children, /** @type {any} */ options, /** @type {any} */ context) {
+  const keyOf = (/** @type {any} */ node) => {
+    const kind = node.tagName;
+    const isMergeable = kind === 'script'
+      ? options.mergeScripts && !node.namespaceURI.endsWith('MathML')
+      : kind === 'style' && options.mergeStyles && isHTML(node);
+    if (!isMergeable) return undefined;
+    /** @type {Record<string, string>} */
+    const values = Object.fromEntries(node.attrs
+      .filter((/** @type {any} */ attr) => !isRemovedAttribute(node, attr.name, attr.value, options, context))
+      .map((/** @type {any} */ attr) => [attr.name, attr.value]));
+    const type = trim(values.type ?? '').toLowerCase();
+    if ('id' in values || (kind === 'script' ? 'src' in values || !SCRIPT_TYPES_JS.has(type) : type && type !== 'text/css')) return undefined;
+    delete values.type;
+    const media = trim(values.media ?? '');
+    if (media && media.toLowerCase() !== 'all') values.media = media;
+    else delete values.media;
+    return JSON.stringify([kind, ...Object.entries(values).sort(([nameA], [nameB]) => nameA < nameB ? -1 : 1)]);
   };
-  return typeOf(scriptA) === '' && typeOf(scriptB) === '' && ['async', 'defer', 'nomodule', 'nonce'].every(name => attrValue(scriptA, name) === attrValue(scriptB, name));
-}
-
-function mergeAdjacentScripts(/** @type {any[]} */ children) {
+  const canonicalCSS = (/** @type {string} */ text) => options.minifyCSS && !options.removeUnusedCSS ? normalizeCSS(text) : trim(text);
   /** @type {any[]} */
   const merged = [];
   for (const child of children) {
     const last = merged[merged.length - 1];
-    if (child.nodeName === '#text' && isWsOnly(child.value) && last?.tagName === 'script') continue;
-    if (child.tagName === 'script' && last?.tagName === 'script' && attrValue(child, 'src') === undefined && attrValue(last, 'src') === undefined && isSameScriptKind(child, last)) {
+    const keyLast = last && keyOf(last);
+    if (child.nodeName === '#text' && isWsOnly(child.value) && keyLast !== undefined) continue;
+    if (keyLast !== undefined && keyOf(child) === keyLast) {
       const text = child.childNodes[0]?.value ?? '';
-      if (last.childNodes[0]) last.childNodes[0].value += ';\n' + text;
-      else if (text) last.childNodes = child.childNodes;
-      continue;
-    }
-    merged.push(child);
-  }
-  return merged;
-}
-
-// Style sheets that may merge, as one style sheet: With code minified, CSS that minifies alike
-// joins alike, and without, whitespace around each is left out
-function mergeAdjacentStyles(/** @type {any[]} */ children, /** @type {any} */ options) {
-  const keyOf = (/** @type {any} */ style) => {
-    if (!isHTML(style) || style.attrs.some((/** @type {any} */ attr) => !['blocking', 'media', 'nonce', 'type'].includes(attr.name))) return undefined;
-    const type = trim(attrValue(style, 'type') ?? '').toLowerCase();
-    if (type && type !== 'text/css') return undefined;
-    const media = trim(attrValue(style, 'media') ?? '');
-    return JSON.stringify([attrValue(style, 'blocking'), media.toLowerCase() === 'all' ? '' : media, attrValue(style, 'nonce')]);
-  };
-  const canonical = (/** @type {string} */ text) => options.minifyCSS && !options.removeUnusedCSS ? normalizeCSS(text) : trim(text);
-  /** @type {any[]} */
-  const merged = [];
-  for (const child of children) {
-    const last = merged[merged.length - 1];
-    if (child.nodeName === '#text' && isWsOnly(child.value) && last?.tagName === 'style' && keyOf(last) !== undefined) continue;
-    if (child.tagName === 'style' && last?.tagName === 'style' && keyOf(child) !== undefined && keyOf(child) === keyOf(last)) {
-      const text = canonical(last.childNodes[0]?.value ?? '') + canonical(child.childNodes[0]?.value ?? '');
-      last.childNodes = text ? [{ nodeName: '#text', value: text }] : [];
+      if (child.tagName === 'style') {
+        const css = canonicalCSS(last.childNodes[0]?.value ?? '') + canonicalCSS(text);
+        last.childNodes = css ? [{ nodeName: '#text', value: css }] : [];
+      } else if (last.childNodes[0]) {
+        last.childNodes[0].value += ';\n' + text;
+      } else if (text) {
+        last.childNodes = child.childNodes;
+      }
       continue;
     }
     merged.push(child);
@@ -529,8 +525,7 @@ function canonicalize(source, options, scripting) {
 
   function visit(/** @type {any} */ node, /** @type {string} */ path, /** @type {boolean} */ preformatted) {
     const parent = node.tagName;
-    let children = options.mergeScripts ? mergeAdjacentScripts(childrenOf(node)) : childrenOf(node);
-    if (options.mergeStyles) children = mergeAdjacentStyles(children, options);
+    const children = options.mergeScripts || options.mergeStyles ? mergeAdjacent(childrenOf(node), options, context) : childrenOf(node);
     for (const child of children) {
       if (child.nodeName === '#documentType') {
         lines.push(options.useShortDoctype ? 'doctype:' + child.name.toLowerCase() : `doctype:${child.name}|${child.publicId ?? ''}|${child.systemId ?? ''}`);

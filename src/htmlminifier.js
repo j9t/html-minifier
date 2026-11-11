@@ -2,7 +2,7 @@ import { HTMLParser } from './htmlparser.js';
 import TokenChain from './tokenchain.js';
 import { presets, getPreset, getPresetNames } from './presets.js';
 
-import { LRU, decodeForeignText, describeDependencyFailure, escapeXML, findTagEnd, identity, isThenable, lowercase, replaceNUL, uniqueId } from './lib/utils.js';
+import { LRU, decodeForeignText, describeDependencyFailure, escapeXML, identity, isThenable, lowercase, replaceNUL, uniqueId } from './lib/utils.js';
 import { collectUsage } from './lib/unused-css.js';
 
 import {
@@ -82,7 +82,7 @@ import {
 } from './lib/content.js';
 
 import { declinesMinify, processOptions } from './lib/options.js';
-import { canStyleSheetFollow, getStyleMergeKey, isStyleSheetClosed, joinStyleSheets } from './lib/merging.js';
+import { canScriptFollow, canStyleSheetFollow, getMergeKey, isStyleSheetClosed, joinScripts, joinStyleSheets } from './lib/merging.js';
 import { toFragment, replaceCustomFragments, isMinifiedCodeSafe } from './lib/fragments.js';
 
 /** @import { ProcessedOptions } from './lib/options.js' */
@@ -101,15 +101,17 @@ import { toFragment, replaceCustomFragments, isMinifiedCodeSafe } from './lib/fr
  */
 
 /**
- * @typedef {Object} StyleRecord
- *  A `style` element for `mergeStyles`, by where its parts sit in the output buffer.
+ * @typedef {Object} MergeRecord
+ *  A `script` or `style` element for `mergeScripts` or `mergeStyles`, by where its parts sit
+ *  in the output buffer.
  *
+ * @prop {'script' | 'style'} kind
  * @prop {number} start - Index of the start tag’s first entry
  * @prop {number} content - Index of the first content entry
  * @prop {number} end - Index of the end tag
- * @prop {string | null} key - What its attributes make of the style sheet (`null` to keep it apart)
- * @prop {string} tail - The last CSS of its run that isn’t blank, once parsed
- * @prop {boolean} deferred - Whether its CSS is left to be minified with its run’s
+ * @prop {string | null} key - What its attributes make of it (`null` to keep it apart)
+ * @prop {string} tail - For style sheets, the last CSS of its run that isn’t blank, once parsed
+ * @prop {boolean} deferred - For style sheets, whether its CSS is left to be minified with its run’s
  */
 
 /**
@@ -349,16 +351,16 @@ import { toFragment, replaceCustomFragments, isMinifiedCodeSafe } from './lib/fr
  *
  * @prop {boolean} [mergeScripts]
  *  When true, consecutive inline `<script>` elements are merged into one.
- *  Only merges compatible scripts (same `type`, matching `async`/`defer`/
- *  `nomodule`/`nonce` attributes). Does not merge external scripts (with `src`).
+ *  Only merges classic scripts whose attributes match (other than a JavaScript
+ *  `type`), and none with an `id`. Does not merge external scripts (with `src`).
  *
  *  Default: `false`
  *
  * @prop {boolean} [mergeStyles]
  *  When true, consecutive `<style>` elements are merged into one. Only merges
- *  compatible style sheets (no attributes other than matching `media`,
- *  `nonce`, and `blocking`, and a CSS `type`) where the first ends cleanly
- *  and the next doesn’t start with `@import` or `@namespace`.
+ *  style sheets whose attributes match (other than a CSS `type`, and `media`
+ *  that matches all), and none with an `id`, where the first ends cleanly and
+ *  the next doesn’t hold `@import` or `@namespace`.
  *
  *  Default: `false`
  *
@@ -687,20 +689,12 @@ let svgMinifyCache = null;
 const cacheStatsOrEmpty = (cache) => cache ? cache.stats() : { gets: 0, hits: 0, size: 0, limit: 0 };
 
 // Patterns for script merging
-const RE_SCRIPT_ATTRS = /([^\s=]+)(?:=(?:"([^"]*)"|'([^']*)'|([^\s>]+)))?/g;
-const RE_SCRIPT_OPEN = /<script(?=[\s>])/gi; // Finds tag start; use `findTagEnd()` for the actual closing `>`
-const RE_SCRIPT_CLOSE = /<\/script\s*>/gi;
-const RE_SCRIPT_START_TEXT = /<script[\t\n\f\r />]/i; // As script text, after `<!--`
-const RE_MATH_TAG = /<(\/?)math(?=[\s/>])/gi;
-const SCRIPT_BOOL_ATTRS = new Set(['async', 'defer', 'nomodule']);
-const DEFAULT_JS_TYPES = new Set(['', 'text/javascript', 'application/javascript']);
 
 // Patterns for buffer scanning
 const RE_START_TAG = /^<[^/!]/;
 const RE_UNQUOTED_VALUE_END = /=[^\s"'=<>`]+$/;
 const RE_START_TAG_NAME = /^<([^\s/>]+)/;
 const RE_LEADING_WHITESPACE = /^[ \t\n\r\f]/;
-const RE_ASCII_WHITESPACE = /[ \t\n\r\f]/;
 const RE_END_TAG = /^<\//;
 const RE_WHITESPACE_ONLY = /^\s+$/;
 const RE_TABS = /\t/g;
@@ -741,159 +735,6 @@ const RE_FOREIGN_ELEMENT_PROBE = /<(?:svg|math)[\s/>]/i;
 function nameForeign(name) {
   const nameLower = name.toLowerCase();
   return namesForeignMixedCase.get(nameLower) ?? nameLower;
-}
-
-// @@ Merge in the parse buffer, as `mergeStyles` does, to skip comments, RCDATA, and ignored markup
-/**
- * Merge consecutive inline script tags into one.
- * Only merges scripts that are compatible:
- * - Both inline (no `src` attribute)
- * - Same `type` (or both default JavaScript)
- * - No conflicting attributes (`async`, `defer`, `nomodule`, different `nonce`)
- *
- * Uses a scanner rather than a regex to locate script boundaries, so literal
- * `</script>` strings inside script content are handled correctly per the HTML
- * spec (raw text ends at the first `</script>`).
- *
- * Single forward pass: Each script absorbs all directly following compatible
- * scripts, and the output is assembled from segments—this avoids rebuilding
- * the full string and restarting the scan after every merge (O(n²) on inputs
- * with many merges). Merges can’t cascade backwards: compatibility depends
- * only on the attributes of the first script in a chain, which merging
- * preserves, so one pass finds every merge the iterated rescan found.
- *
- * @param {string} html
- * @param {boolean} [hasMathML] - Whether the HTML holds MathML, whose `script` elements stay apart
- * @returns {string} HTML with consecutive scripts merged
- */
-function mergeConsecutiveScripts(html, hasMathML = false) {
-  const parseAttrs = (/** @type {string} */ attrStr) => {
-    /** @type {Record<string, string>} */
-    const attrs = {};
-    RE_SCRIPT_ATTRS.lastIndex = 0;
-    let m;
-    while ((m = RE_SCRIPT_ATTRS.exec(attrStr)) !== null) {
-      const name = (m[1] ?? '').toLowerCase();
-      const value = m[2] ?? m[3] ?? m[4] ?? '';
-      attrs[name] = value;
-    }
-    return attrs;
-  };
-
-  // In MathML, a `script` neither runs nor is hidden, so its text is shown as it is;
-  // scripts are visited in order, so the MathML tags before each are counted once
-  let mathDepth = 0;
-  let mathPos = 0;
-  const insideMath = (/** @type {number} */ index) => {
-    if (!hasMathML) return false;
-    RE_MATH_TAG.lastIndex = mathPos;
-    let tag;
-    while ((tag = RE_MATH_TAG.exec(html)) !== null && tag.index < index) {
-      mathDepth = tag[1] ? Math.max(0, mathDepth - 1) : mathDepth + 1;
-      mathPos = RE_MATH_TAG.lastIndex;
-    }
-    return mathDepth > 0;
-  };
-
-  /** @type {string[]} */
-  const segments = [];
-  let consumedPos = 0; // Start of the input region not yet copied to `segments`
-
-  RE_SCRIPT_OPEN.lastIndex = 0;
-  let m1;
-
-  while ((m1 = RE_SCRIPT_OPEN.exec(html)) !== null) {
-    // `findTagEnd` skips quoted attribute values to find the real closing `>`
-    const tagEnd1 = findTagEnd(html, m1.index + 7);
-    if (tagEnd1 === -1) break;
-
-    const attrs1Str = html.slice(m1.index + 7, tagEnd1);
-
-    // Find end of this script’s content (first `</script>`—per HTML spec, raw text ends here)
-    RE_SCRIPT_CLOSE.lastIndex = tagEnd1 + 1;
-    const close1 = RE_SCRIPT_CLOSE.exec(html);
-    if (!close1) break;
-
-    let mergedContent = html.slice(tagEnd1 + 1, close1.index);
-    let afterClose = close1.index + close1[0].length;
-
-    const a1 = parseAttrs(attrs1Str);
-    // `src` (external) and non-default types (modules, JSON, etc.) must not be merged:
-    // module scripts have per-script lexical scope, and non-JS content (e.g., JSON)
-    // is not concatenable; even identical non-JS types are incompatible
-    const mergeable = !('src' in a1) && DEFAULT_JS_TYPES.has((a1.type || '').toLowerCase());
-    let mergedAny = false;
-    // Whitespace between the scripts, which may separate text around them
-    let gap = '';
-
-    // Absorb all directly following compatible scripts
-    while (mergeable) {
-      let i = afterClose;
-      while (i < html.length && (html[i] === ' ' || html[i] === '\t' || html[i] === '\n' || html[i] === '\r' || html[i] === '\f')) i++;
-      const gapNext = html.slice(afterClose, i);
-      if (html.slice(i, i + 7).toLowerCase() !== '<script' || (html.charAt(i + 7) !== '>' && !/\s/.test(html.charAt(i + 7)))) break;
-
-      const tagEnd2 = findTagEnd(html, i + 7);
-      if (tagEnd2 === -1) break;
-
-      const attrs2Str = html.slice(i + 7, tagEnd2);
-
-      RE_SCRIPT_CLOSE.lastIndex = tagEnd2 + 1;
-      const close2 = RE_SCRIPT_CLOSE.exec(html);
-      if (!close2) break;
-
-      const a2 = parseAttrs(attrs2Str);
-
-      // Check compatibility: No `src`, default JS type, no conflicting boolean
-      // attributes, and `nonce` must be same or both absent
-      if ('src' in a2 || !DEFAULT_JS_TYPES.has((a2.type || '').toLowerCase())) break;
-      let boolConflict = false;
-      for (const attr of SCRIPT_BOOL_ATTRS) {
-        if ((attr in a1) !== (attr in a2)) { boolConflict = true; break; }
-      }
-      if (boolConflict || a1.nonce !== a2.nonce || (!mergedAny && insideMath(m1.index))) break;
-
-      const content2 = html.slice(tagEnd2 + 1, close2.index);
-      // After `<!--`, `<script` opens a state `</script>` doesn’t end,
-      // which would swallow what follows the merged script
-      if (mergedContent.indexOf('<!--') !== -1 && RE_SCRIPT_START_TEXT.test(content2)) break;
-
-      // Join with a semicolon, after a newline where the first may end in a `//`, `<!--`,
-      // or `-->` comment, all of which browsers read as running to the end of the line,
-      // and before one where the second starts with `-->`, a comment only there
-      const c1 = mergedContent.trim();
-      const c2 = content2.trim();
-      if (c1 && c2) {
-        const lastLine = c1.slice(c1.lastIndexOf('\n') + 1);
-        const separator = /\/\/|<!--|-->/.test(lastLine) ? '\n;' : (c1.endsWith(';') ? '' : ';');
-        mergedContent = c1 + separator + (c2.startsWith('-->') ? '\n' : '') + c2;
-      } else {
-        mergedContent = c1 || c2;
-      }
-
-      afterClose = close2.index + close2[0].length;
-      mergedAny = true;
-      gap ||= gapNext;
-    }
-
-    if (mergedAny) {
-      // Whitespace goes after the merged script, unless nothing or
-      // whitespace is on either side anyway
-      if (gap && (!m1.index || afterClose === html.length || RE_ASCII_WHITESPACE.test(html.charAt(m1.index - 1) + html.charAt(afterClose)))) {
-        gap = '';
-      }
-      // Use first script’s attributes (they are compatible)
-      segments.push(html.slice(consumedPos, m1.index), `<script${attrs1Str}>${mergedContent}</script>${gap}`);
-      consumedPos = afterClose;
-    }
-
-    // Continue scanning after this script (skips `<script` occurrences inside content)
-    RE_SCRIPT_OPEN.lastIndex = afterClose;
-  }
-
-  if (!segments.length) return html;
-  segments.push(html.slice(consumedPos));
-  return segments.join('');
 }
 
 /**
@@ -1159,14 +1000,13 @@ async function minifyHTML(value, options, partialMarkup) {
   let trimSettledIndex = -1;
   // Parallel to `buffer`: whether the entry is a tag—the only place lines may break
   const bufferTags = options.maxLineLength ? /** @type {boolean[]} */ ([]) : null;
-  // Under `mergeStyles`, the `style` elements whose style sheets apply to the document as
-  // written (not in `template`, `noscript`, or foreign content), by where their start tag,
-  // content, and end tag sit in `buffer`; the one being parsed; and how deep parsing is in
-  // `template` and `noscript` elements
-  /** @type {StyleRecord[] | null} */
-  const styleRecords = options.mergeStyles ? [] : null;
-  /** @type {StyleRecord | null} */
-  let styleRecord = null;
+  // Under `mergeStyles` and `mergeScripts`, the elements that may be merged, by where their
+  // start tag, content, and end tag sit in `buffer`; the one being parsed; and how deep parsing
+  // is in `template` and `noscript` elements, whose style sheets don’t apply as written
+  /** @type {MergeRecord[] | null} */
+  const mergeRecords = options.mergeScripts || options.mergeStyles ? [] : null;
+  /** @type {MergeRecord | null} */
+  let mergeRecord = null;
   let inertDepth = 0;
   /** @type {string} */
   let charsPrevTag = '';
@@ -1477,18 +1317,18 @@ async function minifyHTML(value, options, partialMarkup) {
     buffer.splice(index, 1);
     bufferTags?.splice(index, 1);
     if (index <= trimSettledIndex) trimSettledIndex = -1;
-    if (styleRecords) {
+    if (mergeRecords) {
       // Recorded in buffer order, so those before `index` stay as they are
-      for (let i = styleRecords.length - 1; i >= 0; i--) {
-        const record = /** @type {StyleRecord} */ (styleRecords[i]);
+      for (let i = mergeRecords.length - 1; i >= 0; i--) {
+        const record = /** @type {MergeRecord} */ (mergeRecords[i]);
         if (record.end < index) break;
-        shiftStyleRecord(record, index);
+        shiftMergeRecord(record, index);
       }
-      if (styleRecord) shiftStyleRecord(styleRecord, index);
+      if (mergeRecord) shiftMergeRecord(mergeRecord, index);
     }
   }
 
-  function shiftStyleRecord(/** @type {StyleRecord} */ record, /** @type {number} */ index) {
+  function shiftMergeRecord(/** @type {MergeRecord} */ record, /** @type {number} */ index) {
     if (record.start === index || record.content === index || record.end === index) {
       record.key = null;
     }
@@ -1504,12 +1344,12 @@ async function minifyHTML(value, options, partialMarkup) {
     if (transparentGapIndex >= buffer.length) transparentGapIndex = -1;
     if (noTrimEndIndex >= buffer.length) noTrimEndIndex = -1;
     if (noCollapseEndIndex >= buffer.length) noCollapseEndIndex = -1;
-    if (styleRecords) {
-      while (styleRecords.length && /** @type {StyleRecord} */ (styleRecords[styleRecords.length - 1]).end >= buffer.length) {
-        styleRecords.pop();
+    if (mergeRecords) {
+      while (mergeRecords.length && /** @type {MergeRecord} */ (mergeRecords[mergeRecords.length - 1]).end >= buffer.length) {
+        mergeRecords.pop();
       }
-      if (styleRecord && styleRecord.start >= buffer.length) styleRecord = null;
-      else if (styleRecord && styleRecord.content >= buffer.length) styleRecord.content = -1;
+      if (mergeRecord && mergeRecord.start >= buffer.length) mergeRecord = null;
+      else if (mergeRecord && mergeRecord.content >= buffer.length) mergeRecord.content = -1;
     }
     removed = true;
   }
@@ -1528,13 +1368,21 @@ async function minifyHTML(value, options, partialMarkup) {
     return [before, after];
   }
 
-  function styleContentOf(/** @type {StyleRecord} */ record) {
+  function recordContentOf(/** @type {MergeRecord} */ record) {
     return buffer.slice(record.content, record.end).join('');
   }
 
+  // Custom fragments as written, to compare attributes by
+  function restoreFragments(/** @type {string} */ text) {
+    return uidPattern && text.includes(/** @type {string} */ (uidAttr))
+      ? text.replace(uidPattern, (/** @type {string} */ match, /** @type {string} */ prefix, /** @type {string} */ index, /** @type {string} */ suffix) =>
+        prefix + (ignoredCustomMarkupChunks[+index]?.[0] ?? match) + suffix)
+      : text;
+  }
+
   // Whether the entries from `from` to `to` (exclusive) are whitespace that may sit between
-  // merged `style` elements
-  function isStyleGap(/** @type {number} */ from, /** @type {number} */ to) {
+  // merged elements
+  function isMergeGap(/** @type {number} */ from, /** @type {number} */ to) {
     for (let i = from; i < to; i++) {
       const entry = buffer[i] ?? '';
       if (entry && !RE_WS_ONLY.test(entry)) return false;
@@ -1542,48 +1390,62 @@ async function minifyHTML(value, options, partialMarkup) {
     return true;
   }
 
-  // Whether the `style` element being parsed, holding `css`, joins the last one recorded
+  function createMergeRecord(/** @type {'script' | 'style'} */ kind, /** @type {HTMLAttribute[]} */ attrs) {
+    return { kind, start: buffer.length, content: -1, end: -1, key: getMergeKey(kind, attrs, restoreFragments), tail: '', deferred: false };
+  }
+
+  // Whether an element is like the one before and follows it with only whitespace between
+  function followsAlike(/** @type {MergeRecord} */ recordPrev, /** @type {MergeRecord} */ record) {
+    return record.key !== null && record.key === recordPrev.key && record.start > recordPrev.end &&
+      isMergeGap(recordPrev.end + 1, record.start);
+  }
+
+  // Whether the `style` element being parsed, holding `css`, joins the last element recorded
   // (or its run), so that its CSS is minified with the run’s rather than on its own
-  function joinsStyleRun(/** @type {StyleRecord} */ record, /** @type {string} */ css) {
-    const recordPrev = styleRecords?.[styleRecords.length - 1];
-    return recordPrev !== undefined && record.key !== null && record.key === recordPrev.key &&
-      record.start > recordPrev.end && isStyleGap(recordPrev.end + 1, record.start) &&
+  function joinsStyleRun(/** @type {MergeRecord} */ record, /** @type {string} */ css) {
+    const recordPrev = mergeRecords?.[mergeRecords.length - 1];
+    return recordPrev !== undefined && followsAlike(recordPrev, record) &&
       isStyleSheetClosed(recordPrev.tail) && canStyleSheetFollow(css);
   }
 
-  // Merge each run of `style` elements that only whitespace separates into its first, as long
-  // as their style sheets are compatible; whitespace that may separate text goes after it. CSS
-  // whose minification was deferred to the run is minified here.
-  async function mergeStyleElements(/** @type {StyleRecord[]} */ records) {
-    /** @type {Array<{records: StyleRecord[], parts: string[]}>} */
+  // Merge each run of `script` or `style` elements that only whitespace separates into its
+  // first, as long as they are compatible; whitespace that may separate text goes after it.
+  // CSS whose minification was deferred to the run is minified here.
+  async function mergeElements(/** @type {MergeRecord[]} */ records) {
+    /** @type {Array<{records: MergeRecord[], parts: string[]}>} */
     const runs = [];
-    /** @type {{records: StyleRecord[], parts: string[]} | null} */
+    /** @type {{records: MergeRecord[], parts: string[]} | null} */
     let run = null;
-    /** @type {StyleRecord | null} */
+    /** @type {MergeRecord | null} */
     let recordPrev = null;
-    // The last CSS of the run that isn’t blank, which decides whether more may follow
-    let cssTail = '';
+    // What decides whether more may follow: For style sheets, the last CSS of the run that
+    // isn’t blank; for scripts, whether the run’s code holds `<!--`
+    let tail = '';
+    let holdsCommentStart = false;
     for (const record of records) {
       const isUsable = record.key !== null && RE_START_TAG.test(buffer[record.start] ?? '') && RE_END_TAG.test(buffer[record.end] ?? '');
-      const css = styleContentOf(record);
-      if (run && isUsable && recordPrev && record.key === recordPrev.key && record.start > recordPrev.end &&
-          isStyleGap(recordPrev.end + 1, record.start) && isStyleSheetClosed(cssTail) && canStyleSheetFollow(css)) {
+      const content = recordContentOf(record);
+      const isStyle = record.kind === 'style';
+      if (run && isUsable && recordPrev && followsAlike(recordPrev, record) &&
+          (isStyle ? isStyleSheetClosed(tail) && canStyleSheetFollow(content) : canScriptFollow(holdsCommentStart, content))) {
         run.records.push(record);
-        run.parts.push(css);
+        run.parts.push(content);
       } else {
         // Where what was to be merged no longer is, the CSS is still to be minified
-        run = isUsable || record.deferred ? { records: [record], parts: [css] } : null;
+        run = isUsable || record.deferred ? { records: [record], parts: [content] } : null;
         if (run) runs.push(run);
-        cssTail = '';
+        tail = '';
+        holdsCommentStart = false;
       }
-      if (css.trim()) cssTail = css;
+      if (!isStyle) holdsCommentStart ||= content.indexOf('<!--') !== -1;
+      else if (content.trim()) tail = content;
       recordPrev = isUsable ? record : null;
     }
 
     /** @type {Promise<void>[]} */
     const pending = [];
     for (const { records: merged, parts } of runs) {
-      const first = /** @type {StyleRecord} */ (merged[0]);
+      const first = /** @type {MergeRecord} */ (merged[0]);
       if (merged.length < 2) {
         if (first.deferred) {
           pending.push((async () => {
@@ -1594,13 +1456,13 @@ async function minifyHTML(value, options, partialMarkup) {
         }
         continue;
       }
-      const last = /** @type {StyleRecord} */ (merged[merged.length - 1]);
+      const last = /** @type {MergeRecord} */ (merged[merged.length - 1]);
       // The first whitespace between the elements stays, right after the first one
       let gapFrom = -1;
       let gapTo = -1;
       for (let i = 1; i < merged.length && gapFrom === -1; i++) {
-        const from = /** @type {StyleRecord} */ (merged[i - 1]).end + 1;
-        const to = /** @type {StyleRecord} */ (merged[i]).start;
+        const from = /** @type {MergeRecord} */ (merged[i - 1]).end + 1;
+        const to = /** @type {MergeRecord} */ (merged[i]).start;
         if (buffer.slice(from, to).join('')) {
           gapFrom = from;
           gapTo = to;
@@ -1620,6 +1482,10 @@ async function minifyHTML(value, options, partialMarkup) {
         }
       }
       for (let i = first.content + 1; i < first.end; i++) bufferSet(i, '');
+      if (first.kind === 'script') {
+        bufferSet(first.content, joinScripts(parts, markers));
+        continue;
+      }
       const css = joinStyleSheets(parts);
       bufferSet(first.content, css);
       if (options.minifyCSS === identity) continue;
@@ -2515,9 +2381,6 @@ async function minifyHTML(value, options, partialMarkup) {
       if (hasForeignContext) {
         lowerTag = tag.toLowerCase();
         if (lowerTag === 'svg' || lowerTag === 'math') {
-          if (lowerTag === 'math' && options.documentState) {
-            options.documentState.hasMathML = true;
-          }
           // Preserve the surrounding HTML context’s slash handling so
           // `foreignObject`/`annotation-xml` can restore it
           const keepClosingSlashHTML = Boolean(options.keepClosingSlash);
@@ -2677,13 +2540,20 @@ async function minifyHTML(value, options, partialMarkup) {
       const optionsTag = useNameParentForTag ? optionsParent : options;
       const hasUnarySlash = needsXMLSlash || (unarySlash && optionsTag.keepClosingSlash);
 
-      // Only names as long as `style`, `template`, and `noscript` need a look
-      if (styleRecords && (tag.length === 5 || tag.length === 8)) {
-        const tagLower = tag.toLowerCase();
-        if (tagLower === 'template' || tagLower === 'noscript') {
-          if (!unary) inertDepth++;
-        } else if (tagLower === 'style' && !inertDepth && !options.namespaceForeign) {
-          styleRecord = { start: buffer.length, content: -1, end: -1, key: getStyleMergeKey(attrs, markers), tail: '', deferred: false };
+      if (mergeRecords) {
+        // An element inside one to merge (in SVG, a `script` may hold some) keeps it apart
+        if (mergeRecord) mergeRecord.key = null;
+        // Only names as long as `style`, `script`, `template`, and `noscript` need a look
+        if (!unary && (tag.length === 5 || tag.length === 6 || tag.length === 8)) {
+          const tagLower = tag.toLowerCase();
+          if (tagLower === 'template' || tagLower === 'noscript') {
+            inertDepth++;
+          } else if (tagLower === 'style' && options.mergeStyles && !inertDepth && !options.namespaceForeign) {
+            mergeRecord = createMergeRecord('style', attrs);
+          } else if (tagLower === 'script' && options.mergeScripts && options.namespaceForeign !== 'math') {
+            // In MathML, a `script` neither runs nor is hidden, so its text is shown as it is
+            mergeRecord = createMergeRecord('script', attrs);
+          }
         }
       }
 
@@ -2770,10 +2640,10 @@ async function minifyHTML(value, options, partialMarkup) {
       // As in `start`
       const tagOut = namesAsWritten && name === lowercase ? tagSource : tag;
       let endTagText = '</' + tagOut + '>';
-      const endsStyleRecord = styleRecord !== null && tag.length === 5 && tag.toLowerCase() === 'style';
-      if (endsStyleRecord && styleRecord && styleRecord.content === -1) {
+      const endsMergeRecord = mergeRecord !== null && (tag.length === 5 || tag.length === 6) && tag.toLowerCase() === mergeRecord.kind;
+      if (endsMergeRecord && mergeRecord && mergeRecord.content === -1) {
         // A place for the content of what is merged into this one
-        styleRecord.content = buffer.length;
+        mergeRecord.content = buffer.length;
         bufferPush('', false);
       } else if (inertDepth && tag.length === 8) {
         const tagLower = tag.toLowerCase();
@@ -2955,19 +2825,21 @@ async function minifyHTML(value, options, partialMarkup) {
         markOpenElementFilled();
       }
 
-      if (endsStyleRecord) {
-        if (styleRecords && styleRecord && buffer.length - 1 > styleRecord.content && RE_END_TAG.test(buffer[buffer.length - 1] ?? '')) {
-          styleRecord.end = buffer.length - 1;
-          const css = styleContentOf(styleRecord);
-          styleRecord.tail = css.trim() || !styleRecord.deferred ? css : styleRecords[styleRecords.length - 1]?.tail ?? '';
-          styleRecords.push(styleRecord);
-        } else if (styleRecords && styleRecord && styleRecord.deferred && styleRecord.content < buffer.length) {
+      if (endsMergeRecord) {
+        if (mergeRecords && mergeRecord && buffer.length - 1 > mergeRecord.content && RE_END_TAG.test(buffer[buffer.length - 1] ?? '')) {
+          mergeRecord.end = buffer.length - 1;
+          if (mergeRecord.kind === 'style') {
+            const css = recordContentOf(mergeRecord);
+            mergeRecord.tail = css.trim() || !mergeRecord.deferred ? css : mergeRecords[mergeRecords.length - 1]?.tail ?? '';
+          }
+          mergeRecords.push(mergeRecord);
+        } else if (mergeRecords && mergeRecord && mergeRecord.deferred && mergeRecord.content < buffer.length) {
           // Without an end tag, it stays apart, but its CSS is still to be minified
-          styleRecord.key = null;
-          styleRecord.end = buffer.length;
-          styleRecords.push(styleRecord);
+          mergeRecord.key = null;
+          mergeRecord.end = buffer.length;
+          mergeRecords.push(mergeRecord);
         }
-        styleRecord = null;
+        mergeRecord = null;
       }
 
       // SVG subtree capture: Record end position for post-processing with SVGO
@@ -2980,10 +2852,10 @@ async function minifyHTML(value, options, partialMarkup) {
       }
     },
     chars: function (/** @type {string} */ text, /** @type {string} */ prevTag, /** @type {string} */ nextTag, /** @type {HTMLAttribute[]} */ prevAttrs, /** @type {HTMLAttribute[]} */ nextAttrs, /** @type {boolean} */ source) {
-      if (styleRecord) {
-        if (styleRecord.content === -1) styleRecord.content = buffer.length;
-        // Custom fragments may be restored on the way, and may hold anything
-        if (markers.length && markers.some(marker => text.includes(marker))) styleRecord.key = null;
+      if (mergeRecord) {
+        if (mergeRecord.content === -1) mergeRecord.content = buffer.length;
+        // Custom fragments may hold anything, which minified CSS can’t take as written
+        if (mergeRecord.kind === 'style' && markers.length && markers.some(marker => text.includes(marker))) mergeRecord.key = null;
       }
       // Publish this node’s context for the `charsCollapse`/`charsFinalize` phases
       textPrevTag = prevTag === '' ? 'comment' : prevTag;
@@ -3039,8 +2911,8 @@ async function minifyHTML(value, options, partialMarkup) {
           // Style sheets that may be merged are minified once that is known, by run; except
           // under `removeEmptyElements`, which needs to know now whether CSS minifies to nothing,
           // where that only goes for CSS that joins a run
-          if (styleRecord && styleRecord.key !== null && (!options.removeEmptyElements || joinsStyleRun(styleRecord, text))) {
-            styleRecord.deferred = true;
+          if (mergeRecord?.kind === 'style' && mergeRecord.key !== null && (!options.removeEmptyElements || joinsStyleRun(mergeRecord, text))) {
+            mergeRecord.deferred = true;
           } else {
             text = await options.minifyCSS(text, undefined, options.cssContext);
           }
@@ -3090,8 +2962,8 @@ async function minifyHTML(value, options, partialMarkup) {
     settleTransparentGap(Boolean(options.conservativeCollapse));
   }
 
-  if (styleRecords && (styleRecords.length > 1 || styleRecords[0]?.deferred)) {
-    await mergeStyleElements(styleRecords);
+  if (mergeRecords && (mergeRecords.length > 1 || mergeRecords[0]?.deferred)) {
+    await mergeElements(mergeRecords);
   }
 
   // Post-processing: Optimize SVG blocks with SVGO
@@ -3433,15 +3305,13 @@ export const minify = async function (value, options) {
   // copy; the `minifyCSS` closure hangs off the memoized base, shared across calls
   /** @type {NonNullable<ProcessedOptions['cssContext']>} */
   const cssContext = { warned: new Set() };
-  // What the parse finds out about the document for post-processing, sparing an output scan
-  const documentState = { hasMathML: false };
   // Whether the document holds a `base` element, looked up in it on the first `target=_self`
   /** @type {NonNullable<ProcessedOptions['baseState']>} */
   const baseState = { hasBase: undefined, source: value };
   // Work on a shallow copy so per-call reassignments don’t reach the cached base. The
   // per-document state is part of the copy from the start, as properties added to it
   // later slow down every option lookup.
-  const processedOptions = /** @type {ProcessedOptions} */ ({ ...processedBase, cssContext, documentState, baseState });
+  const processedOptions = /** @type {ProcessedOptions} */ ({ ...processedBase, cssContext, baseState });
 
   // Unused-CSS removal needs the whole document’s symbols before the first `style` element is
   // minified, so they are collected upfront from the raw input—where there is a style sheet at all
@@ -3455,11 +3325,7 @@ export const minify = async function (value, options) {
     ));
   }
 
-  let result = await minifyHTML(value, processedOptions);
-
-  if (processedOptions.mergeScripts) {
-    result = mergeConsecutiveScripts(result, documentState.hasMathML);
-  }
+  const result = await minifyHTML(value, processedOptions);
 
   processedOptions.log('minified in: ' + (Date.now() - start) + 'ms');
   return result;

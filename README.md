@@ -161,8 +161,8 @@ Options can be used in config files (camelCase) or via CLI flags (kebab-case wit
 | `keepClosingSlash`<br>`--keep-closing-slash` | Keep the trailing slash on void elements and other start tags that carry one, and read it as closing the element | `false` |
 | `maxInputLength`<br>`--max-input-length` | Maximum input length to prevent ReDoS attacks (disabled by default) | `undefined` |
 | `maxLineLength`<br>`--max-line-length` | Specify a maximum line length; output will be split by newlines in tags only (between attributes or before a tag’s `>`), where they can’t change the page, so lines may run longer | `undefined` |
-| `mergeScripts`<br>`--merge-scripts` | Merge consecutive inline `script` elements into one (only merges compatible scripts with same `type`, matching `async`/`defer`/`nomodule`/`nonce`) | `false` |
-| `mergeStyles`<br>`--merge-styles` | Merge consecutive `style` elements into one (only merges compatible style sheets, with matching `media`/`nonce`/`blocking`) | `false` |
+| `mergeScripts`<br>`--merge-scripts` | Merge consecutive `script` elements into one (only merges classic scripts whose attributes match, and none with an `id`) | `false` |
+| `mergeStyles`<br>`--merge-styles` | Merge consecutive `style` elements into one (only merges style sheets whose attributes match, and none with an `id`) | `false` |
 | `minifyCSS`<br>`--minify-css` | [Minify CSS](#css-minification) in `style` elements and attributes (uses [Lightning CSS](https://lightningcss.dev/)) | `false` (could be `true`, `Object`, `Function(text, type)`) |
 | `minifyJS`<br>`--minify-js` | [Minify JavaScript](#javascript-minification) in `script` elements and event attributes (uses [Terser](https://terser.org/) or [SWC](https://swc.rs/)) | `false` (could be `true`, `Object`, `Function(text, inline)`) |
 | `minifyJSON`<br>`--minify-json` | [Minify JSON](#json-minification) in `script` elements (e.g., `application/ld+json`, `importmap`, etc.) by removing whitespace | `false` |

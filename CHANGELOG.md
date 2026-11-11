@@ -9,10 +9,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 ### Fixed
 
 * Fixed `removeUnusedCSS` keeping style sheets of which nothing is used as written, unminified, where they held a word of ten or more lowercase letters (e.g., `background`; taken for a custom-fragment placeholder)
+* Fixed `mergeScripts` merging what only looks like scripts—text in `textarea` and `title` elements, comments, and markup kept with `htmlmin:ignore`—and losing code where a script holds `<!--<script>`, which browsers end only at a later `</script>` (e.g., `<script><!--<script></script><script></script></script>` lost `<script></script>`)
+* Fixed `mergeScripts` joining a script that ends in a custom fragment on one line with the next, which the fragment may comment out
+* Fixed `mergeScripts` dropping the attributes of scripts merged into another, whose own attributes then covered their code, too—which tools that rewrite pages in the browser or at the edge read (e.g., `data-cfasync="false"` for Cloudflare Rocket Loader, or `data-cookieconsent`)—scripts now merge only where their attributes match (other than a JavaScript `type`), and not where they have an `id`
 
 ### Added
 
 * Added `mergeStyles` (part of the `comprehensive` preset) to merge consecutive `style` elements with compatible style sheets into one, which `minifyCSS` then minifies as one (e.g., `<style>a{color:red}</style><style>a{color:blue}</style>` becomes `<style>a{color:#00f}</style>`)
+
+### Changed
+
+* Made `mergeScripts` faster, as it merges what the minifier writes rather than scanning its output again
 
 ## [5.0.4] - 2026-11-11
 

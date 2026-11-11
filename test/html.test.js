@@ -4357,10 +4357,21 @@ describe('HTML', () => {
     output = '<script>let a=1;let b=2</script>';
     assert.strictEqual(await minify(input, { mergeScripts: true }), output);
 
-    // Preserve attributes from first script
-    input = '<script id="main">let a=1</script><script>let b=2</script>';
-    output = '<script id="main">let a=1;let b=2</script>';
+    // Scripts merge only where their attributes match, other than a JavaScript `type`, which
+    // tools that rewrite the page in the browser or at the edge may read; one with an `id`,
+    // which two scripts can’t share, stays apart
+    input = '<script data-cfasync="false">let a=1</script><script data-cfasync="false">let b=2</script>';
+    output = '<script data-cfasync="false">let a=1;let b=2</script>';
     assert.strictEqual(await minify(input, { mergeScripts: true }), output);
+    for (input of [
+      '<script data-cfasync="false">let a=1</script><script>let b=2</script>',
+      '<script>let a=1</script><script data-cfasync="false">let b=2</script>',
+      '<script data-x="a">let a=1</script><script data-x="b">let b=2</script>',
+      '<script id="a">let a=1</script><script>let b=2</script>',
+      '<script>let a=1</script><script id="b">let b=2</script>'
+    ]) {
+      assert.strictEqual(await minify(input, { mergeScripts: true }), input);
+    }
 
     // Handle trailing single-line comments (newline prevents comment bleed)
     input = '<script>let a=1 // comment</script><script>let b=2</script>';
@@ -4448,14 +4459,27 @@ describe('HTML', () => {
     output = '<script data-x="a>b">let a=1;let b=2</script>';
     assert.strictEqual(await minify(input, { mergeScripts: true }), output);
 
-    // Compatibility attributes are correctly parsed even when another attribute contains `>`—
-    // matching nonce values should merge, differing nonce values should not
-    input = '<script data-x="a>b" nonce="abc">let a=1</script><script data-x="a > b" nonce="abc">let b=2</script>';
-    output = '<script data-x="a>b" nonce="abc">let a=1;let b=2</script>';
-    assert.strictEqual(await minify(input, { mergeScripts: true }), output);
-
-    input = '<script data-x="a>b" nonce="abc">let a=1</script><script data-x="a > b" nonce="xyz">let b=2</script>';
+    input = '<script data-x="a>b">let a=1</script><script data-x="a > b">let b=2</script>';
     assert.strictEqual(await minify(input, { mergeScripts: true }), input);
+
+    // Text that only looks like scripts, and ignored markup, stay as they are
+    for (input of [
+      '<textarea><script>a()</script><script>b()</script></textarea>',
+      '<title><script>a()</script><script>b()</script></title>',
+      '<!-- <script>a()</script><script>b()</script> -->',
+      '<script><!--<script></script><script></script></script>'
+    ]) {
+      assert.strictEqual(await minify(input, { mergeScripts: true }), input);
+    }
+    input = '<!-- htmlmin:ignore --><script>a()</script><script>b()</script><!-- htmlmin:ignore -->';
+    assert.strictEqual(await minify(input, { mergeScripts: true }), '<script>a()</script><script>b()</script>');
+
+    // Custom fragments merge as written, on a line of their own where they may end one
+    input = '<script nonce="<?= $n ?>">a(<?= $x ?>)</script><script nonce="<?= $n ?>">b()</script>';
+    output = '<script nonce="<?= $n ?>">a(<?= $x ?>);b()</script>';
+    assert.strictEqual(await minify(input, { mergeScripts: true }), output);
+    input = '<script>a() <?= $x ?></script><script>b()</script>';
+    assert.strictEqual(await minify(input, { mergeScripts: true }), '<script>a() <?= $x ?>\n;b()</script>');
 
     // Disabled by default
     input = '<script>let a=1</script><script>let b=2</script>';
@@ -4508,17 +4532,19 @@ describe('HTML', () => {
     input = '<style type="text/css">a{}</style><style>b{}</style>';
     assert.strictEqual(await minify(input, { mergeStyles: true }), '<style type="text/css">a{}b{}</style>');
 
-    // Attributes that differ, or that may set the style sheets apart
+    input = '<style title="a" data-a>a{}</style><style data-a title="a">b{}</style>';
+    assert.strictEqual(await minify(input, { mergeStyles: true }), '<style title="a" data-a>a{}b{}</style>');
+
+    // Attributes that differ, and an `id`, which two style sheets can’t share
     for (input of [
       '<style media="print">a{}</style><style media="screen">b{}</style>',
       '<style media="print">a{}</style><style>b{}</style>',
       '<style nonce="abc">a{}</style><style nonce="xyz">b{}</style>',
       '<style>a{}</style><style type="text/plain">b{}</style>',
+      '<style title="a">a{}</style><style title="b">b{}</style>',
+      '<style data-a>a{}</style><style>b{}</style>',
       '<style id="a">a{}</style><style>b{}</style>',
-      '<style>a{}</style><style id="b">b{}</style>',
-      '<style title="a">a{}</style><style title="a">b{}</style>',
-      '<style class="a">a{}</style><style class="a">b{}</style>',
-      '<style data-a>a{}</style><style data-a>b{}</style>'
+      '<style>a{}</style><style id="b">b{}</style>'
     ]) {
       assert.strictEqual(await minify(input, { mergeStyles: true }), input);
     }
