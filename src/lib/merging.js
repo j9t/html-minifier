@@ -2,9 +2,8 @@
  * Script and style merging
  */
 
-import { RE_WS_END, RE_WS_START, executableScriptsMimetypes } from './constants.js';
-import { isStyleLinkTypeAttribute } from './attributes.js';
-import { trimWhitespace } from './whitespace.js';
+import { RE_WS_END, RE_WS_START } from './constants.js';
+import { isClassicScriptType, isStyleLinkTypeAttribute } from './attributes.js';
 
 // Rules that only work at the start of a style sheet, and those that apply to the rest of it,
 // each also as any at-rule whose name holds an escape (a stray one in a string or comment
@@ -39,18 +38,6 @@ function readAttrs(attrs, resolve) {
     if (!(nameLower in values)) values[nameLower] = resolve(attr.value ?? '');
   }
   return values;
-}
-
-/**
- * Whether a `type` makes a classic script: none, or a JavaScript MIME type as is,
- * as one with parameters makes a data block
- *
- * @param {string | undefined} type
- * @returns {boolean}
- */
-function isClassicScriptType(type) {
-  const typeLower = trimWhitespace(type ?? '').toLowerCase();
-  return typeLower === '' || (typeLower !== 'module' && executableScriptsMimetypes.has(typeLower));
 }
 
 /**

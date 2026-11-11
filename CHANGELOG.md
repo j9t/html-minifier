@@ -12,6 +12,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 * Fixed `mergeScripts` merging what only looks like scripts—text in `textarea` and `title` elements, comments, and markup kept with `htmlmin:ignore`—and losing code where a script holds `<!--<script>`, which browsers end only at a later `</script>` (e.g., `<script><!--<script></script><script></script></script>` lost `<script></script>`)
 * Fixed `mergeScripts` joining a script that ends in a custom fragment on one line with the next, which the fragment may comment out
 * Fixed `mergeScripts` dropping the attributes of scripts merged into another, whose own attributes then covered their code, too—which tools that rewrite pages in the browser or at the edge read (e.g., `data-cfasync="false"` for Cloudflare Rocket Loader, or `data-cookieconsent`)—scripts now merge only where their attributes match (other than a JavaScript `type`), and not where they have an `id`
+* Fixed `removeDefaultTypeAttributes` removing JavaScript types with parameters (e.g., `type="text/javascript; charset=utf-8"`), which make the element a data block rather than a script, so that browsers then ran its content; `minifyJS` no longer minifies such blocks, either
 
 ### Added
 
@@ -20,6 +21,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 ### Changed
 
 * Made `mergeScripts` faster, as it merges what the minifier writes rather than scanning its output again
+* Made `minifyJS`, `removeDefaultTypeAttributes`, and `mergeScripts` treat the remaining JavaScript types browsers run as such (`text/javascript1.0` to `text/javascript1.5`, and `text/livescript`)
 
 ## [5.0.4] - 2026-11-11
 

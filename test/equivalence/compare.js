@@ -50,7 +50,10 @@ const ATTRIBUTES_NUMBER = /** @type {Record<string, Set<string>>} */ ({ a: words
 const ATTRIBUTES_URL = /** @type {Record<string, Set<string>>} */ ({ a: words('href'), area: words('href'), audio: words('src'), base: words('href'), blockquote: words('cite'), button: words('formaction'), del: words('cite'), embed: words('src'), form: words('action'), frame: words('longdesc src'), head: words('profile'), iframe: words('src'), img: words('longdesc src usemap'), input: words('formaction src usemap'), ins: words('cite'), link: words('href'), object: words('classid codebase data usemap'), q: words('cite'), script: words('src'), source: words('src'), track: words('src'), video: words('poster src') });
 const META_HTTP_EQUIV_NO_EFFECT = words('cleartype content-script-type content-style-type imagetoolbar msthemecompatible page-enter page-exit pics-label site-enter site-exit window-target x-ua-compatible');
 const META_NAME_NO_EFFECT = words('handheldfriendly ie_rm_off mobileoptimized mssmarttagspreventparsing');
-const SCRIPT_TYPES_JS = new Set(['', 'application/ecmascript', 'application/javascript', 'application/x-ecmascript', 'application/x-javascript', 'text/ecmascript', 'text/javascript', 'text/jscript', 'text/x-ecmascript', 'text/x-javascript']);
+// https://mimesniff.spec.whatwg.org/#javascript-mime-type
+// —matched as written (with parameters, a type makes a data block);
+// restated rather than imported, so that a wrong entry in the minifier’s list shows
+const SCRIPT_TYPES_JS = new Set(['', 'application/ecmascript', 'application/javascript', 'application/x-ecmascript', 'application/x-javascript', 'text/ecmascript', 'text/javascript', 'text/javascript1.0', 'text/javascript1.1', 'text/javascript1.2', 'text/javascript1.3', 'text/javascript1.4', 'text/javascript1.5', 'text/jscript', 'text/livescript', 'text/x-ecmascript', 'text/x-javascript']);
 
 // https://html.spec.whatwg.org/multipage/ (per element, with the values read as the default)
 const DEFAULTS_ANY = /** @type {Record<string, string>} */ ({ autocorrect: 'on', fetchpriority: 'auto', loading: 'eager', popovertargetaction: 'toggle' });
@@ -233,7 +236,8 @@ function isRemovedAttribute(/** @type {any} */ node, /** @type {string} */ name,
   if ((isWsOnly(value) || (name === 'style' && RE_VALUELESS_STYLE.test(trim(value)))) && removesEmpty(tag, name, options)) return true;
   if (options.removeRedundantAttributes && isRedundant(node, name, value, options, context)) return true;
   if (options.removeDefaultTypeAttributes && (isHTML(node) || tag === 'style') && name === 'type') {
-    const type = trim(value.split(';', 1)[0] ?? '').toLowerCase();
+    // A `link` reads its type as a MIME type, parameters aside
+    const type = trim((tag === 'link' ? value.split(';', 1)[0] : value) ?? '').toLowerCase();
     return tag === 'script' ? SCRIPT_TYPES_JS.has(type) : (tag === 'style' || tag === 'link') && (type === '' || type === 'text/css');
   }
   return false;

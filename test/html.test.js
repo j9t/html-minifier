@@ -1814,8 +1814,16 @@ describe('HTML', () => {
     output = '<script>alert(1)</script>';
     assert.strictEqual(await minify(input, { removeDefaultTypeAttributes: true }), output);
 
+    // With parameters, a type makes a data block, which a script without one would run
     input = '<script type="application/javascript;version=1.8">alert(1)</script>';
-    output = '<script>alert(1)</script>';
+    assert.strictEqual(await minify(input, { removeDefaultTypeAttributes: true }), input);
+    input = '<script type="text/javascript; charset=utf-8">alert(1)</script><script type="module; a">b()</script>';
+    output = '<script type="text/javascript;charset=utf-8">alert(1)</script><script type="module;a">b()</script>';
+    assert.strictEqual(await minify(input, { removeDefaultTypeAttributes: true }), output);
+
+    // Legacy JavaScript types are default types, too
+    input = '<script type="text/javascript1.5">alert(1)</script><script type="TEXT/LIVESCRIPT">alert(2)</script>';
+    output = '<script>alert(1)</script><script>alert(2)</script>';
     assert.strictEqual(await minify(input, { removeDefaultTypeAttributes: true }), output);
 
     input = '<script type="text/vbscript">MsgBox("foo bar")</script>';
@@ -4027,13 +4035,17 @@ describe('HTML', () => {
 
     assert.strictEqual(await minify(input, { minifyJS: true }), output);
 
+    // With parameters, a type makes a data block, which isn’t JavaScript to minify
     input = '<script type="application/javascript;version=1.8">(function(){ let foo = 1; let bar = 2; alert(foo + " " + bar); })()</script>';
-    output = '<script type="application/javascript;version=1.8">alert("1 2")</script>';
+    assert.strictEqual(await minify(input, { minifyJS: true }), input);
+
+    input = '<script type=" application/javascript  ; charset=utf-8 ">(function(){ let foo = 1; let bar = 2; alert(foo + " " + bar); })()</script>';
+    output = '<script type="application/javascript;charset=utf-8">(function(){ let foo = 1; let bar = 2; alert(foo + " " + bar); })()</script>';
 
     assert.strictEqual(await minify(input, { minifyJS: true }), output);
 
-    input = '<script type=" application/javascript  ; charset=utf-8 ">(function(){ let foo = 1; let bar = 2; alert(foo + " " + bar); })()</script>';
-    output = '<script type="application/javascript;charset=utf-8">alert("1 2")</script>';
+    input = '<script type="text/livescript">(function(){ let foo = 1; let bar = 2; alert(foo + " " + bar); })()</script>';
+    output = '<script type="text/livescript">alert("1 2")</script>';
 
     assert.strictEqual(await minify(input, { minifyJS: true }), output);
 
@@ -8369,8 +8381,8 @@ describe('HTML', () => {
         '<script type=\'text/javascript ;charset=utf-8\'\n' +
         'language=\'javascript\'></script><style type=\'text/css\'></style>'
       ], */
-      // Minifier removes more JavaScript `type` attributes than PHPTAL
-      ['<script></script><script type=text/hack></script>', '<script type="text/javascript;e4x=1"></script><script type="text/hack"></script>']
+      // A JavaScript `type` with parameters makes a data block, so it stays
+      ['<script type="text/javascript;e4x=1"></script><script type=text/hack></script>', '<script type="text/javascript;e4x=1"></script><script type="text/hack"></script>']
       /* trim "title" attribute value in <a>
       [
         '<title>Foo</title><p><a title="x"href=test>x </a>xu</p><br>foo',

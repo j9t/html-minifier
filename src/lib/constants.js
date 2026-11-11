@@ -245,14 +245,20 @@ const namespaceXLink = 'http://www.w3.org/1999/xlink';
 
 // Script MIME types
 
-// https://mathiasbynens.be/demo/javascript-mime-type
-// https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/script
+// https://mimesniff.spec.whatwg.org/#javascript-mime-type
 const executableScriptsMimetypes = new Set([
   'text/javascript',
+  'text/javascript1.0',
+  'text/javascript1.1',
+  'text/javascript1.2',
+  'text/javascript1.3',
+  'text/javascript1.4',
+  'text/javascript1.5',
   'text/x-javascript',
   'text/ecmascript',
   'text/x-ecmascript',
   'text/jscript',
+  'text/livescript',
   'application/javascript',
   'application/x-javascript',
   'application/ecmascript',

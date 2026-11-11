@@ -352,14 +352,21 @@ function isAttributeRedundant(tag, attrName, attrValue, attrs, options) {
   return attrValue === generalDefault || attrValue === tagDefault;
 }
 
+// Types are matched as written, as browsers do:
+// With parameters, a JavaScript type makes a data block
+// https://html.spec.whatwg.org/multipage/scripting.html#prepare-the-script-element
 function isScriptTypeAttribute(attrValue = '') {
-  attrValue = trimWhitespace(attrValue.split(/;/, 2)[0] ?? '').toLowerCase();
+  attrValue = trimWhitespace(attrValue).toLowerCase();
   return attrValue === '' || executableScriptsMimetypes.has(attrValue);
 }
 
 function keepScriptTypeAttribute(attrValue = '') {
-  attrValue = trimWhitespace(attrValue.split(/;/, 2)[0] ?? '').toLowerCase();
-  return keepScriptsMimetypes.has(attrValue);
+  return keepScriptsMimetypes.has(trimWhitespace(attrValue).toLowerCase());
+}
+
+// Whether a `type` makes a classic script, which it can then be left out for
+function isClassicScriptType(attrValue = '') {
+  return isScriptTypeAttribute(attrValue) && !keepScriptTypeAttribute(attrValue);
 }
 
 /**
@@ -1109,7 +1116,7 @@ function normalizeAttrContinue(attrName, attrNameOut, attrValue, attr, attrs, ta
        isAttributeRedundant(tag, attrName, attrValue ?? '', attrs, options)) ||
       (options.removeDefaultTypeAttributes && attrName === 'type' && (
         ((tag === 'style' || tag === 'link') && isStyleLinkTypeAttribute(attrValue)) ||
-        (tag === 'script' && isScriptTypeAttribute(attrValue) && !keepScriptTypeAttribute(attrValue))
+        (tag === 'script' && isClassicScriptType(attrValue))
       ))) && !isAttributeSelected(attrName, options)) {
     return;
   }
@@ -1295,6 +1302,7 @@ export {
   // Validators
   isIgnoredComment,
   isExecutableScript,
+  isClassicScriptType,
   isStyleElement,
   isStyleLinkTypeAttribute,
   isMetaWithoutEffect,
