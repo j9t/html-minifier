@@ -5,9 +5,11 @@
 import { RE_WS_END, RE_WS_START } from './constants.js';
 import { isStyleLinkTypeAttribute } from './attributes.js';
 
-// Rules that only work at the start of a style sheet (a stray one in a string or comment
+// Rules that only work at the start of a style sheet, and those that apply to the rest of it,
+// each also as any at-rule whose name holds an escape (a stray one in a string or comment
 // merely keeps the style sheets apart)
-const RE_LEADING_AT_RULE = /@(?:import|namespace)/i;
+const RE_LEADING_AT_RULE = /@(?:import|namespace)|@[\w-]*\\/i;
+const RE_NAMESPACE_RULE = /@namespace|@[\w-]*\\/i;
 
 // After `<!--`, `<script` opens a state `</script>` doesn’t end
 const RE_SCRIPT_START_TEXT = /<script[\t\n\f\r />]/i;
@@ -26,8 +28,9 @@ const SCRIPT_TYPES_CLASSIC = new Set(['', 'text/javascript', 'application/javasc
  * @returns {Record<string, string> | null}
  */
 function readAttrs(attrs, resolve) {
+  // Without a prototype, so that names like `constructor` are attributes, too
   /** @type {Record<string, string>} */
-  const values = {};
+  const values = Object.create(null);
   for (const attr of attrs) {
     if ((attr.customAssign && attr.customAssign !== '=') || attr.customOpen) return null;
     const name = resolve(attr.name);
@@ -196,20 +199,22 @@ function joinStyleSheets(parts) {
 }
 
 /**
- * Whether CSS may follow another style sheet’s
+ * Whether CSS may follow a style sheet’s: The style sheet has to end cleanly and declare
+ * no namespaces, which would apply to what follows, and the CSS can’t hold rules that
+ * only work at the start of a style sheet
  *
- * @param {string} css
+ * @param {string} css - The last CSS of the style sheets merged so far that isn’t blank
+ * @param {string} next
  * @returns {boolean}
  */
-function canStyleSheetFollow(css) {
-  return !RE_LEADING_AT_RULE.test(css);
+function canStyleSheetsJoin(css, next) {
+  return isStyleSheetClosed(css) && !RE_NAMESPACE_RULE.test(css) && !RE_LEADING_AT_RULE.test(next);
 }
 
 export {
   canScriptFollow,
-  canStyleSheetFollow,
+  canStyleSheetsJoin,
   getMergeKey,
-  isStyleSheetClosed,
   joinScripts,
   joinStyleSheets
 };

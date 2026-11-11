@@ -345,10 +345,15 @@ function mergeAdjacent(/** @type {any[]} */ children, /** @type {any} */ options
   const canonicalCSS = (/** @type {string} */ text) => options.minifyCSS && !options.removeUnusedCSS ? normalizeCSS(text) : trim(text);
   /** @type {any[]} */
   const merged = [];
-  for (const child of children) {
+  for (const [index, child] of children.entries()) {
     const last = merged[merged.length - 1];
     const keyLast = last && keyOf(last);
-    if (child.nodeName === '#text' && isWsOnly(child.value) && keyLast !== undefined) continue;
+    // Whitespace goes only between elements that merge
+    if (child.nodeName === '#text' && isWsOnly(child.value) && keyLast !== undefined) {
+      let indexNext = index + 1;
+      while (children[indexNext]?.nodeName === '#text' && isWsOnly(children[indexNext].value)) indexNext++;
+      if (children[indexNext] && keyOf(children[indexNext]) === keyLast) continue;
+    }
     if (keyLast !== undefined && keyOf(child) === keyLast) {
       const text = child.childNodes[0]?.value ?? '';
       if (child.tagName === 'style') {

@@ -82,7 +82,7 @@ import {
 } from './lib/content.js';
 
 import { declinesMinify, processOptions } from './lib/options.js';
-import { canScriptFollow, canStyleSheetFollow, getMergeKey, isStyleSheetClosed, joinScripts, joinStyleSheets } from './lib/merging.js';
+import { canScriptFollow, canStyleSheetsJoin, getMergeKey, joinScripts, joinStyleSheets } from './lib/merging.js';
 import { toFragment, replaceCustomFragments, isMinifiedCodeSafe } from './lib/fragments.js';
 
 /** @import { ProcessedOptions } from './lib/options.js' */
@@ -1404,8 +1404,7 @@ async function minifyHTML(value, options, partialMarkup) {
   // (or its run), so that its CSS is minified with the run’s rather than on its own
   function joinsStyleRun(/** @type {MergeRecord} */ record, /** @type {string} */ css) {
     const recordPrev = mergeRecords?.[mergeRecords.length - 1];
-    return recordPrev !== undefined && followsAlike(recordPrev, record) &&
-      isStyleSheetClosed(recordPrev.tail) && canStyleSheetFollow(css);
+    return recordPrev !== undefined && followsAlike(recordPrev, record) && canStyleSheetsJoin(recordPrev.tail, css);
   }
 
   // Merge each run of `script` or `style` elements that only whitespace separates into its
@@ -1427,7 +1426,7 @@ async function minifyHTML(value, options, partialMarkup) {
       const content = recordContentOf(record);
       const isStyle = record.kind === 'style';
       if (run && isUsable && recordPrev && followsAlike(recordPrev, record) &&
-          (isStyle ? isStyleSheetClosed(tail) && canStyleSheetFollow(content) : canScriptFollow(holdsCommentStart, content))) {
+          (isStyle ? canStyleSheetsJoin(tail, content) : canScriptFollow(holdsCommentStart, content))) {
         run.records.push(record);
         run.parts.push(content);
       } else {

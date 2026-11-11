@@ -4367,6 +4367,7 @@ describe('HTML', () => {
       '<script data-cfasync="false">let a=1</script><script>let b=2</script>',
       '<script>let a=1</script><script data-cfasync="false">let b=2</script>',
       '<script data-x="a">let a=1</script><script data-x="b">let b=2</script>',
+      '<script constructor="a">let a=1</script><script constructor="b">let b=2</script>',
       '<script id="a">let a=1</script><script>let b=2</script>',
       '<script>let a=1</script><script id="b">let b=2</script>'
     ]) {
@@ -4560,6 +4561,12 @@ describe('HTML', () => {
     input = '<style>a{}</style><style>@import "b.css";c{}</style>';
     assert.strictEqual(await minify(input, { mergeStyles: true }), input);
     input = '<style>a{}</style><style>@namespace svg url(http://www.w3.org/2000/svg);c{}</style>';
+    assert.strictEqual(await minify(input, { mergeStyles: true }), input);
+    // Nor can a style sheet follow one that declares namespaces, which would apply to it
+    input = '<style>@namespace url(http://www.w3.org/2000/svg);a{}</style><style>div{}</style>';
+    assert.strictEqual(await minify(input, { mergeStyles: true }), input);
+    // At-rules may be written with escapes
+    input = '<style>a{}</style><style>@\\69mport "b.css";c{}</style>';
     assert.strictEqual(await minify(input, { mergeStyles: true }), input);
     input = '<style>@import "a.css";b{}</style><style>c{}</style>';
     assert.strictEqual(await minify(input, { mergeStyles: true }), '<style>@import "a.css";b{}c{}</style>');
