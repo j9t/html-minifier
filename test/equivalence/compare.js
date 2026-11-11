@@ -7,6 +7,8 @@ import { parse } from 'parse5';
 import { minify_sync as terser } from 'terser';
 // Too long to restate here, so a wrong entry goes unnoticed; HTML’s defaults are restated below
 import { tagDefaultsSVG } from '../../src/lib/constants.js';
+// Likewise, so that what merges is judged by the minifier’s rules, while the merging is checked
+import { canScriptFollow, canStyleSheetsJoin, holdsHashbang } from '../../src/lib/merging.js';
 
 const NS_HTML = 'http://www.w3.org/1999/xhtml';
 const NS_SVG = 'http://www.w3.org/2000/svg';
@@ -14,6 +16,7 @@ const RE_WS_RUN = /[ \t\n\r\f]+/g;
 const RE_WS_ONLY = /^[ \t\n\r\f]*$/;
 const RE_WS_EDGES = /^[ \t\n\r\f]+|[ \t\n\r\f]+$/g;
 const RE_WS_END = /[ \t\n\r\f]+$/;
+const RE_WS_START = /^[ \t\n\r\f]/;
 const RE_VALUELESS_STYLE = /^(?:[a-z-]+:[;\s]*)+$/i;
 const RE_JSON_TYPE = /^(?:application\/(?:[\w.-]+\+)?json|importmap|speculationrules)$/;
 const RE_JS_COMMENTS = /<!--.*|-->.*|\/\/.*|\/\*[\s\S]*?\*\//g;
@@ -48,7 +51,10 @@ const ATTRIBUTES_NUMBER = /** @type {Record<string, Set<string>>} */ ({ a: words
 const ATTRIBUTES_URL = /** @type {Record<string, Set<string>>} */ ({ a: words('href'), area: words('href'), audio: words('src'), base: words('href'), blockquote: words('cite'), button: words('formaction'), del: words('cite'), embed: words('src'), form: words('action'), frame: words('longdesc src'), head: words('profile'), iframe: words('src'), img: words('longdesc src usemap'), input: words('formaction src usemap'), ins: words('cite'), link: words('href'), object: words('classid codebase data usemap'), q: words('cite'), script: words('src'), source: words('src'), track: words('src'), video: words('poster src') });
 const META_HTTP_EQUIV_NO_EFFECT = words('cleartype content-script-type content-style-type imagetoolbar msthemecompatible page-enter page-exit pics-label site-enter site-exit window-target x-ua-compatible');
 const META_NAME_NO_EFFECT = words('handheldfriendly ie_rm_off mobileoptimized mssmarttagspreventparsing');
-const SCRIPT_TYPES_JS = new Set(['', 'application/ecmascript', 'application/javascript', 'application/x-ecmascript', 'application/x-javascript', 'text/ecmascript', 'text/javascript', 'text/jscript', 'text/x-ecmascript', 'text/x-javascript']);
+// https://mimesniff.spec.whatwg.org/#javascript-mime-type
+// —matched as written (with parameters, a type makes a data block);
+// restated rather than imported, so that a wrong entry in the minifier’s list shows
+const SCRIPT_TYPES_JS = new Set(['', 'application/ecmascript', 'application/javascript', 'application/x-ecmascript', 'application/x-javascript', 'text/ecmascript', 'text/javascript', 'text/javascript1.0', 'text/javascript1.1', 'text/javascript1.2', 'text/javascript1.3', 'text/javascript1.4', 'text/javascript1.5', 'text/jscript', 'text/livescript', 'text/x-ecmascript', 'text/x-javascript']);
 
 // https://html.spec.whatwg.org/multipage/ (per element, with the values read as the default)
 const DEFAULTS_ANY = /** @type {Record<string, string>} */ ({ autocorrect: 'on', fetchpriority: 'auto', loading: 'eager', popovertargetaction: 'toggle' });
@@ -231,7 +237,8 @@ function isRemovedAttribute(/** @type {any} */ node, /** @type {string} */ name,
   if ((isWsOnly(value) || (name === 'style' && RE_VALUELESS_STYLE.test(trim(value)))) && removesEmpty(tag, name, options)) return true;
   if (options.removeRedundantAttributes && isRedundant(node, name, value, options, context)) return true;
   if (options.removeDefaultTypeAttributes && (isHTML(node) || tag === 'style') && name === 'type') {
-    const type = trim(value.split(';', 1)[0] ?? '').toLowerCase();
+    // A `link` reads its type as a MIME type, parameters aside
+    const type = trim((tag === 'link' ? value.split(';', 1)[0] : value) ?? '').toLowerCase();
     return tag === 'script' ? SCRIPT_TYPES_JS.has(type) : (tag === 'style' || tag === 'link') && (type === '' || type === 'text/css');
   }
   return false;
@@ -318,29 +325,95 @@ function canonicalizeRaw(/** @type {any} */ node, /** @type {string} */ text, /*
   return (SCRIPT_TYPES_JS.has(type) && normalizeJS(text)) || text.replace(/[;\s]+/g, '');
 }
 
-// Only classic scripts merge, and only with the same loading behavior
-function isSameScriptKind(/** @type {any} */ scriptA, /** @type {any} */ scriptB) {
-  const typeOf = (/** @type {any} */ script) => {
-    const type = trim(attrValue(script, 'type') ?? '').toLowerCase();
-    return SCRIPT_TYPES_JS.has(type) ? '' : type;
+// Adjacent scripts and style sheets, merged as the minifier merges them so that both sides
+// compare alike: by their attributes as the output has them, under the minifier’s own checks,
+// with whitespace between them moved after them, and their code compared loosely. What merges
+// is copied, so that the tree stays as parsed for the syntax check.
+function mergeAdjacent(/** @type {any[]} */ children, /** @type {any} */ options, /** @type {any} */ context, /** @type {boolean} */ inert) {
+  const textOf = (/** @type {any} */ node) => node.childNodes[0]?.value ?? '';
+  const keyOf = (/** @type {any} */ node) => {
+    const kind = node.tagName;
+    // MathML scripts are text, and style sheets in `template` or `noscript` don’t apply as written
+    const isMergeable = kind === 'script'
+      ? options.mergeScripts && !node.namespaceURI.endsWith('MathML')
+      : kind === 'style' && options.mergeStyles && isHTML(node) && !inert;
+    if (!isMergeable) return undefined;
+    /** @type {Record<string, string>} */
+    const values = Object.fromEntries(node.attrs
+      .filter((/** @type {any} */ attr) => !isRemovedAttribute(node, attr.name, attr.value, options, context))
+      .map((/** @type {any} */ attr) => [attr.name, attr.value]));
+    const type = trim(values.type ?? '').toLowerCase();
+    if ('id' in values || (kind === 'script' ? 'src' in values || !SCRIPT_TYPES_JS.has(type) || holdsHashbang(textOf(node)) : type && type !== 'text/css')) return undefined;
+    delete values.type;
+    const media = trim(values.media ?? '');
+    if (media && media.toLowerCase() !== 'all') values.media = media;
+    else delete values.media;
+    return JSON.stringify([kind, ...Object.entries(values).sort(([nameA], [nameB]) => nameA < nameB ? -1 : 1)]);
   };
-  return typeOf(scriptA) === '' && typeOf(scriptB) === '' && ['async', 'defer', 'nomodule', 'nonce'].every(name => attrValue(scriptA, name) === attrValue(scriptB, name));
-}
-
-function mergeAdjacentScripts(/** @type {any[]} */ children) {
+  const canonicalCSS = (/** @type {string} */ text) => options.minifyCSS && !options.removeUnusedCSS ? normalizeCSS(text) : trim(text);
+  // For a merged style sheet, its last CSS that isn’t blank; for a merged script, whether it
+  // holds `<!--`
+  /** @type {Map<any, string>} */
+  const tails = new Map();
+  const tailOf = (/** @type {any} */ node) => tails.get(node) ?? (node.tagName === 'style' ? canonicalCSS(textOf(node)) : textOf(node));
+  const canJoin = (/** @type {any} */ last, /** @type {any} */ next) => next.tagName === 'style'
+    ? canStyleSheetsJoin(tailOf(last), canonicalCSS(textOf(next)))
+    : canScriptFollow(tailOf(last).includes('<!--'), textOf(next));
   /** @type {any[]} */
   const merged = [];
-  for (const child of children) {
+  /** @type {Set<any>} */
+  const copies = new Set();
+  /** @type {string | undefined} */
+  let gap;
+  // Ending a run, with what follows it (if anything)
+  const settleGap = (/** @type {any} */ next) => {
+    if (gap === undefined) return next;
+    const value = gap;
+    gap = undefined;
+    const before = merged[merged.length - 2];
+    if ((before?.nodeName === '#text' && RE_WS_END.test(before.value)) || (next?.nodeName === '#text' && RE_WS_START.test(next.value))) return next;
+    if (next?.nodeName === '#text') return { ...next, value: value + next.value };
+    merged.push({ nodeName: '#text', value });
+    return next;
+  };
+  for (const [index, child] of children.entries()) {
     const last = merged[merged.length - 1];
-    if (child.nodeName === '#text' && isWsOnly(child.value) && last?.tagName === 'script') continue;
-    if (child.tagName === 'script' && last?.tagName === 'script' && attrValue(child, 'src') === undefined && attrValue(last, 'src') === undefined && isSameScriptKind(child, last)) {
-      const text = child.childNodes[0]?.value ?? '';
-      if (last.childNodes[0]) last.childNodes[0].value += ';\n' + text;
-      else if (text) last.childNodes = child.childNodes;
+    const keyLast = last && keyOf(last);
+    // Whitespace goes only between elements that merge
+    if (child.nodeName === '#text' && isWsOnly(child.value) && keyLast !== undefined) {
+      let indexNext = index + 1;
+      while (children[indexNext]?.nodeName === '#text' && isWsOnly(children[indexNext].value)) indexNext++;
+      const next = children[indexNext];
+      if (next && keyOf(next) === keyLast && canJoin(last, next)) {
+        gap ??= child.value;
+        continue;
+      }
+    }
+    if (keyLast !== undefined && keyOf(child) === keyLast && canJoin(last, child)) {
+      const text = textOf(child);
+      const tail = tailOf(last);
+      let target = last;
+      if (!copies.has(last)) {
+        target = { ...last, childNodes: [...last.childNodes] };
+        copies.add(target);
+        merged[merged.length - 1] = target;
+      }
+      if (child.tagName === 'style') {
+        const css = canonicalCSS(text);
+        const cssMerged = canonicalCSS(textOf(target)) + css;
+        target.childNodes = cssMerged ? [{ nodeName: '#text', value: cssMerged }] : [];
+        tails.set(target, css ? css : tail);
+      } else {
+        // On lines of their own, so that a line comment can’t take the semicolon along
+        if (target.childNodes[0]) target.childNodes = [{ nodeName: '#text', value: textOf(target) + '\n;\n' + text }];
+        else if (text) target.childNodes = child.childNodes;
+        tails.set(target, text.includes('<!--') ? '<!--' : tail);
+      }
       continue;
     }
-    merged.push(child);
+    merged.push(settleGap(child));
   }
+  settleGap(undefined);
   return merged;
 }
 
@@ -501,9 +574,10 @@ function canonicalize(source, options, scripting) {
   const body = document.childNodes.find(child => child.nodeName === 'html')?.childNodes.find((/** @type {any} */ child) => child.tagName === 'body');
   if (body) trimDocumentEnd(body);
 
-  function visit(/** @type {any} */ node, /** @type {string} */ path, /** @type {boolean} */ preformatted) {
+  // `inert` is whether `node` sits in a `template` or `noscript` element (or is one)
+  function visit(/** @type {any} */ node, /** @type {string} */ path, /** @type {boolean} */ preformatted, /** @type {boolean} */ inert) {
     const parent = node.tagName;
-    const children = options.mergeScripts ? mergeAdjacentScripts(childrenOf(node)) : childrenOf(node);
+    const children = options.mergeScripts || options.mergeStyles ? mergeAdjacent(childrenOf(node), options, context, inert) : childrenOf(node);
     for (const child of children) {
       if (child.nodeName === '#documentType') {
         lines.push(options.useShortDoctype ? 'doctype:' + child.name.toLowerCase() : `doctype:${child.name}|${child.publicId ?? ''}|${child.systemId ?? ''}`);
@@ -515,7 +589,7 @@ function canonicalize(source, options, scripting) {
         const namespace = isHTML(child) ? '' : (child.namespaceURI.split('/').pop() ?? '');
         lines.push(`${pathChild}@${namespace}${isOpaque ? '«SVG»' : JSON.stringify(canonicalizeAttributes(child, options, context))}`);
         if (!isOpaque) {
-          visit(child, pathChild, preformatted || isPreformatted(child));
+          visit(child, pathChild, preformatted || isPreformatted(child), inert || child.tagName === 'template' || child.tagName === 'noscript');
           lines.push(`${pathChild}/end`);
         }
       }
@@ -552,7 +626,7 @@ function canonicalize(source, options, scripting) {
     }
   }
 
-  visit(document, '', false);
+  visit(document, '', false, false);
   lines.push('comments:' + JSON.stringify(comments.sort()));
   return { document, lines };
 }
@@ -712,7 +786,7 @@ export function compareMarkup(input, output, options) {
     if (options.collapseWhitespace || options.removeOptionalTags || options.removeEmptyElements || options.minifySVG) {
       differences.push(...diffLines('render', renderedText(canonicalIn.document, options), renderedText(canonicalOut.document, options)));
     }
-    if (options.minifyJS) {
+    if (options.minifyJS || options.mergeScripts) {
       differences.push(...checkScriptSyntax(canonicalIn.document, canonicalOut.document));
     }
     if (differences.length) {

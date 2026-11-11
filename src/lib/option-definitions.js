@@ -113,7 +113,11 @@ const optionDefinitions = {
     type: 'int'
   },
   mergeScripts: {
-    description: 'Merge consecutive inline `script` elements into one',
+    description: 'Merge consecutive `script` elements into one',
+    type: 'boolean'
+  },
+  mergeStyles: {
+    description: 'Merge consecutive `style` elements into one',
     type: 'boolean'
   },
   minifyCSS: {

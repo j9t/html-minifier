@@ -793,6 +793,15 @@ describe('SVG and MathML', () => {
       await minify('<svg><script>a()</script><script>b()</script></svg>', { mergeScripts: true }),
       '<svg><script>a();b()</script></svg>'
     );
+    // Style sheets are left apart: In MathML, they are text, and in SVG, SVGO merges them
+    assert.strictEqual(
+      await minify('<math><style>a{}</style><style>b{}</style></math><style>c{}</style><style>d{}</style>', { mergeStyles: true }),
+      '<math><style>a{}</style><style>b{}</style></math><style>c{}d{}</style>'
+    );
+    assert.strictEqual(
+      await minify('<svg><style>a{}</style><style>b{}</style></svg>', { mergeStyles: true }),
+      '<svg><style>a{}</style><style>b{}</style></svg>'
+    );
   });
 
   test('Reads CDATA sections in foreign content as text', async () => {

@@ -1351,6 +1351,7 @@ export class HTMLParser {
     }
 
     // What a formatting element’s end tag meets among the elements open inside it
+    //
     // @@ Reopen formatting on whitespace (`<p><a><div></div> <div>` should stay as is)
     function readFormattingScope(/** @type {number} */ stackIndex) {
       let hasSpecial = false;

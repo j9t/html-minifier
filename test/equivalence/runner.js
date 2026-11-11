@@ -22,6 +22,7 @@ export const OPTIONS_STRUCTURAL = {
   keepClosingSlash: true,
   maxLineLength: 40,
   mergeScripts: true,
+  mergeStyles: true,
   minifyURLs: 'https://example.org/dir/page.html',
   noNewlinesBeforeTagClose: true,
   preserveLineBreaks: true,

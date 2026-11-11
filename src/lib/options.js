@@ -50,7 +50,6 @@ import { optionDefinitions, optionDefaults } from './option-definitions.js';
  *   canMinifySVG: ((text: string) => boolean) | null,
  *   removeUnusedCSS: {safelist: Array<string | RegExp>, scripts: boolean} | null,
  *   cssContext?: CSSContext,
- *   documentState?: {hasMathML: boolean},
  *   baseState?: {hasBase: boolean | undefined, selectedAttrs?: Set<string>, source: string},
  *   parallelJS?: boolean,
  *   nameParent?: (name: string) => string,
@@ -521,13 +520,14 @@ const processOptions = (inputOptions, { getLightningCSS, getTerser, getSwc, getS
             // Where Lightning CSS emptied template syntax (`<?php ?>`, `{{ }}`: `<` or `>` without
             // `CDATA`), custom-fragment UIDs (long lowercase alphanumeric runs), or a media query
             // (an invalid one matches nothing, an empty one everything), keep the original;
-            // CDATA sections, entities, and other invalid CSS may go
+            // CDATA sections, entities, and other invalid CSS may go. Dropping what it can’t
+            // read is what it warns about, which emptying a style sheet of unused rules is not.
             const isCDATA = text.includes('<![CDATA[');
             const uidPattern = /[a-z0-9]{10,}/; // UIDs are long alphanumeric strings
             const hasUID = uidPattern.test(text) && !isCDATA; // Exclude CDATA from UID detection
             const looksLikeTemplate = (text.includes('<') || text.includes('>')) && !isCDATA;
 
-            const css = (text.trim() && !outputCSS.trim() && (type === 'media' || looksLikeTemplate || hasUID)) ? text : outputCSS;
+            const css = (text.trim() && !outputCSS.trim() && (type === 'media' || (warnings.length > 0 && (looksLikeTemplate || hasUID)))) ? text : outputCSS;
             return /** @type {CSSResult} */ ({ css, warnings });
           });
           report(resolved.warnings);
@@ -835,6 +835,7 @@ const processOptions = (inputOptions, { getLightningCSS, getTerser, getSwc, getS
 };
 
 export {
+  declinesMinify,
   optionDependencies,
   optionKeysExtra,
   shouldMinifyInnerHTML,

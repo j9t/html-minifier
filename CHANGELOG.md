@@ -4,6 +4,27 @@ As of version 5.0.0, all notable changes to HTML Minifier (HM) are documented in
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.1.0] - 2026-11-11
+
+### Fixed
+
+* Fixed `removeUnusedCSS` keeping style sheets of which nothing is used as written, unminified, where they held a word of ten or more lowercase letters (e.g., `background`; taken for a custom-fragment placeholder)
+* Fixed `mergeScripts` merging what only looks like scripts—text in `textarea` and `title` elements, comments, and markup kept with `htmlmin:ignore`—and losing code where a script holds `<!--<script>`, which browsers end only at a later `</script>` (e.g., `<script><!--<script></script><script></script></script>` lost `<script></script>`)
+* Fixed `mergeScripts` joining a script that ends in a custom fragment on one line with the next, which the fragment may comment out
+* Fixed `mergeScripts` merging scripts that start with a hashbang (`#!`), which only works at the very start of a script, so that none of the merged code ran
+* Fixed `mergeScripts` dropping the attributes of scripts merged into another, whose own attributes then covered their code, too—which tools that rewrite pages in the browser or at the edge read (e.g., `data-cfasync="false"` for Cloudflare Rocket Loader, or `data-cookieconsent`)—scripts now merge only where their attributes match (other than a JavaScript `type`), and not where they have an `id`
+* Fixed `removeDefaultTypeAttributes` removing JavaScript types with parameters (e.g., `type="text/javascript; charset=utf-8"`), which make the element a data block rather than a script, so that browsers then ran its content; `minifyJS` no longer minifies such blocks, either
+
+### Added
+
+* Added `mergeStyles` (part of the `comprehensive` preset) to merge consecutive `style` elements with compatible style sheets into one, which `minifyCSS` then minifies as one (e.g., `<style>a{color:red}</style><style>a{color:blue}</style>` becomes `<style>a{color:#00f}</style>`)
+
+### Changed
+
+* Made `mergeScripts` faster, as it merges what the minifier writes rather than scanning its output again
+* Made `mergeScripts` merge scripts of any JavaScript type (e.g., `text/ecmascript`), not just of `text/javascript` and `application/javascript`
+* Made `minifyJS`, `removeDefaultTypeAttributes`, and `mergeScripts` treat the remaining JavaScript types browsers run as such (`text/javascript1.0` to `text/javascript1.5`, and `text/livescript`)
+
 ## [5.0.4] - 2026-11-11
 
 ### Fixed

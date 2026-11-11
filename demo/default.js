@@ -92,6 +92,10 @@ const demoConfig = {
     label: 'Merge scripts',
     checked: true
   },
+  mergeStyles: {
+    label: 'Merge styles',
+    checked: true
+  },
   minifyCSS: {
     label: 'Minify CSS',
     checked: false,
