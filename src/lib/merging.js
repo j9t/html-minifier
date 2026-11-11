@@ -13,6 +13,7 @@ const RE_NAMESPACE_RULE = /@namespace|@[\w-]*\\/i;
 
 // After `<!--`, `<script` opens a state `</script>` doesn’t end
 const RE_SCRIPT_START_TEXT = /<script[\t\n\f\r />]/i;
+const RE_SCRIPT_HASHBANG = /^\s*#!/;
 
 /** @typedef {{name: string, value?: string, customAssign?: string, customOpen?: string}} MergeAttribute */
 
@@ -65,6 +66,18 @@ function getMergeKey(kind, attrs, resolve) {
     else delete values.media;
   }
   return JSON.stringify([kind, ...Object.entries(values).sort(([nameA], [nameB]) => nameA < nameB ? -1 : 1)]);
+}
+
+/**
+ * Whether script code starts with a hashbang, which only works at the very start of a script,
+ * so that the script stays apart (where whitespace comes first, it’s an error, which would
+ * spread to what is merged with it)
+ *
+ * @param {string} code
+ * @returns {boolean}
+ */
+function holdsHashbang(code) {
+  return RE_SCRIPT_HASHBANG.test(code);
 }
 
 /**
@@ -214,6 +227,7 @@ export {
   canScriptFollow,
   canStyleSheetsJoin,
   getMergeKey,
+  holdsHashbang,
   joinScripts,
   joinStyleSheets
 };

@@ -4481,6 +4481,15 @@ describe('HTML', () => {
     input = '<script data-x="a>b">let a=1</script><script data-x="a > b">let b=2</script>';
     assert.strictEqual(await minify(input, { mergeScripts: true }), input);
 
+    // A hashbang only works at the start of a script
+    for (input of [
+      '<script>a()</script><script>#!/usr/bin/env node\nb()</script>',
+      '<script>#!/usr/bin/env node\na()</script><script>b()</script>',
+      '<script>a()</script><script>\n#!/usr/bin/env node\nb()</script>'
+    ]) {
+      assert.strictEqual(await minify(input, { mergeScripts: true }), input);
+    }
+
     // Text that only looks like scripts, and ignored markup, stay as they are
     for (input of [
       '<textarea><script>a()</script><script>b()</script></textarea>',

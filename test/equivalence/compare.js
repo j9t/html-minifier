@@ -8,7 +8,7 @@ import { minify_sync as terser } from 'terser';
 // Too long to restate here, so a wrong entry goes unnoticed; HTML’s defaults are restated below
 import { tagDefaultsSVG } from '../../src/lib/constants.js';
 // Likewise, so that what merges is judged by the minifier’s rules, while the merging is checked
-import { canScriptFollow, canStyleSheetsJoin } from '../../src/lib/merging.js';
+import { canScriptFollow, canStyleSheetsJoin, holdsHashbang } from '../../src/lib/merging.js';
 
 const NS_HTML = 'http://www.w3.org/1999/xhtml';
 const NS_SVG = 'http://www.w3.org/2000/svg';
@@ -16,6 +16,7 @@ const RE_WS_RUN = /[ \t\n\r\f]+/g;
 const RE_WS_ONLY = /^[ \t\n\r\f]*$/;
 const RE_WS_EDGES = /^[ \t\n\r\f]+|[ \t\n\r\f]+$/g;
 const RE_WS_END = /[ \t\n\r\f]+$/;
+const RE_WS_START = /^[ \t\n\r\f]/;
 const RE_VALUELESS_STYLE = /^(?:[a-z-]+:[;\s]*)+$/i;
 const RE_JSON_TYPE = /^(?:application\/(?:[\w.-]+\+)?json|importmap|speculationrules)$/;
 const RE_JS_COMMENTS = /<!--.*|-->.*|\/\/.*|\/\*[\s\S]*?\*\//g;
@@ -328,10 +329,13 @@ function canonicalizeRaw(/** @type {any} */ node, /** @type {string} */ text, /*
 // style sheets whose attributes match, other than a JavaScript or CSS `type` and `media` that
 // matches all, none with an `id`; what options remove of them isn’t compared, as the output
 // lacks it. As in the minifier, a style sheet only joins one that ends cleanly and can be
-// followed, and a script holding `<script` doesn’t follow one holding `<!--`.
-// Merged scripts are compared loosely; style sheets, with CSS minified, as CSS that minifies
-// alike, and without, leaving out whitespace around each.
+// followed, a script holding `<script` doesn’t follow one holding `<!--`, and one starting with
+// a hashbang stays apart; the first whitespace between merged elements goes after them, unless
+// whitespace is next to them anyway. Merged scripts are compared loosely; style sheets, with CSS
+// minified, as CSS that minifies alike, and without, leaving out whitespace around each. What
+// merges is copied, so that the tree stays as parsed.
 function mergeAdjacent(/** @type {any[]} */ children, /** @type {any} */ options, /** @type {any} */ context) {
+  const textOf = (/** @type {any} */ node) => node.childNodes[0]?.value ?? '';
   const keyOf = (/** @type {any} */ node) => {
     const kind = node.tagName;
     const isMergeable = kind === 'script'
@@ -343,7 +347,7 @@ function mergeAdjacent(/** @type {any[]} */ children, /** @type {any} */ options
       .filter((/** @type {any} */ attr) => !isRemovedAttribute(node, attr.name, attr.value, options, context))
       .map((/** @type {any} */ attr) => [attr.name, attr.value]));
     const type = trim(values.type ?? '').toLowerCase();
-    if ('id' in values || (kind === 'script' ? 'src' in values || !SCRIPT_TYPES_JS.has(type) : type && type !== 'text/css')) return undefined;
+    if ('id' in values || (kind === 'script' ? 'src' in values || !SCRIPT_TYPES_JS.has(type) || holdsHashbang(textOf(node)) : type && type !== 'text/css')) return undefined;
     delete values.type;
     const media = trim(values.media ?? '');
     if (media && media.toLowerCase() !== 'all') values.media = media;
@@ -351,7 +355,6 @@ function mergeAdjacent(/** @type {any[]} */ children, /** @type {any} */ options
     return JSON.stringify([kind, ...Object.entries(values).sort(([nameA], [nameB]) => nameA < nameB ? -1 : 1)]);
   };
   const canonicalCSS = (/** @type {string} */ text) => options.minifyCSS && !options.removeUnusedCSS ? normalizeCSS(text) : trim(text);
-  const textOf = (/** @type {any} */ node) => node.childNodes[0]?.value ?? '';
   // For a merged style sheet, its last CSS that isn’t blank; for a merged script, whether it
   // holds `<!--`
   /** @type {Map<any, string>} */
@@ -362,6 +365,21 @@ function mergeAdjacent(/** @type {any[]} */ children, /** @type {any} */ options
     : canScriptFollow(tailOf(last).includes('<!--'), textOf(next));
   /** @type {any[]} */
   const merged = [];
+  /** @type {Set<any>} */
+  const copies = new Set();
+  /** @type {string | undefined} */
+  let gap;
+  // Ending a run, with what follows it (if anything)
+  const settleGap = (/** @type {any} */ next) => {
+    if (gap === undefined) return next;
+    const value = gap;
+    gap = undefined;
+    const before = merged[merged.length - 2];
+    if ((before?.nodeName === '#text' && RE_WS_END.test(before.value)) || (next?.nodeName === '#text' && RE_WS_START.test(next.value))) return next;
+    if (next?.nodeName === '#text') return { ...next, value: value + next.value };
+    merged.push({ nodeName: '#text', value });
+    return next;
+  };
   for (const [index, child] of children.entries()) {
     const last = merged[merged.length - 1];
     const keyLast = last && keyOf(last);
@@ -370,26 +388,36 @@ function mergeAdjacent(/** @type {any[]} */ children, /** @type {any} */ options
       let indexNext = index + 1;
       while (children[indexNext]?.nodeName === '#text' && isWsOnly(children[indexNext].value)) indexNext++;
       const next = children[indexNext];
-      if (next && keyOf(next) === keyLast && canJoin(last, next)) continue;
+      if (next && keyOf(next) === keyLast && canJoin(last, next)) {
+        gap ??= child.value;
+        continue;
+      }
     }
     if (keyLast !== undefined && keyOf(child) === keyLast && canJoin(last, child)) {
       const text = textOf(child);
       const tail = tailOf(last);
+      let target = last;
+      if (!copies.has(last)) {
+        target = { ...last, childNodes: [...last.childNodes] };
+        copies.add(target);
+        merged[merged.length - 1] = target;
+      }
       if (child.tagName === 'style') {
         const css = canonicalCSS(text);
-        const cssMerged = canonicalCSS(textOf(last)) + css;
-        last.childNodes = cssMerged ? [{ nodeName: '#text', value: cssMerged }] : [];
-        tails.set(last, css ? css : tail);
+        const cssMerged = canonicalCSS(textOf(target)) + css;
+        target.childNodes = cssMerged ? [{ nodeName: '#text', value: cssMerged }] : [];
+        tails.set(target, css ? css : tail);
       } else {
         // On lines of their own, so that a line comment can’t take the semicolon along
-        if (last.childNodes[0]) last.childNodes[0].value += '\n;\n' + text;
-        else if (text) last.childNodes = child.childNodes;
-        tails.set(last, text.includes('<!--') ? '<!--' : tail);
+        if (target.childNodes[0]) target.childNodes = [{ nodeName: '#text', value: textOf(target) + '\n;\n' + text }];
+        else if (text) target.childNodes = child.childNodes;
+        tails.set(target, text.includes('<!--') ? '<!--' : tail);
       }
       continue;
     }
-    merged.push(child);
+    merged.push(settleGap(child));
   }
+  settleGap(undefined);
   return merged;
 }
 
@@ -761,7 +789,7 @@ export function compareMarkup(input, output, options) {
     if (options.collapseWhitespace || options.removeOptionalTags || options.removeEmptyElements || options.minifySVG) {
       differences.push(...diffLines('render', renderedText(canonicalIn.document, options), renderedText(canonicalOut.document, options)));
     }
-    if (options.minifyJS) {
+    if (options.minifyJS || options.mergeScripts) {
       differences.push(...checkScriptSyntax(canonicalIn.document, canonicalOut.document));
     }
     if (differences.length) {

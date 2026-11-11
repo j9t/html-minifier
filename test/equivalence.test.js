@@ -40,6 +40,8 @@ describe('Equivalence', () => {
       ['<iframe>a</noscript></body></html>', '<iframe>a</noscript>', {}],
       ['<script>a();</script>\n<script>b()</script>', '<script>a();b()</script>', { mergeScripts: true }],
       ['<script>a() // c</script><script>b()</script>', '<script>a() // c\n;b()</script>', { mergeScripts: true }],
+      ['<div><script>a()</script> <script>b()</script></div><p>x</p>', '<div><script>a();b()</script> </div><p>x</p>', { mergeScripts: true }],
+      ['<div><style>a{}</style> <style>b{}</style></div><p>x</p>', '<div><style>a{}b{}</style> </div><p>x</p>', { mergeStyles: true }],
       ['<style>a{top:0}</style>\n<style media=all>b{top:0}</style>', '<style>a{top:0}b{top:0}</style>', { mergeStyles: true }],
       ['<style>a{color:red}</style><style>a{color:blue}</style>', '<style>a{color:#00f}</style>', { mergeStyles: true, minifyCSS: true }],
       ['<svg><!-- a --><rect/></svg>', '<svg><rect/></svg>', { minifySVG: true }],
@@ -71,6 +73,7 @@ describe('Equivalence', () => {
       ['<a "target="_blank">b</a>', '<a target="_blank">b</a>', {}, 'tree'],
       ['<script>a()</script><script>(b)()</script>', '<script>a()(b)()</script>', { mergeScripts: true }, 'tree'],
       ['<script>a() // c</script><script>(b)()</script>', '<script>a() // c\n(b)()</script>', { mergeScripts: true }, 'tree'],
+      ['<script>a()</script><script>#!b\nc()</script>', '<script>a();#!b\nc()</script>', { mergeScripts: true }, 'tree'],
       ['<style>a{top:0</style><style>b{top:0}</style>', '<style>a{top:0b{top:0}</style>', { mergeStyles: true, minifyCSS: true }, 'tree'],
       ['<style>a{top:0}</style><style>@import "b.css";c{top:0}</style>', '<style>a{top:0}@import "b.css";c{top:0}</style>', { mergeStyles: true }, 'tree'],
       ['<script>a="<!--"</script><script>b="<script>"</script><p>c', '<script>a="<!--";b="<script>"</script><p>c', { mergeScripts: true }, 'tree'],
@@ -91,6 +94,11 @@ describe('Equivalence', () => {
     for (const [input, output, options, kind] of cases) {
       assert.strictEqual(compareMarkup(input, output, options)[0]?.kind, kind, input);
     }
+  });
+
+  test('Checks the syntax of scripts as written, not as merged for comparing', () => {
+    const differences = compareMarkup('<script>a()</script><script>#!b\nc()</script>', '<script>a();#!b\nc()</script>', { mergeScripts: true });
+    assert.ok(differences.some(difference => difference.kind === 'syntax'), JSON.stringify(differences));
   });
 
   test('Reduces markup that fails to parse, as long as it does', async () => {

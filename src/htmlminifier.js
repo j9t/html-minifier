@@ -82,7 +82,7 @@ import {
 } from './lib/content.js';
 
 import { declinesMinify, processOptions } from './lib/options.js';
-import { canScriptFollow, canStyleSheetsJoin, getMergeKey, joinScripts, joinStyleSheets } from './lib/merging.js';
+import { canScriptFollow, canStyleSheetsJoin, getMergeKey, holdsHashbang, joinScripts, joinStyleSheets } from './lib/merging.js';
 import { toFragment, replaceCustomFragments, isMinifiedCodeSafe } from './lib/fragments.js';
 
 /** @import { ProcessedOptions } from './lib/options.js' */
@@ -1422,9 +1422,10 @@ async function minifyHTML(value, options, partialMarkup) {
     let tail = '';
     let holdsCommentStart = false;
     for (const record of records) {
-      const isUsable = record.key !== null && RE_START_TAG.test(buffer[record.start] ?? '') && RE_END_TAG.test(buffer[record.end] ?? '');
       const content = recordContentOf(record);
       const isStyle = record.kind === 'style';
+      const isUsable = record.key !== null && RE_START_TAG.test(buffer[record.start] ?? '') && RE_END_TAG.test(buffer[record.end] ?? '') &&
+        (isStyle || !holdsHashbang(content));
       if (run && isUsable && recordPrev && followsAlike(recordPrev, record) &&
           (isStyle ? canStyleSheetsJoin(tail, content) : canScriptFollow(holdsCommentStart, content))) {
         run.records.push(record);
