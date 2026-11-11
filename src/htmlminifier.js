@@ -1791,6 +1791,8 @@ async function minifyHTML(value, options, partialMarkup) {
     }
     // Right before an element that doesn’t render, the text’s own pass has
     // weighed both sides already
+    //
+    // @@ Spare a pending gap, too (`charsIndex === transparentGapIndex`): 3+ empties lose a space
     if (charsIndex === buffer.length - 1 && inlineElementsTransparent.has(nextTag)) {
       return;
     }
