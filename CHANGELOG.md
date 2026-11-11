@@ -4,10 +4,11 @@ As of version 5.0.0, all notable changes to HTML Minifier (HM) are documented in
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [5.0.4] - 2026-11-11
 
 ### Fixed
 
+* Fixed `collapseWhitespace` taking quadratic time on deeply nested markup, as each end tag walked back over all those before it (e.g., 6,400 nested `div` elements took 1.5 s rather than 7 ms)
 * Fixed `mergeScripts` joining scripts on one line after a last line holding `<!--` or `-->`, which browsers read as starting a comment, so that the next script didn’t run (e.g., `a()\n<!--b-->` before `c()`)
 * Fixed `mergeScripts` merging a script holding `<!--` with one holding `<script`, which browsers then didn’t end at `</script>`, so that the rest of the document became script text (e.g., `a="<!--"` before `b="<script>"`)
 * Fixed `mergeScripts` joining a script that starts with `-->` on the line before it, where browsers no longer read it as a comment, which broke the merged script (e.g., `a()` before `-->b`)
@@ -17,6 +18,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 * Fixed `collapseAttributeWhitespace` trimming the `encoding` of `annotation-xml` elements, which browsers match as written, so that the element came to hold HTML rather than MathML (e.g., `encoding=" text/html "`)
 * Fixed `collapseWhitespace` removing spaces around `marquee` elements, which browsers render as inline blocks (e.g., `a <marquee>b</marquee> c`)
 * Fixed `removeEmptyElements` with `removeEmptyAttributes` keeping empty elements whose only reason to stay was an empty `id` that then got removed (e.g., `<div id=""></div>` became `<div></div>`)
+* Fixed `removeUnusedCSS` keeping rules for elements whose names match only where non-ASCII letters are lowercased, which browsers don’t do (e.g., `kbd` rules for `<\u212Abd>`, written with a Kelvin sign)
+
+### Changed
+
+* Made `sortAttributes` and `sortClassNames` faster by not running CSS, JavaScript, JSON, SVG, and URL minification in their analysis pass, which only counts attributes and classes
+* Made `removeUnusedCSS` faster at collecting the classes and IDs a document uses
+* Made each `minify` call faster by reusing attribute and `ignoreCustomFragments` patterns across calls
+* Documented how SWC compares to Terser for JavaScript minification
 
 ## [5.0.3] - 2026-11-10
 

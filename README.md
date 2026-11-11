@@ -409,7 +409,7 @@ const result = await minify(html, {
 **Available engines:**
 
 * `terser` (default): The standard JavaScript minifier with excellent compression
-* [`swc`](https://swc.rs/): Rust-based minifier multiple times faster than Terser (requires separate installation)
+* [`swc`](https://swc.rs/): Rust-based minifier around ten times faster than Terser, with output of about the same size (requires separate installation)
 
 The engine also decides how work is scheduled: SWC minifies a document’s script bodies as one batch dispatched ahead of the parse, while Terser shares the thread the parse runs on.
 

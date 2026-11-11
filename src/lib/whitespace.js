@@ -18,6 +18,7 @@ import {
   formControlElementsEither,
   toEndTags
 } from './constants.js';
+import { isWhitespaceCode } from './utils.js';
 
 const RE_ANY_WS_NBSP = /[ \n\r\t\f\xA0]/;
 const RE_TAB_NBSP = /[\t\xA0]/;
@@ -53,10 +54,7 @@ function isWsOrNbsp(code) {
 /** @param {string} str */
 function isAllWhitespace(str) {
   for (let i = 0; i < str.length; i++) {
-    const code = str.charCodeAt(i);
-    if (!((code >= 9 && code <= 13) || code === 32 || code === 0xA0 || code === 0x1680 ||
-        (code >= 0x2000 && code <= 0x200A) || code === 0x2028 || code === 0x2029 ||
-        code === 0x202F || code === 0x205F || code === 0x3000 || code === 0xFEFF)) {
+    if (!isWhitespaceCode(str.charCodeAt(i))) {
       return false;
     }
   }

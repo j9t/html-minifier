@@ -133,6 +133,18 @@ describe('Fragments', () => {
       assert.strictEqual(replaceCustomFragments('<%x%> <A%x%a>', prepare([/<a%[\s\S]*?%a>/]), marker), '<%x%> <A%x%a>');
     });
 
+    test('Reuses prepared fragments across scans, which leave no state behind', () => {
+      const pattern = /\{\{[\s\S]*?\}\}|<%[\s\S]*?%>/;
+      assert.strictEqual(toFragment(pattern), toFragment(new RegExp(pattern.source)));
+      assert.notStrictEqual(toFragment(pattern), toFragment(new RegExp(pattern.source, 'i')));
+
+      // A scan that stops early, as at a fragment that runs to the end, must not offset the next
+      for (const input of ['a {{b}} c <%d', '{{e}}', 'f <%g%>']) {
+        const expected = input.replace(/\s*(?:\{\{[\s\S]*?\}\}|<%[\s\S]*?%>)\s*/g, match => JSON.stringify([match]));
+        assert.strictEqual(replaceCustomFragments(input, [toFragment(pattern)], marker), expected, input);
+      }
+    });
+
     test('Gives up on a pattern run as a regex where its closing literal is nowhere ahead', () => {
       assert.strictEqual(toFragment(/<\?(?:php[\t\n\r ]|=|\$|xml(?:-stylesheet)?(?![\w-])|\s)[\s\S]*?\?>/i).close, '?>');
       assert.strictEqual(toFragment(/a|<%[\s\S]*?%>/).close, null, 'A match of `a` ends anywhere');

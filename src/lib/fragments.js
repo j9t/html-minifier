@@ -10,6 +10,8 @@
  * one per pattern, so each keeps its own flags.
  */
 
+import { LRU } from './utils.js';
+
 const RE_WHITESPACE = /\s/;
 const RE_NAME_CHAR = /[\w$-]/;
 
@@ -149,22 +151,29 @@ function toClosingLiteral(pattern) {
   return close;
 }
 
+// Prepared fragments outlive the call, as options mostly repeat their patterns; a scan
+// only ever runs synchronously, so the `lastIndex` of their regexes is never shared
+const fragmentCache = new LRU(100);
+
 /**
  * Prepare a fragment pattern for matching, by scanning where the shape allows it
  * @param {RegExp} pattern
  * @returns {DelimitedFragment | PatternFragment}
  */
 function toFragment(pattern) {
-  const delimited = toDelimitedFragment(pattern);
-  if (delimited) return delimited;
+  const key = pattern.flags + '/' + pattern.source;
+  const cached = /** @type {DelimitedFragment | PatternFragment | undefined} */ (fragmentCache.get(key));
+  if (cached) return cached;
 
   // `g` and `y` are ours to set, the rest belong to the pattern
   const flags = pattern.flags.replace(/[gy]/g, '');
-  return {
+  const fragment = toDelimitedFragment(pattern) ?? {
     search: new RegExp(pattern.source, flags + 'g'),
     anchored: new RegExp(pattern.source, flags + 'y'),
     close: toClosingLiteral(pattern)
   };
+  fragmentCache.set(key, fragment);
+  return fragment;
 }
 
 /**

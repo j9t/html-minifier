@@ -946,6 +946,15 @@ function describeQuantifierRisk(pattern) {
     : null;
 }
 
+// The characters `\s` matches, by code: tab through carriage return, space, and the
+// Unicode whitespace and line terminators
+/** @param {number} code */
+function isWhitespaceCode(code) {
+  return (code >= 9 && code <= 13) || code === 32 || code === 0xA0 || code === 0x1680 ||
+    (code >= 0x2000 && code <= 0x200A) || code === 0x2028 || code === 0x2029 ||
+    code === 0x202F || code === 0x205F || code === 0x3000 || code === 0xFEFF;
+}
+
 /**
  * Find the index of the `>` that closes an opening tag, correctly skipping
  * over quoted attribute values (which may contain `>`).
@@ -1024,6 +1033,7 @@ export {
   identity,
   isQuirksDoctype,
   isThenable,
+  isWhitespaceCode,
   lowercase,
   paramCase,
   replaceAsync,

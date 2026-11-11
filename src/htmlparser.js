@@ -5,7 +5,7 @@
  * http://erik.eae.net/simplehtmlparser/simplehtmlparser.js
  */
 
-import { isThenable, isQuirksDoctype, embedSource, findTagEnd } from './lib/utils.js';
+import { isThenable, isQuirksDoctype, isWhitespaceCode, embedSource, findTagEnd } from './lib/utils.js';
 import { endlessRawTextElements, escapableRawTextElements, formattingElements, genericRawTextElements, processingInstructionTag, RE_HTML_ENCODING, RE_WS_ONLY } from './lib/constants.js';
 
 /** @import { HTMLAttribute } from './lib/attributes.js' */
@@ -172,13 +172,6 @@ function scanAsciiTagName(html, start) {
   }
 }
 
-// The characters `\s` matches, by code: Tab through carriage return, space, and the
-// Unicode whitespace and line terminators
-const isWhitespaceCode = (/** @type {number} */ code) =>
-  (code >= 9 && code <= 13) || code === 32 || code === 0xA0 || code === 0x1680 ||
-  (code >= 0x2000 && code <= 0x200A) || code === 0x2028 || code === 0x2029 ||
-  code === 0x202F || code === 0x205F || code === 0x3000 || code === 0xFEFF;
-
 /**
  * @param {string} text - The input the tag stands in
  * @param {number} nameEnd - Position right after the tag name
@@ -269,9 +262,6 @@ function findScriptEnd(text) {
   return null;
 }
 
-// Cache for compiled attribute regexes per handler configuration
-const attrRegexCache = new WeakMap();
-
 /** @param {HTMLParserHandler} handler */
 function buildAttrRegex(handler) {
   const unquotedValue = handler.continueOnParseError ? singleAttrValueLenientUnquoted : singleAttrValues[2];
@@ -302,26 +292,32 @@ function buildAttrRegex(handler) {
   return new RegExp('^\\s*' + pattern);
 }
 
-/** @param {HTMLParserHandler} handler */
-function getAttrRegexForHandler(handler) {
-  const cached = attrRegexCache.get(handler);
-  if (cached) return cached;
-  const compiled = buildAttrRegex(handler);
-  attrRegexCache.set(handler, compiled);
-  return compiled;
-}
+// Compiled attribute regexes, the sticky one (`y`) for matching at a position in the whole
+// input: By handler where it holds custom patterns, else by the flags they depend on, as
+// a handler lasts one parse only
+/** @type {WeakMap<HTMLParserHandler, {attribute: RegExp, attributeY: RegExp}>} */
+const attrRegexCache = new WeakMap();
+/** @type {Map<number, {attribute: RegExp, attributeY: RegExp}>} */
+const attrRegexPlainCache = new Map();
 
-// Cache for sticky attribute regexes (`y` flag for position-based matching on full string)
-const attrRegexStickyCache = new WeakMap();
+/** @param {unknown} value */
+const isEmptyOption = value => !value || (Array.isArray(value) && !value.length);
 
 /** @param {HTMLParserHandler} handler */
-function getAttrRegexStickyForHandler(handler) {
-  const cached = attrRegexStickyCache.get(handler);
+function getAttrRegexes(handler) {
+  const plain = isEmptyOption(handler.customAttrAssign) && isEmptyOption(handler.customAttrSurround);
+  // An empty `customAttrSurround` still shapes the pattern, if not what it matches
+  const key = (handler.continueOnParseError ? 1 : 0) + (handler.customAttrSurround ? 2 : 0);
+  const cached = plain ? attrRegexPlainCache.get(key) : attrRegexCache.get(handler);
   if (cached) return cached;
-  const nonSticky = getAttrRegexForHandler(handler);
-  // Derive sticky version: Remove `^` anchor, add `y` flag
-  const compiled = new RegExp(nonSticky.source.slice(1), 'y');
-  attrRegexStickyCache.set(handler, compiled);
+  const attribute = buildAttrRegex(handler);
+  // Without the `^` anchor, as stickiness anchors it
+  const compiled = { attribute, attributeY: new RegExp(attribute.source.slice(1), 'y') };
+  if (plain) {
+    attrRegexPlainCache.set(key, compiled);
+  } else {
+    attrRegexCache.set(handler, compiled);
+  }
   return compiled;
 }
 
@@ -377,8 +373,7 @@ export class HTMLParser {
     // Lowercase counterpart of `lastTag`, kept in sync to avoid per-iteration lowercasing
     /** @type {string} */
     let lastTagLower = '';
-    const attribute = getAttrRegexForHandler(handler);
-    const attributeY = getAttrRegexStickyForHandler(handler);
+    const { attribute, attributeY } = getAttrRegexes(handler);
     // Index of the attribute name in a match, after each `customAttrSurround` pattern’s captures
     const baseIndex = 1 + (handler.customAttrSurround ? handler.customAttrSurround.length * NCP : 0);
     /** @type {string | undefined} */
@@ -1056,7 +1051,7 @@ export class HTMLParser {
           break;
         }
 
-        const attrLen = attr[0].length;
+        const attrLen = /** @type {string} */ (attr[0]).length;
         currentPos += attrLen;
         consumed += attrLen;
         match.attrs.push(attr);

@@ -246,8 +246,8 @@ async function testQuoteCharacter() {
   await minify(html, { quoteCharacter: '"' });
   await minify(html, { quoteCharacter: "'" });
 
-  // Note: TypeScript correctly restricts `quoteCharacter` to only “"” or “'”
-  // Any other value would be a type error
+  // Note: TypeScript correctly restricts `quoteCharacter` to only “"” or “'”;
+  // any other value would be a type error
 }
 
 // `HTMLAttribute` type

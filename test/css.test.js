@@ -589,6 +589,51 @@ describe('CSS', () => {
       );
     });
 
+    test('Finds style sheets, scripts, and elements in any ASCII case', () => {
+      // A length-changing character must not shift where the bodies are found
+      for (const prefix of ['', '<p title="İ">x</p>']) {
+        const elements = new Set();
+        const used = collectUsedSymbols(prefix + '<STYLE>.sheet{}</STYLE><Script>scripted</Script><DIV class="a"></DIV><Kbd></Kbd>', true, undefined, elements);
+
+        assert.ok(!used.has('sheet'), 'Style sheet contents should not count as used');
+        assert.ok(used.has('scripted') && used.has('a'));
+        assert.ok(elements.has('div') && elements.has('style') && elements.has('script'));
+        // The Kelvin sign lowercases to `k`, but browsers fold ASCII only
+        assert.ok(!elements.has('kbd'));
+      }
+    });
+
+    test('Collects identifiers and whitespace-separated tokens as their patterns describe', () => {
+      // Random text over the characters that start, continue, end, and separate symbols,
+      // checked against the patterns the collection follows
+      let seed = 1;
+      const random = () => {
+        seed = (seed * 1103515245 + 12345) % 2147483648;
+        return seed / 2147483648;
+      };
+      const alphabet = [...'aZq_-09.:#/ ', '\t', '\n', '\v', '\f', '\r', '\xA0', ' ', ' ', ' ', ' ', '　', '﻿', 'é'];
+      const textOf = (/** @type {string[]} */ characters) =>
+        Array.from({ length: 1 + Math.floor(random() * 24) }, () => characters[Math.floor(random() * characters.length)]).join('');
+      const identifiers = (/** @type {string} */ text) => text.match(/--[\w-]*|-?[A-Za-z_][\w-]*/g) ?? [];
+      const tokens = (/** @type {string} */ text) => text.split(/\s+/).filter(Boolean);
+
+      for (let run = 0; run < 300; run++) {
+        const data = textOf(alphabet);
+        const classes = textOf(alphabet);
+        const script = textOf([...alphabet, '\'', '"', '`', '\\']);
+        const elements = new Set();
+        const used = collectUsedSymbols(`<p data-x="${data}" class="${classes}"></p><script>${script}</script>`, true, undefined, elements);
+
+        const literals = [...script.matchAll(/'((?:[^'\\\n]|\\.)*)'|"((?:[^"\\\n]|\\.)*)"|`((?:[^`\\]|\\.)*)`/g)]
+          .flatMap(literal => tokens(literal[1] ?? literal[2] ?? literal[3] ?? ''));
+        const expected = new Set([...identifiers(data), ...tokens(data), ...tokens(classes), ...identifiers(script), ...literals]);
+        const expectedElements = new Set(['html', 'head', 'body', 'p', 'script', ...identifiers(script).map(name => name.toLowerCase())]);
+        const context = JSON.stringify({ data, classes, script });
+        assert.deepStrictEqual([...used].sort(), [...expected].sort(), context);
+        assert.deepStrictEqual([...elements].sort(), [...expectedElements].sort(), context);
+      }
+    });
+
     test('Stops stripping a stylesheet at its own end tag, however malformed', async () => {
       // A missed end tag would let the body run on to the next one, swallowing markup
       const input = '<style>.a{color:red}</style bar><p class="a b"></p><style>.b{color:red}</style>';
