@@ -34,7 +34,7 @@ Use `npx html-minifier --help` to check all available options:
 
 | Option | Description | Example |
 | --- | --- | --- |
-| `--zero`, `-z` | Minify all HTML files in the current folder and its subfolders in place (except node_modules), using comprehensive settings (standalone—the flag is ignored when combined with other options) | `npx html-minifier --zero` |
+| `--zero`, `-z` | Minify all HTML files in the current folder and its subfolders in place (except node_modules), using comprehensive settings (standalone or with `--dry` to preview—the flag is ignored when combined with other options) | `npx html-minifier --zero` |
 | `--input-dir <dir>`, `-I <dir>` | Specify an input directory | `--input-dir=src` |
 | `--ignore-dir <patterns>`, `-X <patterns>` | Exclude directories—relative to input directory—from processing (comma-separated, overrides config file setting) | `--ignore-dir=libs`, `--ignore-dir=libs,vendor,node_modules` |
 | `--output-dir <dir>`, `-O <dir>` | Specify an output directory | `--output-dir=dist` |
@@ -45,7 +45,7 @@ Use `npx html-minifier --help` to check all available options:
 | `--preset <name>`, `-p <name>` | Use a preset configuration (conservative or comprehensive) | `--preset=conservative` |
 | `--config-file <file>`, `-c <file>` | Use a configuration file (defaults to html-minifier.config.json in the working directory, if present) | `--config-file=path/to/config.json` |
 | `--verbose`, `-v` | Show detailed processing information (active options, worker thread count, file statistics, and minifier warnings) | `npx html-minifier --input-dir=src --output-dir=dist --verbose --collapse-whitespace` |
-| `--dry`, `-d` | Dry run: Process and report statistics without writing output | `npx html-minifier input.html --dry --collapse-whitespace` |
+| `--dry`, `-d` | Dry run: Process and report statistics without writing output (without input, previews `--zero`) | `npx html-minifier input.html --dry --collapse-whitespace` |
 
 ### Configuration file
 

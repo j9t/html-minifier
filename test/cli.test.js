@@ -1272,11 +1272,80 @@ describe('CLI', { concurrency: os.availableParallelism() }, () => {
       assert.strictEqual(stdout.toString(), '<p>a</p>');
     });
 
+    test('Says how to end input when reading from a terminal', async () => {
+      const { stderr } = await spawnAsync('node', ['--import', asTerminal, cliPath, '--collapse-whitespace'], { input: '<p>a</p>' });
+
+      assert.ok(stderr.toString().includes('Reading HTML from STDIN'));
+    });
+
     test('Keeps reading piped input', async () => {
-      const { stdout, status } = await spawnCli([], { input: '<p>a</p>' });
+      const { stdout, stderr, status } = await spawnCli(['--collapse-whitespace'], { input: '<p>a</p>' });
 
       assert.strictEqual(status, 0);
       assert.strictEqual(stdout.toString(), '<p>a</p>');
+      assert.strictEqual(stderr.toString(), '');
+    });
+
+    test('Previews `--zero` for `--dry` in a terminal', async () => {
+      const tempDir = path.resolve(dirSandbox(), 'tmp/dry-terminal');
+      await fs.promises.mkdir(tempDir, { recursive: true });
+      await fs.promises.copyFile(path.resolve(dirSandbox(), 'default.html'), path.resolve(tempDir, 'default.html'));
+      const original = await fs.promises.readFile(path.resolve(tempDir, 'default.html'), 'utf-8');
+
+      const { stderr, status } = await spawnAsync('node', ['--import', asTerminal, cliPath, '--dry'], { cwd: tempDir });
+
+      assert.strictEqual(status, 0);
+      assert.ok(stderr.toString().includes('[DRY RUN] Would process directory'));
+      assert.ok(stderr.toString().includes('Using preset: comprehensive'));
+      assert.ok(stderr.toString().includes('Total:'));
+      assert.strictEqual(await fs.promises.readFile(path.resolve(tempDir, 'default.html'), 'utf-8'), original);
+    });
+
+    test('Keeps reading piped input for `--dry`', async () => {
+      const { stdout, stderr, status } = await spawnCli(['--dry'], { input: '<p>a</p>' });
+
+      assert.strictEqual(status, 0);
+      assert.strictEqual(stdout.toString(), '');
+      assert.ok(stderr.toString().includes('[DRY RUN] Would minify: STDIN'));
+    });
+  });
+
+  describe('Without minification options', () => {
+    test('Suggests a preset for `--dry`', async () => {
+      const { stderr } = await spawnCli(['--dry'], { input: '<p>a</p>' });
+
+      assert.ok(stderr.toString().includes('No minification options set'));
+      assert.ok(stderr.toString().includes('`--preset=comprehensive`'));
+    });
+
+    test('Suggests a preset for `--verbose`', async () => {
+      const { stderr } = await spawnCli(['--verbose'], { input: '<p>a</p>' });
+
+      assert.ok(stderr.toString().includes('No minification options set'));
+    });
+
+    test('Does not suggest a preset with options set', async () => {
+      const { stderr: withOption } = await spawnCli(['--dry', '--collapse-whitespace'], { input: '<p>a</p>' });
+      const { stderr: withPreset } = await spawnCli(['--dry', '--preset=conservative'], { input: '<p>a</p>' });
+
+      assert.ok(!withOption.toString().includes('No minification options set'));
+      assert.ok(!withPreset.toString().includes('No minification options set'));
+    });
+
+    test('Does not suggest a preset with options from a config file', async () => {
+      const configPath = path.resolve(dirSandbox(), 'tmp/no-options.json');
+      await fs.promises.mkdir(path.dirname(configPath), { recursive: true });
+      await fs.promises.writeFile(configPath, JSON.stringify({ collapseWhitespace: true }));
+
+      const { stderr } = await spawnCli(['--dry', `--config-file=${configPath}`], { input: '<p>a</p>' });
+
+      assert.ok(!stderr.toString().includes('No minification options set'));
+    });
+
+    test('Does not suggest a preset without `--dry` or `--verbose`', async () => {
+      const { stderr } = await spawnCli([], { input: '<p>a</p>' });
+
+      assert.strictEqual(stderr.toString(), '');
     });
   });
 
@@ -1913,6 +1982,30 @@ describe('CLI', { concurrency: os.availableParallelism() }, () => {
     assert.ok(result.stderr.toString().includes('in place'));
     assert.ok(result.stderr.toString().includes('version control'));
     assert.ok(result.stderr.toString().includes('[y/N]'));
+  });
+
+  test('Previews `--zero` with `--dry` without prompting or writing', async () => {
+    const tempDir = path.resolve(dirSandbox(), 'tmp/zero-dry');
+    await fs.promises.mkdir(tempDir, { recursive: true });
+    await fs.promises.copyFile(
+      path.resolve(dirSandbox(), 'default.html'),
+      path.resolve(tempDir, 'default.html')
+    );
+    const original = await fs.promises.readFile(path.resolve(tempDir, 'default.html'), 'utf-8');
+
+    for (const args of [['--zero', '--dry'], ['-d', '-z']]) {
+      const result = await spawnCli(args, { cwd: tempDir });
+      const stderr = result.stderr.toString();
+
+      assert.strictEqual(result.status, 0);
+      assert.ok(!stderr.includes('[y/N]'));
+      assert.ok(!stderr.includes('`--zero` was ignored'));
+      assert.ok(stderr.includes('--preset=comprehensive --dry'));
+      assert.ok(stderr.includes('[DRY RUN] Would process directory'));
+      assert.ok(/default\.html: [\d,]+ → [\d,]+ bytes/.test(stderr));
+      assert.ok(stderr.includes('Total:'));
+      assert.strictEqual(await fs.promises.readFile(path.resolve(tempDir, 'default.html'), 'utf-8'), original);
+    }
   });
 
   // Boolean flag negation tests
