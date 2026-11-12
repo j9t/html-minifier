@@ -224,7 +224,7 @@ Object.entries(optionDefinitions).forEach(function ([key, { description, descrip
 program.option('-i --input <file>', 'Specify input file (alternative to positional argument; pair with `--output` for output)');
 program.option('-o --output <file>', 'Specify output file (reads from `--input` file argument or STDIN; outputs to STDOUT if not specified)');
 program.option('-v --verbose', 'Show detailed processing information (active options, worker thread count, file statistics, and minifier warnings)');
-program.option('-d --dry', 'Dry run: Process and report statistics without writing output');
+program.option('-d --dry', 'Dry run: Process and report statistics without writing output (without input, previews `--zero`)');
 program.addHelpText('after', '\nBoolean options support a `--no-<flag>` form to disable them, overriding a preset or config file (e.g., `--preset=comprehensive --no-collapse-whitespace`).\n\nHTML Minifier documentation: https://meiert.com/hm');
 
 // Lazy import wrapper for HM
@@ -351,7 +351,7 @@ function normalizeConfig(config) {
 
 /** @type {Record<string, any>} */
 let config = {};
-program.option('-z, --zero', 'Minify all HTML files in the current folder and its subfolders in place (except node_modules), using comprehensive settings (standalone—the flag is ignored when combined with other options)');
+program.option('-z, --zero', 'Minify all HTML files in the current folder and its subfolders in place (except node_modules), using comprehensive settings (standalone or with `--dry` to preview—the flag is ignored when combined with other options)');
 program.option('-I --input-dir <dir>', 'Specify an input directory');
 program.option('-X --ignore-dir <patterns>', 'Exclude directories—relative to input directory—from processing (comma-separated, overrides config file setting)');
 program.option('-O --output-dir <dir>', 'Specify an output directory');
@@ -393,23 +393,28 @@ program.helpOption('-h, --help', 'Display help for command');
     filesProvided = true;
   }
 
-  // Handle zero config mode (standalone in-place minification of the current folder)
-  if (programOptions.zero) {
-    const hasOtherArgs = process.argv.slice(2).some(arg => arg !== '--zero' && arg !== '-z');
-    if (hasOtherArgs) {
-      console.error('Note: `--zero` was ignored—it can only be used on its own, to minify the current folder at comprehensive settings.');
-    } else {
-      const cwd = process.cwd();
-      const [execPath = '', scriptPath = ''] = process.argv;
-      const commandName = process.env.npm_command === 'exec'
-        ? 'npx html-minifier'
-        : scriptPath.endsWith('.js')
-          ? `${path.basename(execPath)} ${scriptPath}`
-          : path.basename(scriptPath);
+  // Handle zero config mode (standalone in-place minification of the current folder),
+  // which `--dry` on its own in a terminal previews, as it would otherwise wait for input
+  const isZeroOnly = process.argv.slice(2).every(arg => ['--zero', '-z', '--dry', '-d'].includes(arg));
+  if (programOptions.zero && !isZeroOnly) {
+    console.error('Note: `--zero` was ignored—it can only be used on its own (or with `--dry`), to minify the current folder at comprehensive settings.');
+  } else if (isZeroOnly && (programOptions.zero || (programOptions.dry && process.stdin.isTTY))) {
+    const isDry = Boolean(programOptions.dry);
+    const cwd = process.cwd();
+    const [execPath = '', scriptPath = ''] = process.argv;
+    const commandName = process.env.npm_command === 'exec'
+      ? 'npx html-minifier'
+      : scriptPath.endsWith('.js')
+        ? `${path.basename(execPath)} ${scriptPath}`
+        : path.basename(scriptPath);
+    const commandEquivalent = `Equivalent to: ${commandName} --input-dir=. --output-dir=. --ignore-dir=node_modules --preset=comprehensive${isDry ? ' --dry' : ''}`;
 
+    if (isDry) {
+      console.error(commandEquivalent);
+    } else {
       process.stderr.write(
         `${MARK_WARNING}Zero-config mode minifies all HTML files in the current folder and its subfolders (${cwd}) in place, using comprehensive settings. If you want to compare results and be able to revert, do this under version control.${MARK_RESET}\n` +
-        `Equivalent to: ${commandName} --input-dir=. --output-dir=. --ignore-dir=node_modules --preset=comprehensive\n\n` +
+        `${commandEquivalent}\n\n` +
         `Do you want to continue? [y/N] `
       );
 
@@ -426,16 +431,26 @@ program.helpOption('-h, --help', 'Display help for command');
         process.stderr.write(`${MARK_ERROR}In-place minification aborted.${MARK_RESET}\n`);
         process.exit(0);
       }
-
-      programOptions.preset = 'comprehensive';
-
-      const inputDirResolved = await fs.promises.realpath(cwd).catch(() => cwd);
-      const { stats, failed } = await processDirectory(cwd, cwd, EXTENSIONS_DEFAULT, false, false, undefined, Boolean(process.stderr.isTTY), ['node_modules'], inputDirResolved);
-      reportProcessed(stats.length);
-      reportFailed(failed);
-
-      process.exit();
     }
+
+    programOptions.preset = 'comprehensive';
+
+    if (isDry) {
+      getActiveOptionsDisplay(createOptions());
+      console.error(`[DRY RUN] Would process directory: ${cwd} → ${cwd}`);
+    }
+
+    const inputDirResolved = await fs.promises.realpath(cwd).catch(() => cwd);
+    const { stats, failed } = await processDirectory(cwd, cwd, EXTENSIONS_DEFAULT, isDry, isDry, undefined, Boolean(process.stderr.isTTY) && !isDry, ['node_modules'], inputDirResolved);
+    if (isDry) {
+      reportTotal(stats);
+      await printCacheStats();
+    } else {
+      reportProcessed(stats.length);
+    }
+    reportFailed(failed);
+
+    process.exit();
   }
 
   // Load and normalize config if `--config-file` was specified; otherwise look
@@ -527,6 +542,9 @@ program.helpOption('-h, --help', 'Display help for command');
     if (activeOptions.length > 0) {
       console.error('CLI options: ' + activeOptions.join(', '));
     }
+    if (!presetName && Object.keys(minifierOptions).every(k => k === 'log')) {
+      console.error('Note: No minification options set—for a start, try `--preset=comprehensive`.');
+    }
   }
 
   /**
@@ -559,6 +577,15 @@ program.helpOption('-h, --help', 'Display help for command');
    */
   function reportFileStats(label, stats) {
     console.error(`  ${MARK_SUCCESS}✓${MARK_RESET} ${label}: ${formatSizeStats(stats)}`);
+  }
+
+  /** @param {{ originalSize: number, minifiedSize: number }[]} stats */
+  function reportTotal(stats) {
+    if (!stats.length) return;
+    const totalOriginal = stats.reduce((sum, s) => sum + s.originalSize, 0);
+    const totalMinified = stats.reduce((sum, s) => sum + s.minifiedSize, 0);
+    console.error('---');
+    console.error(`Total: ${formatSizeStats(calculateSizeStats(totalOriginal, totalMinified))}`);
   }
 
   /** @param {number} count */
@@ -1092,11 +1119,8 @@ program.helpOption('-h, --help', 'Display help for command');
         reportProcessed(stats.length);
       }
 
-      if (isVerbose && stats.length > 0) {
-        const totalOriginal = stats.reduce((sum, s) => sum + s.originalSize, 0);
-        const totalMinified = stats.reduce((sum, s) => sum + s.minifiedSize, 0);
-        console.error('---');
-        console.error(`Total: ${formatSizeStats(calculateSizeStats(totalOriginal, totalMinified))}`);
+      if (isVerbose) {
+        reportTotal(stats);
       }
 
       if (isVerbose) {
@@ -1140,7 +1164,10 @@ program.helpOption('-h, --help', 'Display help for command');
     await reportAndWrite(capturedFiles.join(', '), originals.join(''), outputs.join(''));
     process.exit(0);
   } else { // Minifying input coming from STDIN
-    if (process.stdin.isTTY && process.argv.length === 2) program.help();
+    if (process.stdin.isTTY) {
+      if (process.argv.length === 2) program.help();
+      console.error(`Reading HTML from STDIN—end with ${process.platform === 'win32' ? 'Ctrl+Z, Enter' : 'Ctrl+D'}. To minify files instead, pass them as arguments, specify input and output directories (\`--input-dir\`/\`--output-dir\`), or use zero-config mode (\`--zero\`).`);
+    }
 
     content = '';
     process.stdin.setEncoding('utf8');

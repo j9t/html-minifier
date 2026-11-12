@@ -4,6 +4,17 @@ As of version 5.0.0, all notable changes to HTML Minifier (HM) are documented in
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+* Added a preview of zero-config mode with `--zero --dry`, or `--dry` without input (which used to wait silently for input)
+
+### Changed
+
+* Made the CLI say how to end input, and how to minify files instead, when it reads from STDIN in a terminal
+* Made `--dry` and `--verbose` suggest `--preset=comprehensive` when no minification options are set
+
 ## [5.1.0] - 2026-11-11
 
 ### Fixed
