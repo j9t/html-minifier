@@ -7090,6 +7090,33 @@ describe('HTML', () => {
     assert.strictEqual(await minify(input, { collapseAttributeWhitespace: true, minifyJS: true }), '<button onclick=\'alert("→     ←")\'>x</button>');
   });
 
+  test('Collapses attribute whitespace without adding any around custom fragments', async () => {
+    const options = { collapseAttributeWhitespace: true };
+    for (const input of [
+      '<a href="/invoices/<?= $inv->id ?>?tab=lines">x</a>',
+      '<a data-path="/i/<?= $id ?>?t=1">x</a>',
+      '<a data-x="a<?= $a ?><?= $b ?>b">x</a>',
+      '<a data-x="a<% x %>b">x</a>',
+      '<a style="color:<?= $c ?>">x</a>'
+    ]) {
+      assert.strictEqual(await minify(input, options), input);
+      assert.strictEqual(await minify(input, { ...options, collapseWhitespace: true }), input);
+      assert.strictEqual(await minify(input, { ...options, collapseWhitespace: true, trimCustomFragments: true }), input);
+    }
+
+    // Whitespace written next to a fragment stays (collapsed with `collapseWhitespace`)
+    let input = '<a data-x="a  <?= $a ?>\n\tb">x</a>';
+    assert.strictEqual(await minify(input, options), input);
+    assert.strictEqual(await minify(input, { ...options, collapseWhitespace: true }), '<a data-x="a <?= $a ?> b">x</a>');
+
+    // Elsewhere, whitespace still collapses
+    input = '<a data-x="  a\t\tb <?= $a ?>c   d  ">x</a>';
+    assert.strictEqual(await minify(input, options), '<a data-x="a b <?= $a ?>c d">x</a>');
+
+    // The comprehensive preset, as reported
+    assert.strictEqual(await minify('<a href="/invoices/<?= $inv->id ?>?tab=lines">x</a>', { preset: 'comprehensive' }), '<a href="/invoices/<?= $inv->id ?>?tab=lines">x</a>');
+  });
+
   test('Decodes entity characters', async () => {
     let input, output;
 
