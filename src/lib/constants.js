@@ -52,6 +52,7 @@ const RE_DOCTYPE = /^<!doctype[ \n\r\t\f]*([^ \n\r\t\f>]+)[ \n\r\t\f]*(?:public[
 const RE_DOCTYPE_SEGMENT = /("[^"]*(?:"|$)|'[^']*(?:'|$))|[^"']+/g;
 const RE_ATTR_WS_CHECK = /[ \n\r\t\f]/;
 const RE_ATTR_WS_COLLAPSE = /[ \n\r\t\f]+/g;
+const RE_TABS_ONLY = /^\t+$/;
 const RE_WS_CHAR = /\s/;
 const RE_STYLE_ELEMENT = /<style[\s/>]/i;
 const RE_STYLE_TAG = /<\/?style/gi;
@@ -460,6 +461,7 @@ export {
   RE_DOCTYPE_SEGMENT,
   RE_ATTR_WS_CHECK,
   RE_ATTR_WS_COLLAPSE,
+  RE_TABS_ONLY,
   RE_WS_CHAR,
   RE_STYLE_ELEMENT,
   RE_STYLE_TAG,

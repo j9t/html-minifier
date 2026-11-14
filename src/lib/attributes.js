@@ -11,6 +11,7 @@ import {
   RE_BASE_ELEMENT,
   RE_ATTR_WS_CHECK,
   RE_ATTR_WS_COLLAPSE,
+  RE_TABS_ONLY,
   RE_WS_CHAR,
   generalDefaults,
   tagDefaults,
@@ -751,11 +752,28 @@ const valueWhitespaceExemptElements = new Set(['button', 'data', 'input', 'optio
 
 /**
  * @param {string} value
+ * @param {string[]} [markers] - What custom fragment and `htmlmin:ignore` placeholders hold
  * @returns {string}
  */
-function collapseAttributeValue(value) {
+function collapseAttributeValue(value, markers = []) {
   // Fast path: Only process if whitespace exists (avoids regex overhead on clean values)
-  return RE_ATTR_WS_CHECK.test(value) ? trimWhitespace(value).replace(RE_ATTR_WS_COLLAPSE, ' ') : value;
+  if (!RE_ATTR_WS_CHECK.test(value)) {
+    return value;
+  }
+  value = trimWhitespace(value);
+  if (!markers.some(marker => value.indexOf(marker) !== -1)) {
+    return value.replace(RE_ATTR_WS_COLLAPSE, ' ');
+  }
+  // Placeholders come padded with a tab on each side, which restoring them drops; as spaces,
+  // they would stay, while other tabs (e.g., decoded ones) must become a space that stays
+  return value.replace(RE_ATTR_WS_COLLAPSE, (run, offset) => {
+    if (!RE_TABS_ONLY.test(run)) {
+      return ' ';
+    }
+    const paddingBefore = markers.some(marker => value.endsWith(marker, offset)) ? '\t' : '';
+    const paddingAfter = markers.some(marker => value.startsWith(marker, offset + run.length)) ? '\t' : '';
+    return run.length > paddingBefore.length + paddingAfter.length ? paddingBefore + ' ' + paddingAfter : run;
+  });
 }
 
 /**
@@ -791,7 +809,7 @@ function cleanAttributeValue(tag, attrName, attrValue, options, attrs, minifyHTM
   // with `collapseWhitespace`; an `annotation-xml` encoding is matched as written,
   // and with spaces taken out could make the element hold HTML
   if (options.collapseAttributeWhitespace && !collapseAttributeWhitespaceExempt.has(attrName) && !(attrName === 'value' && valueWhitespaceExemptElements.has(tag)) && !(attrName.toLowerCase() === 'encoding' && tag.toLowerCase() === 'annotation-xml') && !isEventAttr) {
-    attrValue = collapseAttributeValue(attrValue);
+    attrValue = collapseAttributeValue(attrValue, markers);
   }
 
   if (isEventAttr) {
