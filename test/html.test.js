@@ -7109,6 +7109,16 @@ describe('HTML', () => {
     assert.strictEqual(await minify(input, options), input);
     assert.strictEqual(await minify(input, { ...options, collapseWhitespace: true }), '<a data-x="a <?= $a ?> b">x</a>');
 
+    // Decoded whitespace next to a fragment stays, as one space
+    for (const [source, expected] of [
+      ['<a data-x="a&#9;<?= $a ?>b">x</a>', '<a data-x="a <?= $a ?>b">x</a>'],
+      ['<a data-x="a<?= $a ?>&#9;&#9;b">x</a>', '<a data-x="a<?= $a ?> b">x</a>'],
+      ['<a data-x="a<?= $a ?>&#9;<?= $b ?>b">x</a>', '<a data-x="a<?= $a ?> <?= $b ?>b">x</a>']
+    ]) {
+      assert.strictEqual(await minify(source, { ...options, decodeEntities: true }), expected);
+      assert.strictEqual(await minify(source, { ...options, decodeEntities: true, collapseWhitespace: true }), expected);
+    }
+
     // Elsewhere, whitespace still collapses
     input = '<a data-x="  a\t\tb <?= $a ?>c   d  ">x</a>';
     assert.strictEqual(await minify(input, options), '<a data-x="a b <?= $a ?>c d">x</a>');

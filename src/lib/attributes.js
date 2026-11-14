@@ -764,9 +764,16 @@ function collapseAttributeValue(value, markers = []) {
   if (!markers.some(marker => value.indexOf(marker) !== -1)) {
     return value.replace(RE_ATTR_WS_COLLAPSE, ' ');
   }
-  // Placeholders come padded with tabs, which restoring them drops; as spaces, they would stay
-  return value.replace(RE_ATTR_WS_COLLAPSE, (run, offset) =>
-    RE_TABS_ONLY.test(run) && markers.some(marker => value.startsWith(marker, offset + run.length) || value.endsWith(marker, offset)) ? run : ' ');
+  // Placeholders come padded with a tab on each side, which restoring them drops; as spaces,
+  // they would stay, while other tabs (e.g., decoded ones) must become a space that stays
+  return value.replace(RE_ATTR_WS_COLLAPSE, (run, offset) => {
+    if (!RE_TABS_ONLY.test(run)) {
+      return ' ';
+    }
+    const paddingBefore = markers.some(marker => value.endsWith(marker, offset)) ? '\t' : '';
+    const paddingAfter = markers.some(marker => value.startsWith(marker, offset + run.length)) ? '\t' : '';
+    return run.length > paddingBefore.length + paddingAfter.length ? paddingBefore + ' ' + paddingAfter : run;
+  });
 }
 
 /**
