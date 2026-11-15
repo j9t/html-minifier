@@ -10,8 +10,8 @@ import { minify } from '../src/htmlminifier.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-const fixturesDir = path.resolve(__dirname, 'fixtures');
-const cliPath = path.resolve(process.cwd(), 'cli.js');
+const dirFixtures = path.resolve(__dirname, 'fixtures');
+const pathCli = path.resolve(process.cwd(), 'cli.js');
 
 const sandbox = new AsyncLocalStorage();
 
@@ -35,7 +35,7 @@ const test = Object.assign((/** @type {any[]} */ ...args) => {
   return nodeTest(...args, async (/** @type {any} */ t) => {
     const dir = await fs.promises.realpath(await fs.promises.mkdtemp(path.join(os.tmpdir(), 'hm-cli-')));
     try {
-      await fs.promises.cp(fixturesDir, dir, { recursive: true });
+      await fs.promises.cp(dirFixtures, dir, { recursive: true });
       return await sandbox.run(dir, () => fn(t));
     } finally {
       await fs.promises.rm(dir, { recursive: true, force: true });
@@ -76,7 +76,7 @@ const spawnAsync = (command, args, { cwd = dirSandbox(), input } = {}) => new Pr
  * @param {string[]} args
  * @param {{ cwd?: string, input?: string }} [options]
  */
-const spawnCli = (args, options) => spawnAsync('node', [cliPath, ...args], options);
+const spawnCli = (args, options) => spawnAsync('node', [pathCli, ...args], options);
 
 const execCli = async (args = []) => {
   const { stdout, stderr } = await spawnCli(args);
@@ -885,7 +885,7 @@ describe('CLI', { concurrency: os.availableParallelism() }, () => {
   test('Handles EPIPE gracefully when piping to head', async () => {
     // The path goes in as `$1` rather than into the script, so the shell never parses it
     const command = 'node "$1" --collapse-whitespace < default.html | head -n1';
-    const { status, stderr } = await spawnAsync('sh', ['-c', command, 'sh', cliPath]);
+    const { status, stderr } = await spawnAsync('sh', ['-c', command, 'sh', pathCli]);
     // Exit code should be `0` and no noisy errors
     assert.strictEqual(status, 0);
     assert.strictEqual(stderr.toString().trim(), '');
@@ -1259,21 +1259,21 @@ describe('CLI', { concurrency: os.availableParallelism() }, () => {
     const asTerminal = 'data:text/javascript,process.stdin.isTTY=true';
 
     test('Shows the help in a terminal', async () => {
-      const { stdout, status } = await spawnAsync('node', ['--import', asTerminal, cliPath]);
+      const { stdout, status } = await spawnAsync('node', ['--import', asTerminal, pathCli]);
 
       assert.strictEqual(status, 0);
       assert.ok(stdout.toString().includes('HTML Minifier documentation: https://meiert.com/hm'));
     });
 
     test('Keeps reading from a terminal with options', async () => {
-      const { stdout, status } = await spawnAsync('node', ['--import', asTerminal, cliPath, '--collapse-whitespace'], { input: '<p>  a  </p>' });
+      const { stdout, status } = await spawnAsync('node', ['--import', asTerminal, pathCli, '--collapse-whitespace'], { input: '<p>  a  </p>' });
 
       assert.strictEqual(status, 0);
       assert.strictEqual(stdout.toString(), '<p>a</p>');
     });
 
     test('Says how to end input when reading from a terminal', async () => {
-      const { stderr } = await spawnAsync('node', ['--import', asTerminal, cliPath, '--collapse-whitespace'], { input: '<p>a</p>' });
+      const { stderr } = await spawnAsync('node', ['--import', asTerminal, pathCli, '--collapse-whitespace'], { input: '<p>a</p>' });
 
       assert.ok(stderr.toString().includes('Reading HTML from STDIN'));
     });
@@ -1287,18 +1287,18 @@ describe('CLI', { concurrency: os.availableParallelism() }, () => {
     });
 
     test('Previews `--zero` for `--dry` in a terminal', async () => {
-      const tempDir = path.resolve(dirSandbox(), 'tmp/dry-terminal');
-      await fs.promises.mkdir(tempDir, { recursive: true });
-      await fs.promises.copyFile(path.resolve(dirSandbox(), 'default.html'), path.resolve(tempDir, 'default.html'));
-      const original = await fs.promises.readFile(path.resolve(tempDir, 'default.html'), 'utf-8');
+      const dirTemp = path.resolve(dirSandbox(), 'tmp/dry-terminal');
+      await fs.promises.mkdir(dirTemp, { recursive: true });
+      await fs.promises.copyFile(path.resolve(dirSandbox(), 'default.html'), path.resolve(dirTemp, 'default.html'));
+      const original = await fs.promises.readFile(path.resolve(dirTemp, 'default.html'), 'utf-8');
 
-      const { stderr, status } = await spawnAsync('node', ['--import', asTerminal, cliPath, '--dry'], { cwd: tempDir });
+      const { stderr, status } = await spawnAsync('node', ['--import', asTerminal, pathCli, '--dry'], { cwd: dirTemp });
 
       assert.strictEqual(status, 0);
       assert.ok(stderr.toString().includes('[DRY RUN] Would process directory'));
       assert.ok(stderr.toString().includes('Using preset: comprehensive'));
       assert.ok(stderr.toString().includes('Total:'));
-      assert.strictEqual(await fs.promises.readFile(path.resolve(tempDir, 'default.html'), 'utf-8'), original);
+      assert.strictEqual(await fs.promises.readFile(path.resolve(dirTemp, 'default.html'), 'utf-8'), original);
     });
 
     test('Keeps reading piped input for `--dry`', async () => {
@@ -1426,7 +1426,7 @@ describe('CLI', { concurrency: os.availableParallelism() }, () => {
     // STDERR is a pipe here, so the CLI is told it is a terminal
     const { stderr, status } = await spawnAsync('node', [
       '--import', 'data:text/javascript,process.stderr.isTTY=true',
-      cliPath,
+      pathCli,
       '--input-dir=tmp',
       '--output-dir=tmp-out',
       '--collapse-whitespace'
@@ -1890,92 +1890,92 @@ describe('CLI', { concurrency: os.availableParallelism() }, () => {
   });
 
   test('Aborts `--zero` when confirmation is denied', async () => {
-    const tempDir = path.resolve(dirSandbox(), 'tmp/zero-abort');
-    await fs.promises.mkdir(tempDir, { recursive: true });
+    const dirTemp = path.resolve(dirSandbox(), 'tmp/zero-abort');
+    await fs.promises.mkdir(dirTemp, { recursive: true });
     await fs.promises.copyFile(
       path.resolve(dirSandbox(), 'default.html'),
-      path.resolve(tempDir, 'default.html')
+      path.resolve(dirTemp, 'default.html')
     );
-    const original = await fs.promises.readFile(path.resolve(tempDir, 'default.html'), 'utf-8');
+    const original = await fs.promises.readFile(path.resolve(dirTemp, 'default.html'), 'utf-8');
 
     const result = await spawnCli(['--zero'], {
-      cwd: tempDir,
+      cwd: dirTemp,
       input: 'n\n'
     });
 
     assert.strictEqual(result.status, 0);
     assert.ok(result.stderr.toString().includes('aborted'));
-    const content = await fs.promises.readFile(path.resolve(tempDir, 'default.html'), 'utf-8');
+    const content = await fs.promises.readFile(path.resolve(dirTemp, 'default.html'), 'utf-8');
     assert.strictEqual(content, original);
   });
 
   test('Aborts `--zero` when confirmation input is empty (default no)', async () => {
-    const tempDir = path.resolve(dirSandbox(), 'tmp/zero-empty');
-    await fs.promises.mkdir(tempDir, { recursive: true });
+    const dirTemp = path.resolve(dirSandbox(), 'tmp/zero-empty');
+    await fs.promises.mkdir(dirTemp, { recursive: true });
     await fs.promises.copyFile(
       path.resolve(dirSandbox(), 'default.html'),
-      path.resolve(tempDir, 'default.html')
+      path.resolve(dirTemp, 'default.html')
     );
-    const original = await fs.promises.readFile(path.resolve(tempDir, 'default.html'), 'utf-8');
+    const original = await fs.promises.readFile(path.resolve(dirTemp, 'default.html'), 'utf-8');
 
     const result = await spawnCli(['--zero'], {
-      cwd: tempDir,
+      cwd: dirTemp,
       input: '\n'
     });
 
     assert.strictEqual(result.status, 0);
     assert.ok(result.stderr.toString().includes('aborted'));
-    const content = await fs.promises.readFile(path.resolve(tempDir, 'default.html'), 'utf-8');
+    const content = await fs.promises.readFile(path.resolve(dirTemp, 'default.html'), 'utf-8');
     assert.strictEqual(content, original);
   });
 
   test('Minifies HTML files in place when `--zero` is confirmed', async () => {
-    const tempDir = path.resolve(dirSandbox(), 'tmp/zero-confirm');
-    await fs.promises.mkdir(tempDir, { recursive: true });
+    const dirTemp = path.resolve(dirSandbox(), 'tmp/zero-confirm');
+    await fs.promises.mkdir(dirTemp, { recursive: true });
     await fs.promises.copyFile(
       path.resolve(dirSandbox(), 'default.html'),
-      path.resolve(tempDir, 'default.html')
+      path.resolve(dirTemp, 'default.html')
     );
-    const original = await fs.promises.readFile(path.resolve(tempDir, 'default.html'), 'utf-8');
+    const original = await fs.promises.readFile(path.resolve(dirTemp, 'default.html'), 'utf-8');
 
     const result = await spawnCli(['--zero'], {
-      cwd: tempDir,
+      cwd: dirTemp,
       input: 'y\n'
     });
 
     assert.strictEqual(result.status, 0);
     assert.ok(result.stderr.toString().includes('Processed'));
-    const minified = await fs.promises.readFile(path.resolve(tempDir, 'default.html'), 'utf-8');
+    const minified = await fs.promises.readFile(path.resolve(dirTemp, 'default.html'), 'utf-8');
     assert.notStrictEqual(minified, original);
     assert.ok(minified.length < original.length);
   });
 
   test('Processes subdirectories when `--zero` is confirmed', async () => {
-    const tempDir = path.resolve(dirSandbox(), 'tmp/zero-subdirectories');
-    const subDir = path.resolve(tempDir, 'sub');
-    await fs.promises.mkdir(subDir, { recursive: true });
-    await fs.promises.writeFile(path.resolve(tempDir, 'a.html'), '<html>  <body>  hello  </body>  </html>');
-    await fs.promises.writeFile(path.resolve(subDir, 'b.html'), '<html>  <body>  world  </body>  </html>');
+    const dirTemp = path.resolve(dirSandbox(), 'tmp/zero-subdirectories');
+    const dirSub = path.resolve(dirTemp, 'sub');
+    await fs.promises.mkdir(dirSub, { recursive: true });
+    await fs.promises.writeFile(path.resolve(dirTemp, 'a.html'), '<html>  <body>  hello  </body>  </html>');
+    await fs.promises.writeFile(path.resolve(dirSub, 'b.html'), '<html>  <body>  world  </body>  </html>');
 
     const result = await spawnCli(['--zero'], {
-      cwd: tempDir,
+      cwd: dirTemp,
       input: 'y\n'
     });
 
     assert.strictEqual(result.status, 0);
-    const a = await fs.promises.readFile(path.resolve(tempDir, 'a.html'), 'utf-8');
-    const b = await fs.promises.readFile(path.resolve(subDir, 'b.html'), 'utf-8');
+    const a = await fs.promises.readFile(path.resolve(dirTemp, 'a.html'), 'utf-8');
+    const b = await fs.promises.readFile(path.resolve(dirSub, 'b.html'), 'utf-8');
     // Comprehensive preset collapses whitespace
     assert.ok(!a.includes('  '));
     assert.ok(!b.includes('  '));
   });
 
   test('Shows a confirmation prompt for `-z`', async () => {
-    const tempDir = path.resolve(dirSandbox(), 'tmp/zero-prompt');
-    await fs.promises.mkdir(tempDir, { recursive: true });
+    const dirTemp = path.resolve(dirSandbox(), 'tmp/zero-prompt');
+    await fs.promises.mkdir(dirTemp, { recursive: true });
 
     const result = await spawnCli(['-z'], {
-      cwd: tempDir,
+      cwd: dirTemp,
       input: 'n\n'
     });
 
@@ -1985,16 +1985,16 @@ describe('CLI', { concurrency: os.availableParallelism() }, () => {
   });
 
   test('Previews `--zero` with `--dry` without prompting or writing', async () => {
-    const tempDir = path.resolve(dirSandbox(), 'tmp/zero-dry');
-    await fs.promises.mkdir(tempDir, { recursive: true });
+    const dirTemp = path.resolve(dirSandbox(), 'tmp/zero-dry');
+    await fs.promises.mkdir(dirTemp, { recursive: true });
     await fs.promises.copyFile(
       path.resolve(dirSandbox(), 'default.html'),
-      path.resolve(tempDir, 'default.html')
+      path.resolve(dirTemp, 'default.html')
     );
-    const original = await fs.promises.readFile(path.resolve(tempDir, 'default.html'), 'utf-8');
+    const original = await fs.promises.readFile(path.resolve(dirTemp, 'default.html'), 'utf-8');
 
     for (const args of [['--zero', '--dry'], ['-d', '-z']]) {
-      const result = await spawnCli(args, { cwd: tempDir });
+      const result = await spawnCli(args, { cwd: dirTemp });
       const stderr = result.stderr.toString();
 
       assert.strictEqual(result.status, 0);
@@ -2004,7 +2004,7 @@ describe('CLI', { concurrency: os.availableParallelism() }, () => {
       assert.ok(stderr.includes('[DRY RUN] Would process directory'));
       assert.ok(/default\.html: [\d,]+ → [\d,]+ bytes/.test(stderr));
       assert.ok(stderr.includes('Total:'));
-      assert.strictEqual(await fs.promises.readFile(path.resolve(tempDir, 'default.html'), 'utf-8'), original);
+      assert.strictEqual(await fs.promises.readFile(path.resolve(dirTemp, 'default.html'), 'utf-8'), original);
     }
   });
 
@@ -2184,7 +2184,7 @@ describe('Parallel multi-file processing', { concurrency: Math.max(1, Math.floor
       'syncBuiltinESMExports();'
     );
 
-    const { stderr, status } = await spawnAsync('node', ['--import', preload, cliPath, '--zero'], { cwd: dir, input: 'y\n' });
+    const { stderr, status } = await spawnAsync('node', ['--import', preload, pathCli, '--zero'], { cwd: dir, input: 'y\n' });
     const stderrStr = stderr.toString();
 
     assert.strictEqual(status, 0, stderrStr);
@@ -2436,7 +2436,7 @@ describe('Failing files', { concurrency: Math.max(1, Math.floor(os.availablePara
       'syncBuiltinESMExports();'
     );
 
-    const { stderr, status } = await spawnAsync('node', ['--import', preload, cliPath, `--input-dir=${dir}`, `--output-dir=${dir}`, '--collapse-whitespace', '--workers=2']);
+    const { stderr, status } = await spawnAsync('node', ['--import', preload, pathCli, `--input-dir=${dir}`, `--output-dir=${dir}`, '--collapse-whitespace', '--workers=2']);
     const stderrStr = stderr.toString();
 
     assert.strictEqual(status, 1, stderrStr);
@@ -2484,7 +2484,7 @@ describe('Failing files', { concurrency: Math.max(1, Math.floor(os.availablePara
   test('Marks only the first line of an error in a terminal', async () => {
     const dir = buildDir('marks', { 'a.html': MARKUP_INPUT, 'bad.html': MARKUP_MALFORMED });
     const asTerminal = 'data:text/javascript,process.stderr.isTTY = true;';
-    const args = ['--import', asTerminal, cliPath, '--collapse-whitespace'];
+    const args = ['--import', asTerminal, pathCli, '--collapse-whitespace'];
     const headerExpected = `\x1b[31mMinification error on ${path.join(dir, 'bad.html')}:\x1b[0m\n  Parse error at line 1, column 1:\n  ${MARKUP_MALFORMED}\n`;
 
     const inDirectory = await spawnAsync('node', [...args, `--input-dir=${dir}`, `--output-dir=${dir}`, '--verbose']);
