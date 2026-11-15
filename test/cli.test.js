@@ -16,7 +16,7 @@ const cliPath = path.resolve(process.cwd(), 'cli.js');
 const sandbox = new AsyncLocalStorage();
 
 /**
- * The current test’s copy of the fixtures folder, which the CLI runs in
+ * The current test’s copy of the fixtures directory, which the CLI runs in
  * @returns {string}
  */
 const dirSandbox = () => {
@@ -26,7 +26,7 @@ const dirSandbox = () => {
 };
 
 /**
- * Runs each test in its own copy of the fixtures folder, so that tests can write
+ * Runs each test in its own copy of the fixtures directory, so that tests can write
  * there—and walk it with `--input-dir=./`—while others run alongside
  * @type {typeof nodeTest}
  */
@@ -1950,8 +1950,8 @@ describe('CLI', { concurrency: os.availableParallelism() }, () => {
     assert.ok(minified.length < original.length);
   });
 
-  test('Processes subfolders when `--zero` is confirmed', async () => {
-    const tempDir = path.resolve(dirSandbox(), 'tmp/zero-subfolders');
+  test('Processes subdirectories when `--zero` is confirmed', async () => {
+    const tempDir = path.resolve(dirSandbox(), 'tmp/zero-subdirectories');
     const subDir = path.resolve(tempDir, 'sub');
     await fs.promises.mkdir(subDir, { recursive: true });
     await fs.promises.writeFile(path.resolve(tempDir, 'a.html'), '<html>  <body>  hello  </body>  </html>');
@@ -2338,8 +2338,8 @@ describe('Failing files', { concurrency: Math.max(1, Math.floor(os.availablePara
 
   /**
    * @param {string} name
-   * @param {Record<string, string>} files - Content by path, relative to the new folder
-   * @returns {string} The folder, relative to the sandbox
+   * @param {Record<string, string>} files - Content by path, relative to the new directory
+   * @returns {string} The directory, relative to the sandbox
    */
   const buildDir = (name, files) => {
     const dir = path.join('tmp', name);
@@ -2394,9 +2394,9 @@ describe('Failing files', { concurrency: Math.max(1, Math.floor(os.availablePara
       assert.ok(stderr.endsWith(`Could not process 1 file:\n  ${path.join(dir, 'a.html')}`), stderr);
     });
 
-    test(`Skips a file whose output folder cannot be created and continues (${flow})`, async () => {
+    test(`Skips a file whose output directory cannot be created and continues (${flow})`, async () => {
       const dir = buildDir(`mkdir-${flow}`, { 'b.html': MARKUP_INPUT, 'sub/a.html': MARKUP_INPUT });
-      const dirOutput = buildDir(`mkdir-${flow}-out`, { sub: 'A file where the folder would go' });
+      const dirOutput = buildDir(`mkdir-${flow}-out`, { sub: 'A file where the directory would go' });
 
       const { stderr, exitCode } = await execCliWithStderr([`--input-dir=${dir}`, `--output-dir=${dirOutput}`, '--collapse-whitespace', ...flags]);
 

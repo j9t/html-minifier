@@ -26,7 +26,7 @@ async function resolveTarget(outputFile) {
     } catch {
       const link = await fs.promises.readlink(file).catch(() => undefined);
       if (link === undefined) return file;
-      // A relative link is read from the real location of its folder
+      // A relative link is read from the real location of its directory
       const dir = await fs.promises.realpath(path.dirname(file)).catch(() => path.dirname(file));
       file = path.resolve(dir, link);
     }
@@ -53,7 +53,7 @@ async function openTempFile(targetFile, mode) {
 }
 
 /**
- * Write a file by way of a temporary file in the same folder, so that an exit
+ * Write a file by way of a temporary file in the same directory, so that an exit
  * that leaves no chance to clean up—a native crash in a minifier, an OOM
  * kill—cannot leave a half-written file where the output belongs
  * @param {string} outputFile

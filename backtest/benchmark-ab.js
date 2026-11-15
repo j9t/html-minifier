@@ -10,14 +10,14 @@
 // `collapseWhitespace` on and off are timed separately, as a whitespace change often costs
 // in one of them only.
 //
-// Usage (from the backtest folder):
+// Usage (from the backtest directory):
 //   npm run benchmark:ab -- main: Compare the working tree (B) with `main` (A)
 //   npm run benchmark:ab -- main --aa: Compare `main` with a copy of itself instead, for the
 //     noise floor—a difference smaller than this in the same session is not a finding
 //   npm run benchmark:ab -- main --pairs=3 --rounds=10 --collapse=on|off|both
 //   npm run benchmark:ab -- main --files=ECMAScript,BBC --top=10
 //
-// The ref’s src is extracted to a folder of the run’s own in backtest/.ab, removed after the
+// The ref’s src is extracted to a directory of the run’s own in backtest/.ab, removed after the
 // run. The corpus is shared with backtest.js; run `npm run backtest` once to download it.
 
 import { execFileSync, spawnSync } from 'child_process';
@@ -163,7 +163,7 @@ async function main() {
   }
 
   const commit = execFileSync('git', ['rev-parse', '--short', args.ref], { cwd: DIR_REPO, encoding: 'utf8' }).trim();
-  // One folder per run, so that runs side by side don’t remove each other’s
+  // One directory per run, so that runs side by side don’t remove each other’s
   mkdirSync(DIR_AB, { recursive: true });
   const dirRun = mkdtempSync(path.join(DIR_AB, commit + '-'));
   const dirA = path.join(dirRun, 'a');

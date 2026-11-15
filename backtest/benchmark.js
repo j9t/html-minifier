@@ -7,7 +7,7 @@
 // processing time. Unlike backtest.js (which walks Git history), this measures the
 // code exactly as it is right now—ideal for A/B testing a branch against a saved baseline.
 //
-// Usage (from the backtest folder):
+// Usage (from the backtest directory):
 //   npm run benchmark: Run; if a baseline exists, show deltas
 //   npm run benchmark -- --save: Run and save the result as the baseline
 //   npm run benchmark -- --core: Disable external minifiers (CSS/JS/SVG/URLs) to isolate HM’s

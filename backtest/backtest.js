@@ -15,7 +15,7 @@
 // the working tree must have no uncommitted changes in src, package.json, or
 // html-minifier.config.json.
 //
-// Usage (from the backtest folder):
+// Usage (from the backtest directory):
 //   npm run backtest: Test the last 50 commits (default)
 //   npm run backtest 100: Test the last COUNT commits
 //   npm run backtest 500/10: Test the last COUNT commits, sampling every STEPth commit
@@ -477,7 +477,7 @@ if (isMain && (process.argv.length > 2 || !process.send)) {
           console.log(`\nCleaning up after ${reason}…`);
         }
 
-        // Restore src folder, package.json, and html-minifier.config.json from HEAD using Git
+        // Restore src directory, package.json, and html-minifier.config.json from HEAD using Git
         await new Promise((resolve) => {
           git('checkout', 'HEAD', '--', pathSrc, pathConfig, pathPkg, function (code) {
             if (code !== 0) {

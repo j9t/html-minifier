@@ -8,6 +8,14 @@ HTML Minifier was originally created by [Juriy “kangax” Zaytsev](https://per
 
 ℹ️ **Updating from HTML Minifier 4? [Use the HTML Minifier 4 to 5 upgrade guide.](https://meiert.com/blog/html-minifier-4-5/)** Switching from HTML Minifier Next? [Use the HTML Minifier Next to HTML Minifier migration guide.](https://meiert.com/blog/html-minifier-next-to-html-minifier/)
 
+## Quick start
+
+* **Single-file minification:** `npx html-minifier --preset comprehensive input.html -o output.html`
+* **Zero-config, in-place minification** in the current directory and subdirectories: `npx html-minifier --zero` (asks for confirmation; preview with `--dry`)
+* [**Configuration wizard** (beta)](https://www.npmjs.com/package/html-minifier-setup) in a directory of unminified web pages: `npx html-minifier-setup` (proposes optimal configuration)
+* **Installation guides:** [Astro](https://meiert.com/blog/astro-html-minification/) · [Eleventy](https://meiert.com/blog/eleventy-html-minification/) · [Jekyll](https://meiert.com/blog/web-page-minification-with-jekyll/) · [VitePress](https://meiert.com/blog/web-page-minification-with-vitepress/) ([your guide?](https://github.com/j9t/html-minifier/issues))
+* **Manual minification**, experimentation, and sample-sharing: [HTML Minifier web version](https://j9t.github.io/html-minifier/)
+
 ## Installation
 
 HTML Minifier is ESM-only and requires Node.js ≥22.13.
@@ -17,8 +25,6 @@ For use as a command-line app, use npx:
 ```shell
 npx html-minifier --help
 ```
-
-(For immediate, zero-config use in the current folder: `npx html-minifier --zero`)
 
 For programmatic use, install as a development dependency:
 
@@ -34,7 +40,7 @@ Use `npx html-minifier --help` to check all available options:
 
 | Option | Description | Example |
 | --- | --- | --- |
-| `--zero`, `-z` | Minify all HTML files in the current folder and its subfolders in place (except node_modules), using comprehensive settings (standalone or with `--dry` to preview—the flag is ignored when combined with other options) | `npx html-minifier --zero` |
+| `--zero`, `-z` | Minify all HTML files in the current directory and its subdirectories in place (except node_modules), using comprehensive settings (standalone or with `--dry` to preview—the flag is ignored when combined with other options) | `npx html-minifier --zero` |
 | `--input-dir <dir>`, `-I <dir>` | Specify an input directory | `--input-dir=src` |
 | `--ignore-dir <patterns>`, `-X <patterns>` | Exclude directories—relative to input directory—from processing (comma-separated, overrides config file setting) | `--ignore-dir=libs`, `--ignore-dir=libs,vendor,node_modules` |
 | `--output-dir <dir>`, `-O <dir>` | Specify an output directory | `--output-dir=dist` |
@@ -49,7 +55,7 @@ Use `npx html-minifier --help` to check all available options:
 
 ### Configuration file
 
-You can use a configuration file to specify options. If an html-minifier.config.json file is present in the current working directory—only there; subfolders (including `--input-dir`) and parent folders are not searched—the CLI picks it up automatically, with a note on STDERR confirming this. An explicit `--config-file` takes precedence. (The standalone `--zero` mode is deliberately config-free and ignores default config files.) The file can be either in JSON format or a JavaScript module that exports the configuration object:
+You can use a configuration file to specify options. If an html-minifier.config.json file is present in the current working directory—only there; subdirectories (including `--input-dir`) and parent directories are not searched—the CLI picks it up automatically, with a note on STDERR confirming this. An explicit `--config-file` takes precedence. (The standalone `--zero` mode is deliberately config-free and ignores default config files.) The file can be either in JSON format or a JavaScript module that exports the configuration object:
 
 **JSON configuration example:**
 
@@ -848,7 +854,7 @@ npm i;
 npm run backtest
 ```
 
-The backtest tool tracks minification performance—output size (raw, Gzip, and Brotli) and processing time—across Git history. Results are saved in the backtest folder (results.json). The corpus (backtest/sites.json) is shared with [the Minifier Benchmarks Project](https://github.com/j9t/minifier-benchmarks)—changing sites requires changing them in both repositories.
+The backtest tool tracks minification performance—output size (raw, Gzip, and Brotli) and processing time—across Git history. Results are saved in the backtest directory (results.json). The corpus (backtest/sites.json) is shared with [the Minifier Benchmarks Project](https://github.com/j9t/minifier-benchmarks)—changing sites requires changing them in both repositories.
 
 Parameters:
 

@@ -351,7 +351,7 @@ function normalizeConfig(config) {
 
 /** @type {Record<string, any>} */
 let config = {};
-program.option('-z, --zero', 'Minify all HTML files in the current folder and its subfolders in place (except node_modules), using comprehensive settings (standalone or with `--dry` to preview—the flag is ignored when combined with other options)');
+program.option('-z, --zero', 'Minify all HTML files in the current directory and its subdirectories in place (except node_modules), using comprehensive settings (standalone or with `--dry` to preview—the flag is ignored when combined with other options)');
 program.option('-I --input-dir <dir>', 'Specify an input directory');
 program.option('-X --ignore-dir <patterns>', 'Exclude directories—relative to input directory—from processing (comma-separated, overrides config file setting)');
 program.option('-O --output-dir <dir>', 'Specify an output directory');
@@ -393,11 +393,11 @@ program.helpOption('-h, --help', 'Display help for command');
     filesProvided = true;
   }
 
-  // Handle zero config mode (standalone in-place minification of the current folder),
+  // Handle zero config mode (standalone in-place minification of the current directory),
   // which `--dry` on its own in a terminal previews, as it would otherwise wait for input
   const isZeroOnly = process.argv.slice(2).every(arg => ['--zero', '-z', '--dry', '-d'].includes(arg));
   if (programOptions.zero && !isZeroOnly) {
-    console.error('Note: `--zero` was ignored—it can only be used on its own (or with `--dry`), to minify the current folder at comprehensive settings.');
+    console.error('Note: `--zero` was ignored—it can only be used on its own (or with `--dry`), to minify the current directory at comprehensive settings.');
   } else if (isZeroOnly && (programOptions.zero || (programOptions.dry && process.stdin.isTTY))) {
     const isDry = Boolean(programOptions.dry);
     const cwd = process.cwd();
@@ -413,7 +413,7 @@ program.helpOption('-h, --help', 'Display help for command');
       console.error(commandEquivalent);
     } else {
       process.stderr.write(
-        `${MARK_WARNING}Zero-config mode minifies all HTML files in the current folder and its subfolders (${cwd}) in place, using comprehensive settings. If you want to compare results and be able to revert, do this under version control.${MARK_RESET}\n` +
+        `${MARK_WARNING}Zero-config mode minifies all HTML files in the current directory and its subdirectories (${cwd}) in place, using comprehensive settings. If you want to compare results and be able to revert, do this under version control.${MARK_RESET}\n` +
         `${commandEquivalent}\n\n` +
         `Do you want to continue? [y/N] `
       );
@@ -958,7 +958,7 @@ program.helpOption('-h, --help', 'Display help for command');
       advanceProgress();
     };
 
-    // The output path, or `null` for a file that just failed for want of its folder
+    // The output path, or `null` for a file that just failed for want of its directory
     const prepareOutDir = async (/** @type {string} */ inputFile, /** @type {number} */ idx) => {
       const outFile = path.join(outputDir, path.relative(inputDir, inputFile));
       if (isDryRun) return outFile;
