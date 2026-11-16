@@ -40,7 +40,7 @@
     "src"
   ],
   "funding": "https://github.com/j9t/html-minifier?sponsor=1",
-  "homepage": "https://j9t.github.io/html-minifier/",
+  "homepage": "https://htmlminifier.org/",
   "keywords": [
     "cli",
     "compress",
@@ -80,7 +80,7 @@
   },
   "scripts": {
     "build": "tsc && npm run build:schema",
-    "build:docs": "vite build --base /html-minifier/",
+    "build:docs": "vite build",
     "build:schema": "node scripts/build-schema.js",
     "deploy": "npm run build && npm run build:docs",
     "lint": "eslint .",

@@ -14,7 +14,7 @@ HTML Minifier was originally created by [Juriy “kangax” Zaytsev](https://per
 * **Zero-config, in-place minification** in the current directory and subdirectories: `npx html-minifier --zero` (asks for confirmation; preview with `--dry`)
 * [**Configuration wizard** (beta)](https://www.npmjs.com/package/html-minifier-setup) in a directory of unminified web pages: `npx html-minifier-setup` (proposes optimal configuration)
 * **Installation guides:** [Astro](https://meiert.com/blog/astro-html-minification/) · [Eleventy](https://meiert.com/blog/eleventy-html-minification/) · [Jekyll](https://meiert.com/blog/web-page-minification-with-jekyll/) · [VitePress](https://meiert.com/blog/web-page-minification-with-vitepress/) ([your guide?](https://github.com/j9t/html-minifier/issues))
-* **Manual minification**, experimentation, and sample-sharing: [HTML Minifier web version](https://j9t.github.io/html-minifier/)
+* **Manual minification**, experimentation, and sample-sharing: [HTML Minifier web version](https://htmlminifier.org/)
 
 ## Installation
 
@@ -830,7 +830,7 @@ npx html-minifier --ignore-custom-fragments '[\\\"\\\\{%[\\\\s\\\\S]{0,1000}?%\\
 
 For CLI usage, using a config file is strongly recommended to avoid complex shell and JSON escaping.
 
-**[Web demo:](https://j9t.github.io/html-minifier/)**
+**[Web demo:](https://htmlminifier.org/)**
 
 ```text
 \{%[\s\S]{0,1000}?%\} \{\{[\s\S]{0,500}?\}\}
