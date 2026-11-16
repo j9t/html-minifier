@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { defineConfig } from 'vite';
 
 const FILE_NOTICES = 'THIRD-PARTY-NOTICES.txt';
+const PREFIX_STUB = '\0virtual:stub:';
 
 // Licenses Vite’s report misses: Alpine’s package lacks its own, it bundles Vue’s reactivity,
 // and LZ-String is a public script rather than a bundled one
@@ -12,6 +13,21 @@ const LICENSES_EXTRA = [
   ['@vue/shared (bundled in alpinejs)', 'node_modules/@vue/shared/LICENSE'],
   ['lz-string', 'demo/licenses/lz-string.txt']
 ];
+
+// Node-only dependencies, replaced by modules that throw if called, keeping them out of the bundle
+/** @type {Record<string, string>} */
+const STUBS = {
+  // Lightning CSS and SWC require native bindings
+  'lightningcss': `export function transform() {
+  throw new Error('Lightning CSS is not available in browser environments. CSS minification is disabled in the web version.');
+}`,
+  '@swc/core': `export function minify() {
+  throw new Error('SWC is not available in browser environments. JavaScript minification uses Terser in the web version.');
+}`,
+  'svgo': `export function optimize() {
+  throw new Error('SVGO is not available in browser environments. SVG minification is disabled in the web version.');
+}`
+};
 
 const config = defineConfig({
   root: 'demo',
@@ -27,14 +43,7 @@ const config = defineConfig({
     'process.platform': JSON.stringify(process.platform)
   },
   resolve: {
-    alias: {
-      // Replace Lightning CSS with inline stub for browser builds
-      // Lightning CSS requires Node.js native bindings and cannot run in-browser
-      'lightningcss': '\0virtual:lightningcss-stub',
-      // Replace SWC with inline stub for browser builds
-      // SWC requires Node.js native bindings and cannot run in-browser
-      '@swc/core': '\0virtual:swc-stub'
-    }
+    alias: Object.fromEntries(Object.keys(STUBS).map(name => [name, PREFIX_STUB + name]))
   },
   // Returning `undefined` from a hook hands the id back to Vite’s default handling
   plugins: [{
@@ -68,25 +77,12 @@ const config = defineConfig({
       }
     }
   }, {
-    name: 'native-stub',
+    name: 'node-stub',
     resolveId(id) {
-      if (id === '\0virtual:lightningcss-stub' || id === '\0virtual:swc-stub') {
-        return id;
-      }
-      return undefined;
+      return id.startsWith(PREFIX_STUB) ? id : undefined;
     },
     load(id) {
-      if (id === '\0virtual:lightningcss-stub') {
-        return `export function transform() {
-  throw new Error('Lightning CSS is not available in browser environments. CSS minification is disabled in the web version.');
-}`;
-      }
-      if (id === '\0virtual:swc-stub') {
-        return `export function minify() {
-  throw new Error('SWC is not available in browser environments. JavaScript minification uses Terser in the web version.');
-}`;
-      }
-      return undefined;
+      return id.startsWith(PREFIX_STUB) ? STUBS[id.slice(PREFIX_STUB.length)] : undefined;
     }
   }]
 });

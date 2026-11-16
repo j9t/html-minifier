@@ -417,6 +417,14 @@ describe('Demo', () => {
       assert.match(html, /src="?\/assets\//);
     });
 
+    test('Leaves out SVGO, which the web version can’t use', () => {
+      assert.ok(!readdirSync(new URL('../demo/build/assets/', import.meta.url)).some(file => file.startsWith('svgo')), 'SVGO chunk in assets');
+      // Its dependencies, as far as nothing else uses them
+      for (const name of ['svgo', 'csso', 'css-select', 'sax']) {
+        assert.doesNotMatch(notices, new RegExp(`^## ${name} `, 'm'), `Notices list ${name}`);
+      }
+    });
+
     test('Publishes the license of all bundled third-party software', () => {
       for (const path of [
         'demo/licenses/alpinejs.txt',
