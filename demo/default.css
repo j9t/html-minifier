@@ -60,6 +60,8 @@ nav {
 	display: flex;
 	flex-wrap: wrap;
 	gap: .5rem;
+	position: relative;
+	top: -1px;
 }
 
 main {
@@ -316,6 +318,10 @@ code {
 }
 
 @media screen and (max-width: 600px) {
+
+	nav {
+		top: 0;
+	}
 
 	main {
 		grid-template-columns: 1fr;
