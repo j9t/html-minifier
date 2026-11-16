@@ -1,14 +1,14 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert';
-import { readFileSync } from 'node:fs';
-import { getOptions } from '../demo/lib/get-options.js';
-import { annotateInvisibles } from '../demo/lib/show-invisibles.js';
-import { decodeState, encodeState } from '../demo/lib/url-state.js';
+import { existsSync, readFileSync } from 'node:fs';
+import { getOptions } from '../lib/get-options.js';
+import { annotateInvisibles } from '../lib/show-invisibles.js';
+import { decodeState, encodeState } from '../lib/url-state.js';
 
 // The demo takes LZ-String from a script the page loads, which is read the way a page
 // would read it: as a script that hands itself to whatever holds it
 const lzString = { exports: {} };
-new Function('module', readFileSync(new URL('../demo/public/lz-string.min.js', import.meta.url), 'utf8'))(lzString);
+new Function('module', readFileSync(new URL('../public/lz-string.min.js', import.meta.url), 'utf8'))(lzString);
 const LZString = lzString.exports;
 globalThis.LZString = LZString;
 
@@ -262,6 +262,112 @@ describe('Demo', () => {
     test('Takes anything but a string as empty', () => {
       assert.strictEqual(annotateInvisibles(undefined), '');
       assert.strictEqual(annotateInvisibles(null), '');
+    });
+  });
+
+  describe('Page', () => {
+    const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
+    const html = read('index.html');
+    const css = read('default.css');
+    const js = read('default.js');
+
+    test('Uses only attribute names that validate as HTML', () => {
+      for (const [tag] of html.matchAll(/<[a-z][^>]*>/g)) {
+        const names = tag.replace(/"[^"]*"/g, '').matchAll(/\s([^\s=/>]+)/g);
+        for (const [, name] of names) {
+          assert.match(name, /^(?!x-)[a-z][a-z0-9-]*$/, `Invalid attribute “${name}” in ${tag}`);
+        }
+      }
+    });
+
+    test('Sets the matching Alpine prefix', () => {
+      assert.match(js, /Alpine\.prefix\('data-x-'\)/);
+    });
+
+    test('Avoids Alpine shorthands, which ignore a custom prefix', () => {
+      assert.doesNotMatch(js, /^\s*'[:@]/m);
+      assert.doesNotMatch(js, /^\s*'x-/m);
+    });
+
+    test('Hides content until Alpine runs', () => {
+      assert.match(html, /data-x-cloak/);
+      assert.match(css, /\[data-x-cloak\]/);
+    });
+
+    test('Loads no third-party scripts or styles', () => {
+      assert.doesNotMatch(html, /<(script|link)[^>]+(src|href)="https?:/);
+    });
+
+    test('Offers social markup with absolute URLs', () => {
+      assert.match(html, /property="og:url" content="https:\/\/htmlminifier\.org\/"/);
+      assert.match(html, /property="og:image" content="https:\/\/htmlminifier\.org\/logo\.png"/);
+      assert.match(html, /name="twitter:card" content="summary"/);
+    });
+
+    test('Ships the icons the page refers to', () => {
+      for (const file of ['logo.png', 'logo.svg']) {
+        assert.ok(existsSync(new URL(`../public/${file}`, import.meta.url)), `Missing ${file}`);
+      }
+      assert.match(html, /<link rel="icon" href="\/logo\.svg" type="image\/svg\+xml">/);
+    });
+
+    test('Links the third-party licenses', () => {
+      assert.match(html, /href="\/THIRD-PARTY-NOTICES\.txt"/);
+    });
+
+    test('Links related projects', () => {
+      for (const url of [
+        'https://www.npmjs.com/package/html-minifier',
+        'https://www.npmjs.com/package/html-minifier-setup',
+        'https://j9t.github.io/minifier-benchmarks/'
+      ]) {
+        assert.ok(html.includes(`href="${url}"`), `Missing link to ${url}`);
+      }
+    });
+
+    test('Shows each message next to the buttons it answers', () => {
+      const rows = [...html.matchAll(/<div class="actions">([\s\S]*?)<\/div>/g)].map(([, row]) => row);
+      assert.strictEqual(rows.length, 2);
+      assert.match(rows[0], /data-x-text="share"/);
+      assert.match(rows[0], /data-x-text="stats\.text"/);
+      assert.match(rows[1], /data-x-text="copied"/);
+    });
+
+    test('Announces messages through live regions that stay in place', () => {
+      const regions = [...html.matchAll(/<span role="status"[^>]*>/g)].map(([tag]) => tag);
+      assert.strictEqual(regions.length, 2);
+      for (const tag of regions) assert.doesNotMatch(tag, /data-x-show/, `Hidden live region: ${tag}`);
+    });
+
+    test('Offers to clear input and output only when there is any', () => {
+      assert.match(html, /<button type="button" data-x-show="input \|\| output" data-x-bind="bindClear">Clear<\/button>/);
+      assert.match(js, /'data-x-on:click'\(\) \{\s+this\.clear\(\);/);
+    });
+
+    test('Marks unsafe options beyond color, with text for screen readers', () => {
+      assert.match(css, /\.unsafe::after \{[^}]*content: '[^']+' \/ '[^']*unsafe[^']*';/);
+    });
+
+    test('Follows the system color scheme', () => {
+      assert.match(css, /:root \{[^}]*color-scheme: light dark;/);
+    });
+
+    test('Sets colors only through custom properties, so that both color schemes cover them', () => {
+      const rules = css.replace(/\/\*[\s\S]*?\*\//g, '').replace(/:root \{[^}]*\}/, '');
+      assert.doesNotMatch(rules, /#[0-9a-f]{3,8}\b|\b(rgb|hsl|oklch)a?\(|light-dark\(/i);
+    });
+
+    test('Keeps links underlined, so that they don’t rely on color alone', () => {
+      assert.doesNotMatch(css, /(^|\})\s*a \{[^}]*text-decoration: none/);
+    });
+
+    test('Sorts CSS declarations alphabetically', () => {
+      for (const [, block] of css.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/\{([^{}]+)\}/g)) {
+        const properties = block.split(';')
+          .map(declaration => declaration.trim().split(':')[0])
+          .filter(Boolean);
+        assert.deepStrictEqual(properties, properties.toSorted(), `Unsorted block: ${block.trim()}`);
+      }
     });
   });
 });

@@ -1,6 +1,9 @@
 import js from '@eslint/js';
 import globals from 'globals';
 
+// The page script and its modules; everything else, web version tests included, runs in Node
+const FILES_BROWSER = ['demo/*.js', 'demo/lib/**/*.js'];
+
 export default [
   {
     ignores: [
@@ -28,14 +31,13 @@ export default [
     }
   },
   {
-    ignores: ['demo/**'],
+    ignores: FILES_BROWSER,
     languageOptions: {
       globals: globals.node
     }
   },
   {
-    // Browser environment for demo files
-    files: ['demo/**/*.js'],
+    files: FILES_BROWSER,
     languageOptions: {
       globals: {
         ...globals.browser,

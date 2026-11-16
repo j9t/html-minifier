@@ -1,3 +1,4 @@
+import Alpine from 'alpinejs';
 import HTMLMinifier, { getPreset } from '../src/htmlminifier.js';
 import { optionDefinitions } from '../src/lib/option-definitions.js';
 import { paramCase } from '../src/lib/utils.js';
@@ -100,7 +101,7 @@ const demoConfig = {
     label: 'Minify CSS',
     checked: false,
     disabled: true,
-    helpText: 'Minify CSS in <code>style</code> elements and attributes (uses Lightning CSS; disabled in web demo because it requires Node.js)'
+    helpText: 'Minify CSS in <code>style</code> elements and attributes (uses Lightning CSS; disabled in the web version because it requires Node.js)'
   },
   minifyJS: {
     label: 'Minify JavaScript',
@@ -115,7 +116,7 @@ const demoConfig = {
     label: 'Minify SVG',
     checked: false,
     disabled: true,
-    helpText: 'Minify SVG elements (uses SVGO; disabled in web demo because it requires Node.js)'
+    helpText: 'Minify SVG elements (uses SVGO; disabled in the web version because it requires Node.js)'
   },
   minifyURLs: {
     label: 'Minify URLs',
@@ -183,7 +184,7 @@ const demoConfig = {
     checked: false,
     disabled: true,
     unsafe: true,
-    helpText: 'Remove CSS from <code>style</code> elements that name an element, class, or ID the document doesn’t reference (if CSS is to be minified; disabled in web demo because it requires Node.js)'
+    helpText: 'Remove CSS from <code>style</code> elements that name an element, class, or ID the document doesn’t reference (if CSS is to be minified; disabled in the web version because it requires Node.js)'
   },
   selfCloseForeignElements: {
     label: 'Self-close empty SVG and MathML elements',
@@ -267,7 +268,8 @@ const updateUrlWithState = (input, options, showInvisibles) => {
   };
 };
 
-// Register Alpine data
+// Valid HTML rules out `:attr` and `@event`, so those live in `x-bind` objects, under full
+// names because Alpine maps its shorthands to the default prefix before `prefix()` runs
 const minifierData = () => ({
   options: sillyClone(defaultOptions),
   input: '',
@@ -283,6 +285,100 @@ const minifierData = () => ({
   share: '',
   _shareTimeout: null,
   _copiedTimeout: null,
+  // Advanced by each run and by whatever voids its result (clear, presets), so that a run
+  // or clipboard write that finishes late changes nothing
+  _run: 0,
+
+  bindClear: {
+    'data-x-on:click'() {
+      this.clear();
+    }
+  },
+
+  bindCopy: {
+    'data-x-on:click'() {
+      this.copyOutput();
+    }
+  },
+
+  bindInput: {
+    'data-x-on:blur'() {
+      this.showInputView();
+    },
+    'data-x-on:focus'() {
+      this.editingInput = true;
+    }
+  },
+
+  bindInputView: {
+    'data-x-on:blur'() {
+      this._pointerOnInputView = false;
+    },
+    'data-x-on:click'(event) {
+      this.editInput(event);
+    },
+    'data-x-on:focus'() {
+      if (!this._pointerOnInputView) this.editInput();
+    },
+    'data-x-on:pointerdown'() {
+      this._pointerOnInputView = true;
+    }
+  },
+
+  bindMinify: {
+    'data-x-on:click'() {
+      this.minify();
+    }
+  },
+
+  bindOptionInput: {
+    'data-x-bind:disabled'() {
+      return this.option.disabled === true;
+    },
+    'data-x-bind:id'() {
+      return this.option.id;
+    },
+    'data-x-bind:type'() {
+      return this.option.type;
+    }
+  },
+
+  bindOptionLabel: {
+    'data-x-bind:class'() {
+      return this.option.unsafe ? 'unsafe' : '';
+    },
+    'data-x-bind:for'() {
+      return this.option.id;
+    }
+  },
+
+  bindOutputView: {
+    'data-x-on:copy'(event) {
+      this.copyFromView(event, this.output);
+    }
+  },
+
+  // Each link names its preset (or selection) in `data-preset`
+  bindPreset: {
+    'data-x-on:click.prevent'(event) {
+      const { preset } = event.currentTarget.dataset;
+      if (preset === 'all' || preset === 'none') this.selectAllOptions(preset === 'all');
+      else if (preset === 'reset') this.resetOptions();
+      else this.applyPreset(preset);
+    }
+  },
+
+  bindShare: {
+    'data-x-on:click'() {
+      this.shareUrl();
+    }
+  },
+
+  bindStats: {
+    'data-x-bind:class'() {
+      return this.stats.result;
+    }
+  },
 
   // Input and output with every invisible character marked, for the “Show invisibles” view
   get annotatedInput() {
@@ -362,9 +458,11 @@ const minifierData = () => ({
     this.share = '';
 
     const options = getOptions(this.options);
+    const run = ++this._run;
 
     try {
       const data = await HTMLMinifier.minify(this.input, options);
+      if (run !== this._run) return;
 
       const diff = this.input.length - data.length;
       const savings = this.input.length ? (100 * diff / this.input.length).toFixed(2) : 0;
@@ -373,6 +471,7 @@ const minifierData = () => ({
       this.stats.result = 'success';
       this.stats.text = `Original size: ${formatNumber(this.input.length)}, minified size: ${formatNumber(data.length)}, savings: ${formatNumber(diff)} (${savings}%)`;
     } catch (err) {
+      if (run !== this._run) return;
       this.output = '';
       this.stats.result = 'failure';
 
@@ -409,6 +508,7 @@ const minifierData = () => ({
 
     this.share = '';
 
+    const run = this._run;
     const result = updateUrlWithState(this.input, this.options, this.showInvisibles);
 
     if (result.success) {
@@ -421,8 +521,10 @@ const minifierData = () => ({
       } else {
         try {
           await navigator.clipboard.writeText(result.url);
+          if (run !== this._run) return;
           this.share = `✓ URL copied to clipboard (${formatNumber(result.length)} characters)`;
         } catch {
+          if (run !== this._run) return;
           this.share = `✓ URL updated (${formatNumber(result.length)} characters)—copy from address bar`;
         }
       }
@@ -445,8 +547,10 @@ const minifierData = () => ({
         } else {
           try {
             await navigator.clipboard.writeText(optionsOnly.url);
+            if (run !== this._run) return;
             this.share = `⚠ Code too large for URL (${formatNumber(result.length)} chars), sharing options only—URL copied to clipboard`;
           } catch {
+            if (run !== this._run) return;
             this.share = `⚠ Code too large for URL (${formatNumber(result.length)} chars), sharing options only—copy from address bar`;
           }
         }
@@ -480,10 +584,13 @@ const minifierData = () => ({
       return;
     }
 
+    const run = this._run;
     try {
       await navigator.clipboard.writeText(this.output);
+      if (run !== this._run) return;
       this.flashCopied('✓ Minified markup copied to clipboard');
     } catch {
+      if (run !== this._run) return;
       this.flashCopied('⚠ Could not copy, copy from the output pane');
     }
   },
@@ -550,6 +657,7 @@ const minifierData = () => ({
     });
 
     // Clear output and stats when applying preset
+    this._run++;
     this.output = '';
     this.stats = { result: '', text: '' };
     this.share = '';
@@ -557,6 +665,16 @@ const minifierData = () => ({
       clearTimeout(this._shareTimeout);
       this._shareTimeout = null;
     }
+  },
+
+  // Empty input and output, and the URL that would bring them back, but keep the options
+  clear() {
+    this._run++;
+    clearTimeout(this._shareTimeout);
+    clearTimeout(this._copiedTimeout);
+    Object.assign(this, { copied: '', editingInput: false, input: '', output: '', share: '', stats: { result: '', text: '' } });
+    if (window.location.hash) window.history.pushState(null, '', window.location.pathname);
+    this.$nextTick(() => this.$refs.input.focus());
   },
 
   resetOptions() {
@@ -578,6 +696,7 @@ const minifierData = () => ({
       }
     });
 
+    this._run++;
     this.output = '';
     this.stats = { result: '', text: '' };
     this.share = '';
@@ -591,11 +710,8 @@ const minifierData = () => ({
   }
 });
 
-const registerMinifier = () => window.Alpine.data('minifier', minifierData);
-if (window.Alpine) {
-  registerMinifier();
-} else {
-  document.addEventListener('alpine:init', registerMinifier, { once: true });
-}
+Alpine.prefix('data-x-');
+Alpine.data('minifier', minifierData);
+Alpine.start();
 
-document.getElementById('minifier-version').innerText = `(v${pkg.version})`;
+document.getElementById('minifier-version').innerText = `v${pkg.version}`;

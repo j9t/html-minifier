@@ -830,7 +830,7 @@ npx html-minifier --ignore-custom-fragments '[\\\"\\\\{%[\\\\s\\\\S]{0,1000}?%\\
 
 For CLI usage, using a config file is strongly recommended to avoid complex shell and JSON escaping.
 
-**[Web demo:](https://htmlminifier.org/)**
+**[Web version:](https://htmlminifier.org/)**
 
 ```text
 \{%[\s\S]{0,1000}?%\} \{\{[\s\S]{0,500}?\}\}

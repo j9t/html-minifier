@@ -5,8 +5,8 @@ import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { BROTLI_QUALITY, GZIP_LEVEL } from './compression.js';
-import { formatChange, formatResults, historicalDeps, ordinal, parseRange } from './backtest.js';
+import { BROTLI_QUALITY, GZIP_LEVEL } from '../compression.js';
+import { formatChange, formatResults, historicalDeps, ordinal, parseRange } from '../backtest.js';
 
 describe('Backtest', () => {
   describe('`parseRange`', () => {
@@ -114,7 +114,7 @@ describe('Backtest', () => {
 
 // Concurrent, as each test uses its own repository and mostly waits on processes
 describe('Git walk', { concurrency: true }, () => {
-  const dirBacktest = path.dirname(fileURLToPath(import.meta.url));
+  const dirBacktest = fileURLToPath(new URL('..', import.meta.url));
   const inputs = { alpha: '<p>Alpha</p>', beta: '<p>Beta</p>' };
 
   // Each commit’s minifier prefixes its own marker and the config’s, so a result shows which

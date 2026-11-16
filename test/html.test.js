@@ -6145,21 +6145,21 @@ describe('HTML', () => {
   test('Trims trailing whitespace in linear time on deeply nested markup', async () => {
     // Each end tag walked back over all those before it; compare growth rather than
     // absolute time, keeping the best of several runs (see the raw-text scan test in
-    // css.test.js)
-    const measure = async (/** @type {number} */ depth) => {
+    // css.test.js), and alternating sizes so that load from parallel tests hits both
+    const time = async (/** @type {number} */ depth) => {
       const input = '<div> a '.repeat(depth) + 'x' + ' </div>'.repeat(depth);
-      let best = Infinity;
-      for (let run = 0; run < 3; run++) {
-        const started = performance.now();
-        await minify(input, { collapseWhitespace: true });
-        best = Math.min(best, performance.now() - started);
-      }
-      return best;
+      const started = performance.now();
+      await minify(input, { collapseWhitespace: true });
+      return performance.now() - started;
     };
 
-    await measure(500);
-    const small = await measure(2000);
-    const large = await measure(4000);
+    await time(500);
+    let small = Infinity;
+    let large = Infinity;
+    for (let run = 0; run < 5; run++) {
+      small = Math.min(small, await time(2000));
+      large = Math.min(large, await time(4000));
+    }
 
     assert.ok(
       large <= small * 3 + 50,
