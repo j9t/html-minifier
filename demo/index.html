@@ -3,80 +3,90 @@
 	<head>
 		<meta charset="utf-8">
 		<meta name="viewport" content="width=device-width">
-		<title>HTML Minifier · Web demo of the highly effective, super-configurable, well-tested web page minifier</title>
+		<title>HTML Minifier · Web version of the highly effective, super-configurable, well-tested web page minifier</title>
+		<meta name="twitter:card" content="summary">
+		<meta property="og:title" content="HTML Minifier">
+		<meta property="og:description" name="description" content="Minify HTML in your browser: the highly effective, super-configurable, well-tested web page minifier, with in-document CSS, JavaScript, and SVG minification">
+		<meta property="og:url" content="https://htmlminifier.org/">
+		<meta property="og:image" content="https://htmlminifier.org/logo.png">
+		<link rel="icon" href="/logo.svg" type="image/svg+xml">
 		<link rel="stylesheet" href="./default.css">
 	</head>
 	<body>
-		<h1>HTML Minifier <span id="minifier-version"></span></h1>
-		<main x-data="minifier" x-cloak>
+		<header>
+			<h1><img src="/logo.svg" alt="" width="28" height="28"> HTML Minifier <span id="minifier-version"></span></h1>
+			<nav aria-label="Related">
+				<a href="https://www.npmjs.com/package/html-minifier" class="badge"><span>npm</span><span>html-minifier</span></a>
+				<a href="https://www.npmjs.com/package/html-minifier-setup" class="badge"><span>Setup</span><span>Configuration wizard</span></a>
+				<a href="https://j9t.github.io/minifier-benchmarks/" class="badge"><span>Data</span><span>Minifier benchmarks</span></a>
+				<a href="https://github.com/j9t/html-minifier" class="badge"><span>Source</span><span>GitHub</span></a>
+			</nav>
+		</header>
+		<main data-x-data="minifier" data-x-cloak>
 			<div class="workspace">
-				<textarea rows="10" cols="40" id="input" x-ref="input" x-model="input" x-show="!inputMarked" @focus="editingInput = true" @blur="showInputView()" aria-label="Markup to minify"></textarea>
-				<pre id="input-view" x-ref="inputView" role="region" aria-label="Markup to minify, invisible characters marked; select to edit" tabindex="0" x-show="inputMarked" x-html="annotatedInput" @pointerdown="_pointerOnInputView = true" @focus="_pointerOnInputView || editInput()" @click="editInput($event)" @blur="_pointerOnInputView = false"></pre>
-				<div class="alt">
-					<button type="button" @click="minify()">Minify</button>
-					<button type="button" @click="shareUrl()">Share</button>
-					<span x-show="share" x-text="share" class="share"></span>
+				<textarea rows="10" cols="40" id="input" data-x-ref="input" data-x-model="input" data-x-show="!inputMarked" data-x-bind="bindInput" aria-label="Markup to minify"></textarea>
+				<pre id="input-view" data-x-ref="inputView" role="region" aria-label="Markup to minify, invisible characters marked; select to edit" tabindex="0" data-x-show="inputMarked" data-x-html="annotatedInput" data-x-bind="bindInputView"></pre>
+				<div class="actions">
+					<button type="button" data-x-bind="bindMinify">Minify</button>
+					<button type="button" data-x-bind="bindShare">Share</button>
+					<button type="button" data-x-show="input || output" data-x-bind="bindClear">Clear</button>
+					<span role="status">
+						<span data-x-show="share" data-x-text="share" class="share"></span>
+						<span data-x-show="!share && stats.text" data-x-text="stats.text" data-x-bind="bindStats"></span>
+					</span>
 				</div>
 				<div class="form-group">
-					<input type="checkbox" id="show-invisibles" x-model="showInvisibles">
+					<input type="checkbox" id="show-invisibles" data-x-model="showInvisibles">
 					<label for="show-invisibles">Show <i>invisibles</i></label>
-					<span class="quiet">Mark characters that don’t show or look like plain spaces<span>: runs of spaces (“·”) and tabs within a line (not indentation), no-break and other special spaces, and zero-width characters such as soft hyphens and direction marks</span></span>
+					<span class="quiet">Mark characters that don’t show or look like plain spaces<span>: runs of spaces (“·”) and tabs within a line (not indentation), no-break and other special spaces, and zero-width characters such as soft hyphens and direction marks</span></span>
 				</div>
-				<textarea rows="10" cols="40" id="output" readonly x-model="output" x-show="!showInvisibles" aria-label="Minified markup"></textarea>
-				<pre id="output-view" role="region" aria-label="Minified markup, invisible characters marked" tabindex="0" x-show="showInvisibles" x-html="annotatedOutput" @copy="copyFromView($event, output)"></pre>
-				<div class="alt">
-					<button type="button" @click="copyOutput()">Copy output</button>
-					<span x-show="copied" x-text="copied" class="share"></span>
+				<textarea rows="10" cols="40" id="output" readonly data-x-model="output" data-x-show="!showInvisibles" aria-label="Minified markup"></textarea>
+				<pre id="output-view" role="region" aria-label="Minified markup, invisible characters marked" tabindex="0" data-x-show="showInvisibles" data-x-html="annotatedOutput" data-x-bind="bindOutputView"></pre>
+				<div class="actions">
+					<button type="button" data-x-bind="bindCopy">Copy output</button>
+					<span role="status" data-x-text="copied" class="share"></span>
 				</div>
-				<p x-text="stats.text" :class="stats.result"></p>
 			</div>
 			<div class="options">
-				<form class="alt">
-					<template x-for="option in options">
+				<div class="alt">
+					<template data-x-for="option in options">
 						<div>
-							<template x-if="option.type === 'checkbox'">
+							<template data-x-if="option.type === 'checkbox'">
 								<div class="form-group">
-									<input type="checkbox" :id="option.id" x-model="option.checked" :disabled="option.disabled === true">
-									<label :for="option.id" x-html="option.label" :class="option.unsafe ? 'unsafe' : ''"></label>
-									<template x-if="option.helpText">
-										<span class="quiet" x-html="option.helpText"></span>
+									<input type="checkbox" data-x-model="option.checked" data-x-bind="bindOptionInput">
+									<label data-x-html="option.label" data-x-bind="bindOptionLabel"></label>
+									<template data-x-if="option.helpText">
+										<span class="quiet" data-x-html="option.helpText"></span>
 									</template>
 								</div>
 							</template>
-							<template x-if="option.type === 'text' || option.type === 'number'">
+							<template data-x-if="option.type === 'text' || option.type === 'number'">
 								<div class="form-group">
-									<label :for="option.id" x-html="option.label" :class="option.unsafe ? 'unsafe' : ''"></label>
-									<input :type="option.type" :id="option.id" x-model="option.value">
-									<template x-if="option.helpText">
-										<span class="quiet" x-html="option.helpText"></span>
+									<label data-x-html="option.label" data-x-bind="bindOptionLabel"></label>
+									<input type="text" data-x-model="option.value" data-x-bind="bindOptionInput">
+									<template data-x-if="option.helpText">
+										<span class="quiet" data-x-html="option.helpText"></span>
 									</template>
 								</div>
 							</template>
 						</div>
 					</template>
-				</form>
+				</div>
 				<div>
 					<span>Select:</span>
-					<a href="#" @click.prevent="selectAllOptions(true)">All</a>,
-					<a href="#" @click.prevent="applyPreset('conservative')">conservative</a>,
-					<a href="#" @click.prevent="applyPreset('comprehensive')">comprehensive</a>,
-					<a href="#" @click.prevent="selectAllOptions(false)">none</a>,
-					<a href="#" @click.prevent="resetOptions()">reset</a>
-					<p>(Cf. <a href="https://github.com/j9t/html-minifier?tab=readme-ov-file#options-quick-reference">README</a> or CLI for all options)</p>
+					<a href="#" data-preset="all" data-x-bind="bindPreset">all</a>,
+					<a href="#" data-preset="conservative" data-x-bind="bindPreset">conservative</a>,
+					<a href="#" data-preset="comprehensive" data-x-bind="bindPreset">comprehensive</a>,
+					<a href="#" data-preset="none" data-x-bind="bindPreset">none</a>,
+					<a href="#" data-preset="reset" data-x-bind="bindPreset">reset</a>
+					(<a href="https://github.com/j9t/html-minifier?tab=readme-ov-file#options-quick-reference">all options explained</a>)
 				</div>
 			</div>
 		</main>
 		<footer>
-			<p class="quiet">
-				HTML Minifier is an enhanced and maintained minifier by <a href="https://meiert.com/">Jens Oliver Meiert</a>.
-				The original HTML Minifier was made by <a href="https://perfectionkills.com/">Juriy “kangax” Zaytsev</a>,
-				using a tweaked version of HTML parser by <a href="https://johnresig.com/">John Resig</a>,
-				which was based on work by <a href="https://web.archive.org/web/20200818163733/http://erik.eae.net/">Erik Arvidsson</a>.
-				Source and bug tracker are <a href="https://github.com/j9t/html-minifier">available on GitHub</a>.
-			</p>
+			<p class="quiet">HTML Minifier is maintained by <a href="https://meiert.com/">Jens Oliver Meiert</a>. The original HTML Minifier was made by <a href="https://perfectionkills.com/">Juriy “kangax” Zaytsev</a>, using a tweaked version of HTML parser by <a href="https://johnresig.com/">John Resig</a>, which was based on work by <a href="https://web.archive.org/web/20200818163733/http://erik.eae.net/">Erik Arvidsson</a>. Source and issue tracker are <a href="https://github.com/j9t/html-minifier">available on GitHub</a> (<a href="/THIRD-PARTY-NOTICES.txt">third-party licenses</a>).</p>
 		</footer>
 		<script src="/lz-string.min.js"></script>
 		<script src="./default.js" type="module"></script>
-		<script src="https://cdn.jsdelivr.net/npm/alpinejs@3/dist/cdn.min.js" defer></script>
 	</body>
 </html>
