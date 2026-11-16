@@ -285,7 +285,8 @@ const minifierData = () => ({
   share: '',
   _shareTimeout: null,
   _copiedTimeout: null,
-  // Advanced by each run and by clear, so that a run that finishes late changes nothing
+  // Advanced by each run and by whatever voids its result (clear, presets), so that a run
+  // or clipboard write that finishes late changes nothing
   _run: 0,
 
   bindClear: {
@@ -507,6 +508,7 @@ const minifierData = () => ({
 
     this.share = '';
 
+    const run = this._run;
     const result = updateUrlWithState(this.input, this.options, this.showInvisibles);
 
     if (result.success) {
@@ -519,8 +521,10 @@ const minifierData = () => ({
       } else {
         try {
           await navigator.clipboard.writeText(result.url);
+          if (run !== this._run) return;
           this.share = `✓ URL copied to clipboard (${formatNumber(result.length)} characters)`;
         } catch {
+          if (run !== this._run) return;
           this.share = `✓ URL updated (${formatNumber(result.length)} characters)—copy from address bar`;
         }
       }
@@ -543,8 +547,10 @@ const minifierData = () => ({
         } else {
           try {
             await navigator.clipboard.writeText(optionsOnly.url);
+            if (run !== this._run) return;
             this.share = `⚠ Code too large for URL (${formatNumber(result.length)} chars), sharing options only—URL copied to clipboard`;
           } catch {
+            if (run !== this._run) return;
             this.share = `⚠ Code too large for URL (${formatNumber(result.length)} chars), sharing options only—copy from address bar`;
           }
         }
@@ -578,10 +584,13 @@ const minifierData = () => ({
       return;
     }
 
+    const run = this._run;
     try {
       await navigator.clipboard.writeText(this.output);
+      if (run !== this._run) return;
       this.flashCopied('✓ Minified markup copied to clipboard');
     } catch {
+      if (run !== this._run) return;
       this.flashCopied('⚠ Could not copy, copy from the output pane');
     }
   },
@@ -648,6 +657,7 @@ const minifierData = () => ({
     });
 
     // Clear output and stats when applying preset
+    this._run++;
     this.output = '';
     this.stats = { result: '', text: '' };
     this.share = '';
@@ -686,6 +696,7 @@ const minifierData = () => ({
       }
     });
 
+    this._run++;
     this.output = '';
     this.stats = { result: '', text: '' };
     this.share = '';
