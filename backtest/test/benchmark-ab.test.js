@@ -1,6 +1,6 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert';
-import { combineRuns, outputSize, parseArgs } from './benchmark-ab.js';
+import { combineRuns, outputSize, parseArgs } from '../benchmark-ab.js';
 
 describe('A/B benchmark', () => {
   describe('`parseArgs`', () => {

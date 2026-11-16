@@ -1,6 +1,6 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert';
-import { compressedSizes } from './compression.js';
+import { compressedSizes } from '../compression.js';
 
 describe('Compression', () => {
   const markup = '<ul>' + '<li class="item"><a href="/page">Page</a></li>'.repeat(200) + '</ul>';

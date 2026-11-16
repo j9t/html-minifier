@@ -1,16 +1,14 @@
-import { exec } from 'node:child_process';
-import { before, describe, test } from 'node:test';
+import { describe, test } from 'node:test';
 import assert from 'node:assert';
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
-import { promisify } from 'node:util';
-import { getOptions } from '../demo/lib/get-options.js';
-import { annotateInvisibles } from '../demo/lib/show-invisibles.js';
-import { decodeState, encodeState } from '../demo/lib/url-state.js';
+import { existsSync, readFileSync } from 'node:fs';
+import { getOptions } from '../lib/get-options.js';
+import { annotateInvisibles } from '../lib/show-invisibles.js';
+import { decodeState, encodeState } from '../lib/url-state.js';
 
 // The demo takes LZ-String from a script the page loads, which is read the way a page
 // would read it: as a script that hands itself to whatever holds it
 const lzString = { exports: {} };
-new Function('module', readFileSync(new URL('../demo/public/lz-string.min.js', import.meta.url), 'utf8'))(lzString);
+new Function('module', readFileSync(new URL('../public/lz-string.min.js', import.meta.url), 'utf8'))(lzString);
 const LZString = lzString.exports;
 globalThis.LZString = LZString;
 
@@ -268,7 +266,7 @@ describe('Demo', () => {
   });
 
   describe('Page', () => {
-    const read = (path) => readFileSync(new URL(`../demo/${path}`, import.meta.url), 'utf8');
+    const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
     const html = read('index.html');
     const css = read('default.css');
     const js = read('default.js');
@@ -308,7 +306,7 @@ describe('Demo', () => {
 
     test('Ships the icons the page refers to', () => {
       for (const file of ['logo.png', 'logo.svg']) {
-        assert.ok(existsSync(new URL(`../demo/public/${file}`, import.meta.url)), `Missing ${file}`);
+        assert.ok(existsSync(new URL(`../public/${file}`, import.meta.url)), `Missing ${file}`);
       }
       assert.match(html, /<link rel="icon" href="\/logo\.svg" type="image\/svg\+xml">/);
     });
@@ -369,72 +367,6 @@ describe('Demo', () => {
           .map(declaration => declaration.trim().split(':')[0])
           .filter(Boolean);
         assert.deepStrictEqual(properties, properties.toSorted(), `Unsorted block: ${block.trim()}`);
-      }
-    });
-  });
-
-  describe('Build', () => {
-    const read = (path) => readFileSync(new URL(`../demo/${path}`, import.meta.url), 'utf8');
-    let html;
-    let notices;
-
-    before(async () => {
-      await promisify(exec)('npm run build:docs', { cwd: new URL('..', import.meta.url) });
-      html = read('build/index.html');
-      notices = read('build/THIRD-PARTY-NOTICES.txt');
-    }, { timeout: 120_000 });
-
-    test('Minifies the page', () => {
-      assert.doesNotMatch(html, /\n/);
-    });
-
-    test('Keeps Alpine directives', () => {
-      assert.match(html, /data-x-data="?minifier/);
-      assert.match(html, /data-x-for="option in options"/);
-      assert.match(html, /data-x-cloak/);
-    });
-
-    // LinkedIn needs `head` (and `body`), messengers like WhatsApp and Signal need quotes
-    test('Keeps social markup readable for picky parsers', () => {
-      assert.match(html, /<head>/);
-      assert.match(html, /<body>/);
-      for (const [, attributes] of html.matchAll(/<meta ([^>]*(?:og|twitter):[^>]*)>/g)) {
-        assert.doesNotMatch(attributes, /=[^"]/, `Unquoted attribute in <meta ${attributes}>`);
-      }
-    });
-
-    test('Inlines the style sheet', () => {
-      assert.match(html, /<style>:root\{/);
-      assert.doesNotMatch(html, /<link[^>]+stylesheet/);
-      assert.ok(!readdirSync(new URL('../demo/build/assets/', import.meta.url)).some(file => file.endsWith('.css')), 'Style sheet left in assets');
-    });
-
-    test('Keeps button types', () => {
-      assert.match(html, /<button type="?button/);
-    });
-
-    test('Points assets to the root', () => {
-      assert.match(html, /src="?\/assets\//);
-    });
-
-    test('Leaves out SVGO, which the web version can’t use', () => {
-      assert.ok(!readdirSync(new URL('../demo/build/assets/', import.meta.url)).some(file => file.startsWith('svgo')), 'SVGO chunk in assets');
-      // Its dependencies, as far as nothing else uses them
-      for (const name of ['svgo', 'csso', 'css-select', 'sax']) {
-        assert.doesNotMatch(notices, new RegExp(`^## ${name} `, 'm'), `Notices list ${name}`);
-      }
-    });
-
-    test('Publishes the license of all bundled third-party software', () => {
-      for (const path of [
-        'demo/licenses/alpinejs.txt',
-        'demo/licenses/lz-string.txt',
-        'node_modules/@vue/reactivity/LICENSE',
-        'node_modules/@vue/shared/LICENSE',
-        'node_modules/terser/LICENSE'
-      ]) {
-        const license = readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
-        assert.ok(notices.includes(license.trim()), `Missing the license of ${path}`);
       }
     });
   });

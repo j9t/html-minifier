@@ -5,9 +5,9 @@ import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { minify } from '../src/htmlminifier.js';
-import { getPreset, getPresetNames } from '../src/presets.js';
-import { BROTLI_QUALITY, GZIP_LEVEL, compressedSizes } from './compression.js';
+import { minify } from '../../src/htmlminifier.js';
+import { getPreset, getPresetNames } from '../../src/presets.js';
+import { BROTLI_QUALITY, GZIP_LEVEL, compressedSizes } from '../compression.js';
 import {
   DEFAULT_CONFIG,
   DEFAULT_ITERATIONS,
@@ -25,7 +25,7 @@ import {
   reproducibility,
   resolvePreset,
   spread
-} from './benchmark.js';
+} from '../benchmark.js';
 
 describe('Benchmark', () => {
   describe('`parseArgs`', () => {
@@ -346,7 +346,7 @@ describe('Benchmark', () => {
     });
 
     test('Exits with only the message, without a stack, when run as a script', () => {
-      const pathScript = path.join(path.dirname(fileURLToPath(import.meta.url)), 'benchmark.js');
+      const pathScript = fileURLToPath(new URL('../benchmark.js', import.meta.url));
       // Rejected before any file is read, so the real corpus does not matter
       const { status, stdout, stderr } = spawnSync(process.execPath, [pathScript, '--config=other.json', '--preset=comprehensive'], { encoding: 'utf8' });
       assert.strictEqual(status, 1);

@@ -90,10 +90,12 @@
     "prepare": "git config core.hooksPath .githooks || true",
     "preview:docs": "vite preview",
     "serve": "vite",
-    "test": "npm run test:types && node --test \"test/**/*.test.js\" \"backtest/*.test.js\"",
+    "test": "npm run test:types && node --test \"test/**/*.test.js\" \"backtest/test/*.test.js\" && npm run test:demo",
+    "test:backtest": "node --test \"backtest/test/*.test.js\"",
+    "test:demo": "node --test \"demo/test/*.test.js\"",
     "test:equivalence": "node test/equivalence/corpus.js",
     "test:types": "tsc --noEmit && tsc --project tsconfig.test.json",
-    "test:watch": "node --test --watch \"test/**/*.test.js\" \"backtest/*.test.js\""
+    "test:watch": "node --test --watch \"test/**/*.test.js\" \"backtest/test/*.test.js\""
   },
   "type": "module",
   "types": "dist/types/htmlminifier.d.ts",
