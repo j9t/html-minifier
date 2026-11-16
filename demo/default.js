@@ -285,6 +285,8 @@ const minifierData = () => ({
   share: '',
   _shareTimeout: null,
   _copiedTimeout: null,
+  // Advanced by each run and by clear, so that a run that finishes late changes nothing
+  _run: 0,
 
   bindClear: {
     'data-x-on:click'() {
@@ -455,9 +457,11 @@ const minifierData = () => ({
     this.share = '';
 
     const options = getOptions(this.options);
+    const run = ++this._run;
 
     try {
       const data = await HTMLMinifier.minify(this.input, options);
+      if (run !== this._run) return;
 
       const diff = this.input.length - data.length;
       const savings = this.input.length ? (100 * diff / this.input.length).toFixed(2) : 0;
@@ -466,6 +470,7 @@ const minifierData = () => ({
       this.stats.result = 'success';
       this.stats.text = `Original size: ${formatNumber(this.input.length)}, minified size: ${formatNumber(data.length)}, savings: ${formatNumber(diff)} (${savings}%)`;
     } catch (err) {
+      if (run !== this._run) return;
       this.output = '';
       this.stats.result = 'failure';
 
@@ -654,6 +659,7 @@ const minifierData = () => ({
 
   // Empty input and output, and the URL that would bring them back, but keep the options
   clear() {
+    this._run++;
     clearTimeout(this._shareTimeout);
     clearTimeout(this._copiedTimeout);
     Object.assign(this, { copied: '', editingInput: false, input: '', output: '', share: '', stats: { result: '', text: '' } });
