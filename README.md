@@ -2,7 +2,7 @@
 
 [![npm version](https://img.shields.io/npm/v/html-minifier.svg)](https://www.npmjs.com/package/html-minifier) [![Build status](https://github.com/j9t/html-minifier/workflows/Tests/badge.svg)](https://github.com/j9t/html-minifier/actions) [![Socket](https://badge.socket.dev/npm/package/html-minifier)](https://socket.dev/npm/package/html-minifier) [![GitHub Sponsors](https://badgen.net/static/Support/Open%20Source/cyan)](https://github.com/sponsors/j9t)
 
-Your web page optimization precision tool: HTML Minifier (HM) is a **highly effective, super-configurable, well-tested HTML minifier**, written in JavaScript, that also handles in-document CSS, JavaScript, and SVG minification.
+Your web page optimization precision tool: HTML Minifier (HM) is a **highly effective, super-configurable, well-tested HTML minifier**, written in JavaScript, that also handles in-document CSS, JavaScript, and SVG minification. Your result: leaner, faster, more sustainable pages (and fewer LLM tokens).
 
 HTML Minifier was originally created by [Juriy “kangax” Zaytsev](https://perfectionkills.com/). As of version 5, it’s actively maintained by [Jens Oliver Meiert](https://meiert.com)—richer in features, easier to use, and significantly faster ([engineering philosophy](https://meiert.com/blog/html-minifier-next-engineering-philosophy/)).
 
