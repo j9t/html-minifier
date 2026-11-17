@@ -294,7 +294,7 @@ code {
 #minifier-version {
 	color: var(--color-muted);
 	font-size: .875rem;
-	font-weight: normal;
+	font-weight: 400;
 }
 
 #input,
