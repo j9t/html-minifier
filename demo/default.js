@@ -132,8 +132,7 @@ const demoConfig = {
     label: 'Preserve line breaks'
   },
   preventAttributesEscaping: {
-    label: 'Prevent attributes escaping',
-    unsafe: true
+    label: 'Prevent attributes escaping'
   },
   processScripts: {
     label: 'Process scripts',
@@ -191,19 +190,18 @@ const demoConfig = {
     checked: true
   },
   sortAttributes: {
-    label: 'Sort attributes',
-    unsafe: true
+    label: 'Sort attributes'
   },
   sortClassNames: {
-    label: 'Sort class names',
-    unsafe: true
+    label: 'Sort class names'
   },
   trimCustomFragments: {
     label: 'Trim whitespace around custom fragments'
   },
   useShortDoctype: {
-    label: 'Use short doctype',
-    checked: true
+    label: 'Convert to short doctype',
+    checked: true,
+    unsafe: true
   }
 };
 
@@ -285,7 +283,10 @@ const minifierData = () => ({
   share: '',
   _shareTimeout: null,
   _copiedTimeout: null,
-  // Advanced by each run and by whatever voids its result (clear, presets), so that a run
+  _optionsTimeout: null,
+  // Set by the first run, so that changing options only updates a result someone asked for
+  _minified: false,
+  // Advanced by each run and by clearing, which voids its result, so that a run
   // or clipboard write that finishes late changes nothing
   _run: 0,
 
@@ -448,9 +449,20 @@ const minifierData = () => ({
         this.minify();
       }
     }
+
+    this.$watch('options', () => this.scheduleMinify());
+  },
+
+  // Debounced, as text options change with each keystroke
+  scheduleMinify() {
+    clearTimeout(this._optionsTimeout);
+    if (!this.input || !this._minified) return;
+    this._optionsTimeout = setTimeout(() => this.minify(), 300);
   },
 
   async minify() {
+    clearTimeout(this._optionsTimeout);
+    this._minified = true;
     this.stats = {
       result: '',
       text: ''
@@ -656,10 +668,6 @@ const minifierData = () => ({
       }
     });
 
-    // Clear output and stats when applying preset
-    this._run++;
-    this.output = '';
-    this.stats = { result: '', text: '' };
     this.share = '';
     if (this._shareTimeout) {
       clearTimeout(this._shareTimeout);
@@ -672,7 +680,8 @@ const minifierData = () => ({
     this._run++;
     clearTimeout(this._shareTimeout);
     clearTimeout(this._copiedTimeout);
-    Object.assign(this, { copied: '', editingInput: false, input: '', output: '', share: '', stats: { result: '', text: '' } });
+    clearTimeout(this._optionsTimeout);
+    Object.assign(this, { _minified: false, copied: '', editingInput: false, input: '', output: '', share: '', stats: { result: '', text: '' } });
     if (window.location.hash) window.history.pushState(null, '', window.location.pathname);
     this.$nextTick(() => this.$refs.input.focus());
   },
@@ -696,9 +705,6 @@ const minifierData = () => ({
       }
     });
 
-    this._run++;
-    this.output = '';
-    this.stats = { result: '', text: '' };
     this.share = '';
     // Clear any pending share message timeout
     if (this._shareTimeout) {

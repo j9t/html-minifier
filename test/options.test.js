@@ -173,9 +173,9 @@ describe('Options', () => {
     // With conservative preset
     let input = '<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN">\n<html>\n  <head>\n    <!-- Comment -->\n    <script type="application/ld+json">\n{\n  "name": "Test",\n  "url": "https://example.com/page"\n}\n    </script>\n  </head>\n</html>';
     const conservativeResult = await minify(input, getPreset('conservative'));
-    // Conservative preset should: remove comments, use short doctype, leave JSON as is
+    // Conservative preset should: remove comments, keep the doctype, leave JSON as is
     assert.ok(!conservativeResult.includes('<!-- Comment -->'), 'Conservative: Should remove comments');
-    assert.ok(conservativeResult.includes('<!doctype html>'), 'Conservative: Should use short doctype');
+    assert.ok(conservativeResult.includes('<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN">'), 'Conservative: Should keep the doctype');
     assert.ok(conservativeResult.includes('{\n  "name": "Test",\n  "url": "https://example.com/page"\n}'), 'Conservative: Should leave JSON as is');
 
     // With comprehensive preset

@@ -411,13 +411,13 @@ import { toFragment, replaceCustomFragments, isMinifiedCodeSafe } from './lib/fr
  *  Default: `false`
  *
  * @prop {boolean} [noNewlinesBeforeTagClose]
- *  When wrapping lines, never split a line in an end tag (e.g., keeps
+ *  When wrapping lines, doesn’t split a line in an end tag (e.g., keeps
  *  `</a>` from becoming `</a` and `>` on two lines).
  *
  *  Default: `false`
  *
  * @prop {boolean} [partialMarkup]
- *  When true, treat input as a partial HTML fragment rather than a complete
+ *  When true, treats input as a partial HTML fragment rather than a complete
  *  document. This preserves stray end tags (closing tags without corresponding
  *  opening tags) and prevents auto-closing of unclosed tags at the end of input.
  *  Useful for minifying template fragments, SSI includes, or other partial HTML
@@ -455,7 +455,7 @@ import { toFragment, replaceCustomFragments, isMinifiedCodeSafe } from './lib/fr
  *  Default: `[]`
  *
  * @prop {"\"" | "'"} [quoteCharacter]
- *  Preferred quote character for attribute values. If unspecified the
+ *  Preferred quote character for attribute values. If unspecified, the
  *  minifier picks the safest quote based on the attribute value.
  *
  *  Default: Auto-detected
@@ -593,7 +593,8 @@ import { toFragment, replaceCustomFragments, isMinifiedCodeSafe } from './lib/fr
  *  Default: `false`
  *
  * @prop {boolean} [useShortDoctype]
- *  Replace the HTML doctype with the short `<!doctype html>` form.
+ *  Convert any doctype to the short `<!doctype html>` form
+ *  (switches pages with legacy doctypes to standards mode).
  *  See also: https://perfectionkills.com/experimenting-with-html-minifier/#use_short_doctype
  *
  *  Default: `false`

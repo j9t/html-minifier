@@ -217,15 +217,16 @@ const optionDefinitions = {
     type: 'boolean'
   },
   trimCustomFragments: {
-    description: 'Trim whitespace around custom fragments (`--ignore-custom-fragments`) where it does not affect the output—use with `--collapse-whitespace`',
+    description: 'Trim whitespace around custom fragments (`--ignore-custom-fragments`) where it doesn’t affect the output—use with `--collapse-whitespace`',
     type: 'boolean'
   },
   strictCustomFragments: {
     description: 'Reject `ignoreCustomFragments` patterns that risk catastrophic backtracking (rather than warning about them)',
     type: 'boolean'
   },
+  // @@ Consider renaming (e.g., `convertDoctype`) with next major release, keeping an alias
   useShortDoctype: {
-    description: 'Replaces the doctype with the short HTML doctype',
+    description: 'Convert any doctype to the short HTML doctype (switches pages with legacy doctypes to standards mode)',
     type: 'boolean'
   }
 };

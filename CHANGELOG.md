@@ -4,6 +4,12 @@ As of version 5.0.0, all notable changes to HTML Minifier (HM) are documented in
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.3.0] - 2026-11-17
+
+### Changed
+
+* Removed `useShortDoctype` from the `conservative` preset, as it converts any doctype to the short HTML doctype (which switches pages with legacy doctypes—e.g., HTML 4.01 Transitional—to standards mode and can change how they render); to keep the previous behavior, add `useShortDoctype` (e.g., `--preset=conservative --use-short-doctype`)
+
 ## [5.2.0] - 2026-11-14
 
 ### Fixed

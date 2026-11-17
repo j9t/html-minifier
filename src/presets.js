@@ -14,8 +14,7 @@ export const presets = {
     conservativeCollapse: true,
     preserveLineBreaks: true,
     removeComments: true,
-    removeDefaultTypeAttributes: true,
-    useShortDoctype: true
+    removeDefaultTypeAttributes: true
   },
   comprehensive: {
     collapseAttributeWhitespace: true,

@@ -34,6 +34,12 @@ body {
 	padding: 0;
 }
 
+html {
+	-webkit-font-smoothing: antialiased;
+	scroll-behavior: smooth;
+	text-wrap: pretty;
+}
+
 body {
 	background: var(--color-background);
 	color: var(--color-text);
@@ -42,13 +48,18 @@ body {
 	padding: 1rem;
 }
 
+header,
+footer p:not(:last-child),
+.options > div:first-child {
+	margin-bottom: 1rem;
+}
+
 header {
 	align-items: center;
 	display: flex;
 	flex-wrap: wrap;
 	gap: .5rem 1.5rem;
 	justify-content: space-between;
-	margin-bottom: 1rem;
 }
 
 footer {
@@ -221,10 +232,6 @@ code {
 	padding: .75rem;
 }
 
-.alt {
-	margin-bottom: 1rem;
-}
-
 .success,
 .share {
 	color: var(--color-success);
@@ -316,6 +323,17 @@ code {
 	overflow: auto;
 	overflow-wrap: anywhere;
 	white-space: pre-wrap;
+}
+
+/* Input and output stay in view while the longer options scroll beside them */
+@media screen and (min-width: 601px) {
+
+	.workspace {
+		align-self: start;
+		position: sticky;
+		top: 1rem;
+	}
+
 }
 
 @media screen and (max-width: 600px) {
