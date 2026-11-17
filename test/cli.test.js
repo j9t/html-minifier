@@ -1673,6 +1673,11 @@ describe('CLI', { concurrency: os.availableParallelism() }, () => {
     await fs.promises.writeFile(path.resolve(dirSandbox(), configPath), JSON.stringify(config));
 
     const input = '<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN"><p>test</p>';
+    // Without the flag, the config’s `useShortDoctype: false` wins over the preset
+    const { stdout: stdoutConfig, status: statusConfig } = await spawnCli(['-c', configPath], { input });
+    assert.strictEqual(statusConfig, 0);
+    assert.ok(stdoutConfig.toString().includes('<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN">'));
+
     // Config says `useShortDoctype: false`, but CLI should override to true
     const { stdout, status } = await spawnCli(['-c', configPath, '--use-short-doctype'], {
       input: input
