@@ -132,8 +132,7 @@ const demoConfig = {
     label: 'Preserve line breaks'
   },
   preventAttributesEscaping: {
-    label: 'Prevent attributes escaping',
-    unsafe: true
+    label: 'Prevent attributes escaping'
   },
   processScripts: {
     label: 'Process scripts',
@@ -191,19 +190,18 @@ const demoConfig = {
     checked: true
   },
   sortAttributes: {
-    label: 'Sort attributes',
-    unsafe: true
+    label: 'Sort attributes'
   },
   sortClassNames: {
-    label: 'Sort class names',
-    unsafe: true
+    label: 'Sort class names'
   },
   trimCustomFragments: {
     label: 'Trim whitespace around custom fragments'
   },
   useShortDoctype: {
-    label: 'Use short doctype',
-    checked: true
+    label: 'Convert to short doctype',
+    checked: true,
+    unsafe: true
   }
 };
 

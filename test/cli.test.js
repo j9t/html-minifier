@@ -1527,7 +1527,7 @@ describe('CLI', { concurrency: os.availableParallelism() }, () => {
     // Conservative preset should apply its options
     assert.strictEqual(status, 0);
     assert.ok(stderr.toString().includes('Using preset: conservative'));
-    // Should remove comments, collapse whitespace, use short doctype
+    // Should remove comments, collapse whitespace
     const output = stdout.toString();
     assert.ok(!output.includes('<!-- comment -->'));
     assert.ok(!output.includes('  '));
@@ -1549,8 +1549,8 @@ describe('CLI', { concurrency: os.availableParallelism() }, () => {
   });
 
   test('Overrides preset options with CLI flags', async () => {
-    const input = '<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN"><p class="">test</p>';
-    // Conservative preset has `useShortDoctype`, `removeEmptyAttributes` added via CLI
+    const input = '<!-- comment --><p class="">test</p>';
+    // Conservative preset has `removeComments`, `removeEmptyAttributes` added via CLI
     const { stdout, status } = await spawnCli(['--preset', 'conservative', '--remove-empty-attributes'], {
       input: input
     });
@@ -1558,8 +1558,8 @@ describe('CLI', { concurrency: os.availableParallelism() }, () => {
     // Both preset and CLI options should be applied
     assert.strictEqual(status, 0);
     const output = stdout.toString();
-    // `useShortDoctype` from preset
-    assert.ok(output.includes('<!doctype html>'));
+    // `removeComments` from preset
+    assert.ok(!output.includes('<!-- comment -->'));
     // `removeEmptyAttributes` from CLI (empty class should be removed)
     assert.ok(!output.includes('class=""'));
   });
@@ -1668,7 +1668,7 @@ describe('CLI', { concurrency: os.availableParallelism() }, () => {
   });
 
   test('Overrides config file options with CLI flags when using a preset', async () => {
-    const config = { preset: 'conservative', useShortDoctype: false }; // Override preset’s `useShortDoctype`
+    const config = { preset: 'comprehensive', useShortDoctype: false }; // Override preset’s `useShortDoctype`
     const configPath = 'preset-config2.json';
     await fs.promises.writeFile(path.resolve(dirSandbox(), configPath), JSON.stringify(config));
 

@@ -194,8 +194,8 @@ Options can be used in config files (camelCase) or via CLI flags (kebab-case wit
 | `sortAttributes`<br>`--sort-attributes` | [Sort attributes by frequency](#sorting-attributes-and-style-classes) | `false` |
 | `sortClassNames`<br>`--sort-class-names` | [Sort style classes by frequency](#sorting-attributes-and-style-classes) | `false` |
 | `strictCustomFragments`<br>`--strict-custom-fragments` | [Reject `ignoreCustomFragments` patterns that risk catastrophic backtracking](#redos-protection) (rather than warning about them) | `false` |
-| `trimCustomFragments`<br>`--trim-custom-fragments` | Trim whitespace around custom fragments (`ignoreCustomFragments`) where it does not affect the output (see [“Minifying server-side templates”](#minifying-server-side-templates))—use with `collapseWhitespace` | `false` |
-| `useShortDoctype`<br>`--use-short-doctype` | [Replaces the doctype with the short HTML doctype](https://perfectionkills.com/experimenting-with-html-minifier/#use_short_doctype) | `false` |
+| `trimCustomFragments`<br>`--trim-custom-fragments` | Trim whitespace around custom fragments (`ignoreCustomFragments`) where it doesn’t affect the output (see [“Minifying server-side templates”](#minifying-server-side-templates))—use with `collapseWhitespace` | `false` |
+| `useShortDoctype`<br>`--use-short-doctype` | [Convert any doctype to the short HTML doctype](https://perfectionkills.com/experimenting-with-html-minifier/#use_short_doctype) (switches pages with legacy doctypes to standards mode; see [“Doctypes and quirks mode”](#doctypes-and-quirks-mode)) | `false` |
 
 ### API-only options
 
@@ -272,6 +272,8 @@ Note: `preserveLineBreaks` keeps line breaks, not indentation. HTML Minifier doe
 ### Sorting attributes and style classes
 
 `sortAttributes` and `sortClassNames` reorder attributes and class names by frequency, so that repeated markup looks more alike. This doesn’t change the plain-text size of the output, only how well it compresses: `sortAttributes` makes Gzip and Brotli output slightly smaller on average, though not on every page (see [“Optimizing for compression”](#optimizing-for-compression)); `sortClassNames` doesn’t help, and alongside `sortAttributes` cancels most of its gain with Brotli.
+
+Neither option changes what the markup means, except to code that depends on order: `sortClassNames` breaks selectors and scripts that match the whole `class` value (e.g., `[class^="btn-"]`, `[class="a b"]`, or `el.className === 'a b'`), and `sortAttributes` breaks scripts that read attributes by position (`el.attributes[0]`).
 
 ### Optimizing for compression
 
@@ -604,7 +606,7 @@ console.log(getCacheStats());
 // }
 ```
 
-A cache that was never exercised (e.g., `minifySVG` disabled, or `minify()` not yet called) reports all-zero stats.
+A cache that wasn’t exercised (e.g., `minifySVG` disabled, or `minify()` not yet called) reports all-zero stats.
 
 The CLI’s `--verbose` and `--dry` modes print the same information to STDERR at the end of a run, omitting caches that were never touched.
 
