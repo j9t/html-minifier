@@ -325,6 +325,17 @@ code {
 	white-space: pre-wrap;
 }
 
+/* Input and output stay in view while the longer options scroll beside them */
+@media screen and (min-width: 601px) {
+
+	.workspace {
+		align-self: start;
+		position: sticky;
+		top: 1rem;
+	}
+
+}
+
 @media screen and (max-width: 600px) {
 
 	nav {

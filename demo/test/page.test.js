@@ -344,6 +344,15 @@ describe('Demo', () => {
       assert.match(js, /'data-x-on:click'\(\) \{\s+this\.clear\(\);/);
     });
 
+    test('Keeps input and output in view beside the options, until the layout stacks', () => {
+      assert.match(css, /@media screen and \(min-width: 601px\) \{\s*\.workspace \{[^}]*position: sticky;/);
+    });
+
+    test('Updates a result when options change', () => {
+      assert.match(js, /this\.\$watch\('options', \(\) => this\.scheduleMinify\(\)\)/);
+      assert.match(js, /scheduleMinify\(\) \{[^}]*if \(!this\.input \|\| !this\._minified\) return;/);
+    });
+
     test('Marks unsafe options beyond color, with text for screen readers', () => {
       assert.match(css, /\.unsafe::after \{[^}]*content: '[^']+' \/ '[^']*unsafe[^']*';/);
     });
