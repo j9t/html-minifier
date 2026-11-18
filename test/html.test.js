@@ -2323,6 +2323,10 @@ describe('HTML', () => {
     assert.strictEqual(await minify('<div>a<p></p> <i>b</i></div>', { collapseWhitespace: true, removeEmptyElements: true }), '<div>a <i>b</i></div>');
     assert.strictEqual(await minify('<div>a<div></div> </div>', { collapseWhitespace: true, removeEmptyElements: true }), '<div>a</div>');
     assert.strictEqual(await minify('<div><div></div> b</div>', { collapseWhitespace: true, removeEmptyElements: true }), '<div>b</div>');
+    // A custom fragment’s placeholder is padded with tabs, which aren’t whitespace to restore
+    const fragments = { collapseWhitespace: true, removeEmptyElements: true, ignoreCustomFragments: [/\{\{.*?\}\}/] };
+    assert.strictEqual(await minify('<div>a{{x}}<div></div>b</div>', fragments), '<div>a{{x}}b</div>');
+    assert.strictEqual(await minify('<div>a{{x}} <div></div>b</div>', fragments), '<div>a{{x}} b</div>');
     assert.strictEqual(await minify('<div>a <div></div>b</div>', { collapseWhitespace: true, removeEmptyElements: true }), output);
     assert.strictEqual(await minify('<div>a <p></p> b</div>', { collapseWhitespace: true, removeEmptyElements: true }), output);
     assert.strictEqual(await minify('<div>a <div><p></p></div>b</div>', { collapseWhitespace: true, removeEmptyElements: true }), output);

@@ -1090,6 +1090,8 @@ async function minifyHTML(value, options, partialMarkup) {
   /** @type {RegExp | undefined} */
   let uidAttrLeadingPattern;
   /** @type {RegExp | undefined} */
+  let uidAttrTrailingPattern;
+  /** @type {RegExp | undefined} */
   let uidAttrExactPattern;
   // Create inline tags/text sets with custom elements
   const customElementsInput = options.inlineCustomElements ?? [];
@@ -1164,6 +1166,7 @@ async function minifyHTML(value, options, partialMarkup) {
         uidAttr = uniqueId(value);
         uidPattern = new RegExp('(\\s*)' + uidAttr + '([0-9]+)' + uidAttr + '(\\s*)', 'g');
         uidAttrLeadingPattern = new RegExp('^\\s*' + uidAttr + '(\\d+)' + uidAttr);
+        uidAttrTrailingPattern = new RegExp(uidAttr + '(\\d+)' + uidAttr + '\\s*$');
         uidAttrExactPattern = new RegExp('^' + uidAttr + '(\\d+)' + uidAttr + '$');
 
         const uidPlaceholderPattern = new RegExp(uidAttr + '\\d+' + uidAttr, 'g');
@@ -1842,6 +1845,15 @@ async function minifyHTML(value, options, partialMarkup) {
     return RE_LEADING_WHITESPACE.test(text);
   }
 
+  // Whether text ends with whitespace, likewise
+  function endsWithTextWhitespace(/** @type {string} */ text) {
+    if (uidAttr && text.endsWith(uidAttr + '\t')) {
+      const match = uidAttrTrailingPattern?.exec(text);
+      return Boolean(match && ignoredCustomMarkupChunks[+(match[1] ?? 0)]?.[2]);
+    }
+    return endsWithWhitespace(text);
+  }
+
   // Keep or trim the whitespace pending before or between elements that don’t render
   function settleTransparentGap(/** @type {boolean} */ keep) {
     if (!keep) {
@@ -2054,7 +2066,7 @@ async function minifyHTML(value, options, partialMarkup) {
       }
     }
     // Whitespace-only text loses its whitespace to the next tag if text in its place keeps it
-    textTrimmedEnd = Boolean(options.removeEmptyElements && options.collapseWhitespace) && endsWithWhitespace(textIn) && !endsWithWhitespace(text) &&
+    textTrimmedEnd = Boolean(options.removeEmptyElements && options.collapseWhitespace) && endsWithTextWhitespace(textIn) && !endsWithWhitespace(text) &&
       (text !== '' || (!stackNoTrimWhitespace.length && !endsWithWhitespace(currentChars) && Boolean(textNextTag) && textNextTag.charAt(0) !== '/' && collapseWhitespaceSmart(textIn, textPrevTag, 'comment', textPrevAttrs, emptyAttrs, options, inlineSets) !== ''));
     return text;
   }
