@@ -578,6 +578,8 @@ export class HTMLParser {
     // change rather than per loop iteration (`stackVersion` covers same-named tags whose
     // namespace differs, as a name alone does not say which element sits on top)
     let stackVersion = 0;
+    // Whether the form element pointer is set, which only an HTML `form` outside a `template` does
+    let formPointer = false;
     let rawTextVersion = -1;
     let rawTextTag = '';
     let rawTextResult = false;
@@ -1323,6 +1325,9 @@ export class HTMLParser {
           pScope = parent.pScope;
         }
       }
+      if (lowerTag === 'form' && !namespace && findTag('template') < 0) {
+        formPointer = true;
+      }
       stack.push({ tag, lowerTag, attrs, namespace, pScope });
       stackVersion++;
       return namespace;
@@ -1387,26 +1392,43 @@ export class HTMLParser {
       return true;
     }
 
-    // Outside a `template`, `</form>` closes the elements with implied end tags open in the `form`,
-    // then the `form` alone, and beyond a scope boundary, nothing, while it stays to clear the
-    // form element pointer; returns whether either applied, or `false` to close as usual
+    // What `</form>` does with the HTML `form` at `stackIndex` open: `'drop'` where browsers
+    // ignore it, `'keep'` where it closes nothing but stays to clear the form element pointer,
+    // and `''` where it closes the `form`
     // https://html.spec.whatwg.org/multipage/parsing.html#parsing-main-inbody
-    function closeForm(/** @type {number} */ stackIndex, /** @type {string} */ rest) {
-      const inTemplate = findTag('template') >= 0;
+    function readFormEnd(/** @type {number} */ stackIndex, /** @type {boolean} */ inTemplate) {
+      if (!inTemplate && !formPointer) {
+        return 'drop';
+      }
       for (let i = stack.length - 1; i > stackIndex; i--) {
         const entry = /** @type {NonNullable<(typeof stack)[number]>} */ (stack[i]);
-        if (entry.namespace) {
-          break;
+        const isBoundary = entry.namespace === 'svg' ? svgIntegrationPoints.has(entry.lowerTag)
+          : entry.namespace ? mathIntegrationPoints.has(entry.lowerTag) || entry.lowerTag === 'annotation-xml'
+            : endTagScopeBoundaries.has(entry.lowerTag);
+        if (isBoundary) {
+          return inTemplate ? 'drop' : 'keep';
         }
-        if (endTagScopeBoundaries.has(entry.lowerTag)) {
-          if (inTemplate) {
-            endTagDropped = true;
-            handler.strayEnd?.();
-          } else {
-            handler.end?.(stack[stackIndex]?.tag ?? 'form', [], false, rest);
-          }
-          return true;
-        }
+      }
+      return '';
+    }
+
+    // Outside a `template`, `</form>` closes the elements with implied end tags open
+    // in the `form`, then the `form` alone; returns whether it did, or `readFormEnd`
+    // dropped or kept it, or `false` to close as usual
+    function closeForm(/** @type {number} */ stackIndex, /** @type {string} */ rest) {
+      const inTemplate = findTag('template') >= 0;
+      const action = readFormEnd(stackIndex, inTemplate);
+      if (!inTemplate) {
+        formPointer = false;
+      }
+      if (action === 'drop') {
+        endTagDropped = true;
+        handler.strayEnd?.();
+        return true;
+      }
+      if (action === 'keep') {
+        handler.end?.(stack[stackIndex]?.tag ?? 'form', [], false, rest);
+        return true;
       }
       if (inTemplate) {
         return false;
@@ -1428,7 +1450,7 @@ export class HTMLParser {
     // Closes the element at `stackIndex`, leaving open what is open in it
     function closeOnly(/** @type {number} */ stackIndex, /** @type {string} */ rest) {
       const entry = /** @type {NonNullable<(typeof stack)[number]>} */ (stack[stackIndex]);
-      handler.end?.(entry.tag, entry.attrs, false, rest);
+      handler.end?.(entry.tag, entry.attrs, false, rest, false, true);
       stack.splice(stackIndex, 1);
       for (let i = stackIndex; i < stack.length; i++) {
         const above = /** @type {NonNullable<(typeof stack)[number]>} */ (stack[i]);
@@ -1486,6 +1508,9 @@ export class HTMLParser {
     function isDroppedEndTag(/** @type {string} */ lowerTagName) {
       const stackIndex = findEndTagTarget(lowerTagName);
       if (stackIndex >= 0) {
+        if (lowerTagName === 'form' && !stack[stackIndex]?.namespace) {
+          return readFormEnd(stackIndex, findTag('template') >= 0) === 'drop';
+        }
         if (stackIndex === stack.length - 1) {
           return false;
         }
@@ -1552,7 +1577,7 @@ export class HTMLParser {
       if (tag && !closesTop && stackIndex >= 0 && formattingElements.has(lowerTagName) && !stack[stackIndex]?.namespace && closeFormattingElement(stackIndex, rest)) {
         return lowerTagName;
       }
-      if (tag && !closesTop && stackIndex >= 0 && lowerTagName === 'form' && closeForm(stackIndex, rest)) {
+      if (tag && stackIndex >= 0 && lowerTagName === 'form' && !stack[stackIndex]?.namespace && closeForm(stackIndex, rest)) {
         return lowerTagName;
       }
       if (tag && !closesTop && stackIndex >= 0 && isBehindSpecialElement(stackIndex)) {
