@@ -5435,6 +5435,24 @@ describe('HTML', () => {
     assert.strictEqual(await minify('<p>a<slot> b </slot>c</p>', { collapseWhitespace: true }), '<p>a<slot> b </slot>c</p>');
   });
 
+  test('Does not degrade to a quadratic scan on repeated removed comments', async () => {
+    const input = '<div>x</div>' + '<!--c--> '.repeat(40000) + '<div>y</div>';
+    const start = performance.now();
+
+    assert.strictEqual(await minify(input, { collapseWhitespace: true, removeComments: true }), '<div>x</div><div>y</div>');
+    assert.ok(performance.now() - start < 1000, 'Collapsing should stay linear in the input length');
+  });
+
+  test('Does not degrade to a quadratic scan on repeated removed elements', async () => {
+    for (const part of ['<span></span> ', '<div></div> ', '<script></script> ', '<!--c--><b></b> ']) {
+      const input = '<div>x ' + part.repeat(40000) + 'y</div>';
+      const start = performance.now();
+
+      await minify(input, { collapseWhitespace: true, removeEmptyElements: true });
+      assert.ok(performance.now() - start < 1000, `Removing ${part.trim()} should stay linear in the input length`);
+    }
+  });
+
   test('Preserves whitespace next to text around elements that don’t render', async () => {
     for (const [element, end] of [['script', '</script>'], ['template', '</template>'], ['noscript', '</noscript>'], ['datalist', '</datalist>'], ['link rel="x"', ''], ['meta itemprop="x"', '']]) {
       const input = `<div>a <${element}>${end}b</div>`;

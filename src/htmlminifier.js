@@ -1000,6 +1000,19 @@ async function minifyHTML(value, options, partialMarkup) {
   // Where the last trim walk began that came to text it couldn’t trim, past end tags alone: A
   // later walk that gets there finds the same, until an entry up to there changes
   let trimSettledIndex = -1;
+  // Runs of entries that walks back through `buffer` step over, empty ones and empty ones or
+  // comments—where the last such walk began and the entry it stopped at, so a later walk that
+  // gets there can skip them, until one of those changes
+  /** @type {{top: number, bottom: number, skips: (entry: string) => boolean}} */
+  const runEmpty = { top: -1, bottom: -1, skips: entry => !entry };
+  /** @type {{top: number, bottom: number, skips: (entry: string) => boolean}} */
+  const runQuiet = {
+    top: -1,
+    bottom: -1,
+    // Comments as `<!…`, not `htmlmin:ignore` content, which renders
+    skips: entry => !entry || (entry.charCodeAt(0) === 60 /* < */ && entry.charCodeAt(1) === 33 /* ! */ && !(uidIgnore && entry.indexOf(uidIgnore) !== -1))
+  };
+  const runsSkipped = [runEmpty, runQuiet];
   // Parallel to `buffer`: whether the entry is a tag—the only place lines may break
   const bufferTags = options.maxLineLength ? /** @type {boolean[]} */ ([]) : null;
   // Under `mergeStyles` and `mergeScripts`, the elements that may be merged, by where their
@@ -1325,6 +1338,9 @@ async function minifyHTML(value, options, partialMarkup) {
     trimsRecorded?.push([index, buffer[index] ?? '']);
     buffer[index] = entry;
     if (index <= trimSettledIndex) trimSettledIndex = -1;
+    for (const run of runsSkipped) {
+      if (index <= run.top && (index === run.bottom ? run.skips(entry) : index > run.bottom && !run.skips(entry))) run.top = -1;
+    }
   }
 
   // Entries after `index` move down by one, so a settled walk from there on is no longer one
@@ -1332,6 +1348,10 @@ async function minifyHTML(value, options, partialMarkup) {
     buffer.splice(index, 1);
     bufferTags?.splice(index, 1);
     if (index <= trimSettledIndex) trimSettledIndex = -1;
+    // Past an empty entry removed from the run, the run is one shorter
+    for (const run of runsSkipped) {
+      if (index <= run.top) run.top = index > run.bottom ? run.top - 1 : -1;
+    }
     if (mergeRecords) {
       // Recorded in buffer order, so those before `index` stay as they are
       for (let i = mergeRecords.length - 1; i >= 0; i--) {
@@ -1355,6 +1375,9 @@ async function minifyHTML(value, options, partialMarkup) {
   function bufferTruncate(/** @type {number} */ length) {
     buffer.length = Math.max(0, length);
     if (length <= trimSettledIndex) trimSettledIndex = -1;
+    for (const run of runsSkipped) {
+      if (length <= run.top) run.top = length > run.bottom + 1 ? length - 1 : -1;
+    }
     if (bufferTags) bufferTags.length = buffer.length;
     if (transparentGapIndex >= buffer.length) transparentGapIndex = -1;
     if (noTrimEndIndex >= buffer.length) noTrimEndIndex = -1;
@@ -1367,6 +1390,25 @@ async function minifyHTML(value, options, partialMarkup) {
       else if (mergeRecord && mergeRecord.content >= buffer.length) mergeRecord.content = -1;
     }
     removed = true;
+  }
+
+  // The nearest entry from `index` down that `run` doesn’t skip (or 0), past what a walk went past
+  // before, so that walking back over removed nodes and comments doesn’t grow quadratic
+  function skipRun(/** @type {typeof runEmpty} */ run, /** @type {number} */ index) {
+    const indexStart = index;
+    while (index > 0 && run.skips(buffer[index] ?? '')) {
+      if (index <= run.top && index > run.bottom) {
+        index = run.bottom;
+        break;
+      }
+      index--;
+    }
+    // A shorter run doesn’t replace a longer one, which entries removed above it may expose again
+    if (index < indexStart && indexStart > run.top && indexStart - index >= run.top - run.bottom) {
+      run.top = indexStart;
+      run.bottom = index;
+    }
+    return index;
   }
 
   // The nearest entries before and from `index` that aren’t empty, as removed nodes leave them
@@ -1748,6 +1790,11 @@ async function minifyHTML(value, options, partialMarkup) {
       }
       const str = buffer[index] ?? '';
       if (!str) {
+        // Up to an entry the checks above stop at
+        const indexTo = skipRun(runEmpty, index);
+        if (indexTo < index - 1 && !(trimSettledIndex > indexTo && trimSettledIndex < index) && !(transparentGapIndex > indexTo && transparentGapIndex < index)) {
+          index = indexTo + 1;
+        }
         continue;
       }
       const endTagName = matchPlainEndTag(str);
@@ -1795,19 +1842,10 @@ async function minifyHTML(value, options, partialMarkup) {
     if (transparentGapIndex !== -1 && !transparentDepth && !inlineElementsTransparentAfter.has(nextTag) && !inlineElementsTransparent.has(nextTag)) {
       settleTransparentGap(collapseWhitespaceSmart(' ', '', nextTag, emptyAttrs, emptyAttrs, options, inlineSets) !== '');
     }
-    let charsIndex = buffer.length - 1;
     // Step back over every trailing comment and empty entry, not just one—a single step
     // stops the search at the comment itself, leaving whitespace behind that a second
     // minification run then removes
-    while (charsIndex > 0) {
-      const item = buffer[charsIndex] ?? '';
-      // Comments and empty entries only, as `<!…` or nothing at all
-      const skippable = item === '' || (item.charCodeAt(0) === 60 /* < */ && item.charCodeAt(1) === 33 /* ! */);
-      if (!skippable || (uidIgnore && item.indexOf(uidIgnore) !== -1)) {
-        break;
-      }
-      charsIndex--;
-    }
+    const charsIndex = skipRun(runQuiet, buffer.length - 1);
     // Right before an element that doesn’t render, the text’s own pass has
     // weighed both sides already, and pending whitespace waits for what follows
     if ((charsIndex === buffer.length - 1 || charsIndex === transparentGapIndex) && inlineElementsTransparent.has(nextTag)) {
@@ -1825,9 +1863,7 @@ async function minifyHTML(value, options, partialMarkup) {
     if (transparentGapIndex !== -1 || transparentDepth || !inlineElementsTransparent.has(nextTag)) {
       return false;
     }
-    while (index > 0 && !buffer[index]) {
-      index--;
-    }
+    index = skipRun(runEmpty, index);
     if (!endsWithWhitespace(buffer[index] ?? '')) {
       return false;
     }
@@ -1967,10 +2003,7 @@ async function minifyHTML(value, options, partialMarkup) {
               effectivePrevTag = textPrevTag;
             }
             // Past comments removed before, and leaving pending whitespace where it is
-            let charsIndex = buffer.length - 2;
-            while (charsIndex > 0 && !buffer[charsIndex]) {
-              charsIndex--;
-            }
+            const charsIndex = skipRun(runEmpty, buffer.length - 2);
             if (charsIndex >= 0 && charsIndex !== transparentGapIndex && (!prevComment || (!options.conservativeCollapse && / $/.test(currentChars)))) {
               bufferSet(charsIndex, (buffer[charsIndex] ?? '').replace(/\s+$/, function (trailingSpaces) {
                 text = trailingSpaces + text;
