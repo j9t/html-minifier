@@ -4,6 +4,12 @@ As of version 5.0.0, all notable changes to HTML Minifier (HM) are documented in
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.3.1] - 2026-11-18
+
+### Fixed
+
+* Fixed `</form>` closing the elements open in the form, which browsers leave open (e.g., `<form><div></form>x</div>y` became `<form><div></form>xy`), and closing elements beyond a scope boundary, where browsers ignore it (e.g., in a table cell, which lost the `</table>` that followed)
+
 ## [5.3.0] - 2026-11-17
 
 ### Changed

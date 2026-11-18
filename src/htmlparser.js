@@ -135,10 +135,12 @@ const specialElements = new Set(['address', 'article', 'aside', 'blockquote', 'b
 // End tags browsers ignore unless the element is in scope, which ends at the boundaries below, at
 // `button` for `p`, and at `ol` and `ul` for `li`. Cells and captions are left out, as they’re
 // only open within a `table` that ends the scope anyway, and `form`, whose end tag has an effect
-// even where it’s ignored.
+// even where it’s ignored (see `closeForm`).
 // https://html.spec.whatwg.org/multipage/parsing.html#parsing-main-inbody
 const scopedEndTagElements = new Set(['address', 'applet', 'article', 'aside', 'blockquote', 'button', 'center', 'dd', 'details', 'dialog', 'dir', 'div', 'dl', 'dt', 'fieldset', 'figcaption', 'figure', 'footer', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'header', 'hgroup', 'li', 'listing', 'main', 'marquee', 'menu', 'nav', 'object', 'ol', 'p', 'pre', 'search', 'section', 'summary', 'ul']);
 const endTagScopeBoundaries = new Set(['applet', 'html', 'marquee', 'object', 'table', 'template']);
+// https://html.spec.whatwg.org/multipage/parsing.html#generate-implied-end-tags
+const impliedEndTagElements = new Set(['dd', 'dt', 'li', 'optgroup', 'option', 'p', 'rb', 'rp', 'rt', 'rtc']);
 
 const isSpecialOrBoundary = (/** @type {string} */ lowerTag) => specialElements.has(lowerTag) || formattingScopeBoundaries.has(lowerTag);
 
@@ -1381,6 +1383,50 @@ export class HTMLParser {
       if (scope !== 'special') {
         return false;
       }
+      closeOnly(stackIndex, rest);
+      return true;
+    }
+
+    // Outside a `template`, `</form>` closes the elements with implied end tags open in the `form`,
+    // then the `form` alone, and beyond a scope boundary, nothing, while it stays to clear the
+    // form element pointer; returns whether either applied, or `false` to close as usual
+    // https://html.spec.whatwg.org/multipage/parsing.html#parsing-main-inbody
+    function closeForm(/** @type {number} */ stackIndex, /** @type {string} */ rest) {
+      const inTemplate = findTag('template') >= 0;
+      for (let i = stack.length - 1; i > stackIndex; i--) {
+        const entry = /** @type {NonNullable<(typeof stack)[number]>} */ (stack[i]);
+        if (entry.namespace) {
+          break;
+        }
+        if (endTagScopeBoundaries.has(entry.lowerTag)) {
+          if (inTemplate) {
+            endTagDropped = true;
+            handler.strayEnd?.();
+          } else {
+            handler.end?.(stack[stackIndex]?.tag ?? 'form', [], false, rest);
+          }
+          return true;
+        }
+      }
+      if (inTemplate) {
+        return false;
+      }
+      let top = stack.length - 1;
+      while (top > stackIndex && !stack[top]?.namespace && impliedEndTagElements.has(stack[top]?.lowerTag ?? '')) {
+        top--;
+      }
+      if (top === stackIndex) {
+        return false;
+      }
+      if (top < stack.length - 1) {
+        parseEndTagAt(top + 1);
+      }
+      closeOnly(stackIndex, rest);
+      return true;
+    }
+
+    // Closes the element at `stackIndex`, leaving open what is open in it
+    function closeOnly(/** @type {number} */ stackIndex, /** @type {string} */ rest) {
       const entry = /** @type {NonNullable<(typeof stack)[number]>} */ (stack[stackIndex]);
       handler.end?.(entry.tag, entry.attrs, false, rest);
       stack.splice(stackIndex, 1);
@@ -1391,7 +1437,6 @@ export class HTMLParser {
         }
       }
       stackVersion++;
-      return true;
     }
 
     // Browsers ignore the end tag of an ordinary element with a special one open inside it
@@ -1465,7 +1510,6 @@ export class HTMLParser {
       return target >= 0 && isOutOfScope(lowerTagName, target) ? -1 : target;
     }
 
-    // @@ Close only `form` on `</form>` (`<form><div></form>x</div>y` should stay as is)
     function isOutOfScope(/** @type {string} */ lowerTagName, /** @type {number} */ stackIndex) {
       if (!scopedEndTagElements.has(lowerTagName) || stack[stackIndex]?.namespace) {
         return false;
@@ -1506,6 +1550,9 @@ export class HTMLParser {
 
       const closesTop = stackIndex === stack.length - 1;
       if (tag && !closesTop && stackIndex >= 0 && formattingElements.has(lowerTagName) && !stack[stackIndex]?.namespace && closeFormattingElement(stackIndex, rest)) {
+        return lowerTagName;
+      }
+      if (tag && !closesTop && stackIndex >= 0 && lowerTagName === 'form' && closeForm(stackIndex, rest)) {
         return lowerTagName;
       }
       if (tag && !closesTop && stackIndex >= 0 && isBehindSpecialElement(stackIndex)) {

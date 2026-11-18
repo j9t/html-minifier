@@ -5590,6 +5590,22 @@ describe('HTML', () => {
     assert.strictEqual(await minify('<p><em><ul><li>b</ul></em></p>', { removeEmptyElements: true }), '<p><em><ul><li>b</ul></em></p>');
   });
 
+  test('Closes only the `form` at `</form>`', async () => {
+    // Browsers leave open what is open in it (after closing elements with implied end tags)
+    assert.strictEqual(await minify('<form><div></form>x</div>y'), '<form><div></form>x</div>y');
+    assert.strictEqual(await minify('<form><span></form>x</span>y'), '<form><span></form>x</span>y');
+    assert.strictEqual(await minify('<form><div><p></form>x</div>y'), '<form><div><p></form>x</div>y');
+    assert.strictEqual(await minify('<div><form><div></form>x</div>y</div>z', { collapseWhitespace: true, removeOptionalTags: true }), '<div><form><div></form>x</div>y</div>z');
+
+    // Within a `template`, it closes what is open in it, too
+    assert.strictEqual(await minify('<template><form><div></form>x</div>y</template>'), '<template><form><div></form>xy</template>');
+
+    // Beyond a scope boundary, it closes nothing, but stays to let a later `form` open
+    assert.strictEqual(await minify('<form><table><tr><td></form>x</table>y'), '<form><table><tr><td></form>x</table>y');
+    assert.strictEqual(await minify('<form><table><tr><td></form><form>x</form></table>y'), '<form><table><tr><td></form><form>x</form></table>y');
+    assert.strictEqual(await minify('<form><template></form>x</template>y'), '<form><template>x</template>y');
+  });
+
   test('Preserves whitespace around `data`', async () => {
     assert.strictEqual(await minify('<p>Price <data value="1">10</data> EUR</p>', { collapseWhitespace: true }), '<p>Price <data value="1">10</data> EUR</p>');
     assert.strictEqual(await minify('<p>Price <data value="1"> 10 </data> EUR</p>', { collapseWhitespace: true }), '<p>Price <data value="1">10 </data>EUR</p>');
