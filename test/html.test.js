@@ -2317,8 +2317,12 @@ describe('HTML', () => {
     output = '<div>both</div>';
     assert.strictEqual(await minify(input, { collapseWhitespace: true, removeEmptyElements: true }), output);
 
-    // A block trims the space before it, which has to come back when the block goes
+    // A block trims the space next to it, which has to come back when the block goes
     output = '<div>a b</div>';
+    assert.strictEqual(await minify('<div>a<div></div> b</div>', { collapseWhitespace: true, removeEmptyElements: true }), output);
+    assert.strictEqual(await minify('<div>a<p></p> <i>b</i></div>', { collapseWhitespace: true, removeEmptyElements: true }), '<div>a <i>b</i></div>');
+    assert.strictEqual(await minify('<div>a<div></div> </div>', { collapseWhitespace: true, removeEmptyElements: true }), '<div>a</div>');
+    assert.strictEqual(await minify('<div><div></div> b</div>', { collapseWhitespace: true, removeEmptyElements: true }), '<div>b</div>');
     assert.strictEqual(await minify('<div>a <div></div>b</div>', { collapseWhitespace: true, removeEmptyElements: true }), output);
     assert.strictEqual(await minify('<div>a <p></p> b</div>', { collapseWhitespace: true, removeEmptyElements: true }), output);
     assert.strictEqual(await minify('<div>a <div><p></p></div>b</div>', { collapseWhitespace: true, removeEmptyElements: true }), output);

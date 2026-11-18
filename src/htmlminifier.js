@@ -1023,6 +1023,8 @@ async function minifyHTML(value, options, partialMarkup) {
   // Entries changed while a start tag trims, with what they were, while recording
   /** @type {Array<[number, string]> | null} */
   let trimsRecorded = null;
+  // Whether the last element is a removed block, which text after it reads past
+  let followsRemovedBlock = false;
   // End tags not written, for the start tag that comes next (`text` is empty where one can’t be)
   /** @type {Array<{tag: string, text: string}>} */
   let impliedEnds = [];
@@ -1310,7 +1312,10 @@ async function minifyHTML(value, options, partialMarkup) {
     textTrimmedEndIndex = -1;
     buffer.push(entry);
     bufferTags?.push(isTag);
-    if (entry) removed = false;
+    if (entry) {
+      removed = false;
+      followsRemovedBlock = false;
+    }
   }
 
   function bufferSet(/** @type {number} */ index, /** @type {string} */ entry) {
@@ -1916,8 +1921,8 @@ async function minifyHTML(value, options, partialMarkup) {
   // and so is to be escaped again
   let textForeign = false;
   let textForeignDecoded = false;
-  // Whether the text lost its trailing whitespace to the tag after it, and where it went
-  // in `buffer` then, for that whitespace to come back should the element go
+  // Whether the text loses its trailing whitespace to the tag after it, and its entry
+  // in `buffer`, for that whitespace to come back should the element go
   let textTrimmedEnd = false;
   let textTrimmedEndIndex = -1;
 
@@ -2048,7 +2053,9 @@ async function minifyHTML(value, options, partialMarkup) {
         text = collapseNoBreakSpaces(text, options);
       }
     }
-    textTrimmedEnd = Boolean(options.removeEmptyElements && text) && endsWithWhitespace(textIn) && !endsWithWhitespace(text);
+    // Whitespace-only text loses its whitespace to the next tag if text in its place keeps it
+    textTrimmedEnd = Boolean(options.removeEmptyElements && options.collapseWhitespace) && endsWithWhitespace(textIn) && !endsWithWhitespace(text) &&
+      (text !== '' || (!stackNoTrimWhitespace.length && !endsWithWhitespace(currentChars) && Boolean(textNextTag) && textNextTag.charAt(0) !== '/' && collapseWhitespaceSmart(textIn, textPrevTag, 'comment', textPrevAttrs, emptyAttrs, options, inlineSets) !== ''));
     return text;
   }
 
@@ -2565,7 +2572,7 @@ async function minifyHTML(value, options, partialMarkup) {
       }
 
       // What the text before loses to an element that may go, with what it was, to come back
-      // should it go: As it trims there, and as the text did before, knowing what came next
+      // should it go: What trims here, and what the text trims seeing this tag next
       /** @type {Array<[number, string]>} */
       const trims = [];
       let charsBeforeRestored = charsBefore;
@@ -2842,6 +2849,8 @@ async function minifyHTML(value, options, partialMarkup) {
             }
             if (openElement.before.gapIndex !== -1) transparentGapIndex = openElement.before.gapIndex;
           }
+          // @@ Keep space by removed inline elements near `script` (`a<script>1</script><b></b> c`)
+          followsRemovedBlock = !inlineElements.has(lowerTag || tag) && !inlineElementsTransparent.has(lowerTag || tag);
           // What it made optional is up to what comes next now
           if (openElement?.omittedEndTag) {
             bufferPush(openElement.omittedEndTag.text, true);
@@ -2947,7 +2956,7 @@ async function minifyHTML(value, options, partialMarkup) {
         if (mergeRecord.kind === 'style' && markers.length && markers.some(marker => text.includes(marker))) mergeRecord.key = null;
       }
       // Publish this node’s context for the `charsCollapse`/`charsFinalize` phases
-      textPrevTag = prevTag === '' ? 'comment' : prevTag;
+      textPrevTag = followsRemovedBlock ? charsPrevTag || 'comment' : prevTag === '' ? 'comment' : prevTag;
       textNextTag = nextTag === '' ? 'comment' : nextTag;
       textPrevAttrs = prevAttrs || [];
       textNextAttrs = nextAttrs || [];
