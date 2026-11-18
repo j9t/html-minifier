@@ -5472,6 +5472,24 @@ describe('HTML', () => {
     }
     assert.strictEqual(await minify('<p><img src="a" alt="b"> <link rel="x"> c</p>', { collapseWhitespace: true, maxLineLength: 1000 }), '<p><img src="a" alt="b"><link rel="x"> c</p>');
 
+    // Comments and removed elements after such elements don’t take the space either
+    for (const input of ['<p>a <script></script><!--c-->b</p>', '<p>a<script></script> <script></script><!--c-->b</p>', '<p>a <link rel="x"><!--c--><!--d-->b</p>']) {
+      assert.strictEqual(await minify(input, { collapseWhitespace: true }), input);
+    }
+    assert.strictEqual(await minify('<p>a<script></script> <!--c--><script></script>b</p>', { collapseWhitespace: true, removeComments: true }), '<p>a<script></script> <script></script>b</p>');
+    assert.strictEqual(await minify('<p>a<script></script> <!--c--><!--d--><!--e--><script></script>b</p>', { collapseWhitespace: true, removeComments: true }), '<p>a<script></script> <script></script>b</p>');
+    assert.strictEqual(await minify('<p>a<script></script> <!--c--><!--d--> <script></script>b</p>', { collapseWhitespace: true, removeComments: true }), '<p>a<script></script> <script></script>b</p>');
+    assert.strictEqual(await minify('<p>a<script></script><span></span> b</p>', { collapseWhitespace: true, removeEmptyElements: true }), '<p>a b</p>');
+    assert.strictEqual(await minify('<p>a<link rel="x"><span></span> b</p>', { collapseWhitespace: true, removeEmptyElements: true }), '<p>a<link rel="x"> b</p>');
+    assert.strictEqual(await minify('<p>a<link rel="x"> <span></span> <link rel="y">b</p>', { collapseWhitespace: true, removeEmptyElements: true }), '<p>a<link rel="x"> <link rel="y">b</p>');
+    assert.strictEqual(await minify('<p>a<script></script> <script></script> <script></script>b</p>', { collapseWhitespace: true, removeEmptyElements: true }), '<p>a b</p>');
+    assert.strictEqual(await minify('<p>a<script></script> <script></script><!--c--><link rel="x">b</p>', { collapseWhitespace: true, removeComments: true, removeEmptyElements: true }), '<p>a <link rel="x">b</p>');
+    assert.strictEqual(await minify('<p>a <template></template><!--c-->b</p>', { collapseWhitespace: true, removeComments: true, removeEmptyElements: true }), '<p>a b</p>');
+    assert.strictEqual(await minify('<p>a <script></script> <span></span><!--c-->b</p>', { collapseWhitespace: true, removeComments: true, removeEmptyElements: true }), '<p>a b</p>');
+    assert.strictEqual(await minify('<p>a<script></script> <!--c--><span></span> <script></script>b</p>', { collapseWhitespace: true, removeComments: true, removeEmptyElements: true }), '<p>a b</p>');
+    assert.strictEqual(await minify('<p>a <link rel="x"> <span></span> <!--c-->b</p>', { collapseWhitespace: true, removeComments: true, removeEmptyElements: true }), '<p>a<link rel="x"> b</p>');
+    assert.strictEqual(await minify('<p>a<link rel="x"> <link rel="y"><!--c--> <link rel="z">b</p>', { collapseWhitespace: true, removeComments: true }), '<p>a<link rel="x"> <link rel="y"><link rel="z">b</p>');
+
     // At the end of the document, nothing follows that would render pending whitespace
     assert.strictEqual(await minify('a <link rel="x">', { collapseWhitespace: true }), 'a<link rel="x">');
     assert.strictEqual(await minify('a <script></script>', { collapseWhitespace: true }), 'a<script></script>');

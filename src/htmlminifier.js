@@ -25,6 +25,7 @@ import {
   inlineElementsToKeepWhitespaceWithin,
   inlineElementsTransparent,
   inlineElementsTransparentAfter,
+  inlineElementsTransparentVoid,
   specialContentElements,
   rawTextElements,
   htmlElements,
@@ -1014,10 +1015,10 @@ async function minifyHTML(value, options, partialMarkup) {
   let currentChars = '';
   /** @type {boolean} */
   let hasChars = false;
-  // Open elements under `removeEmptyElements`, so an element whose content
-  // went is removed, too: where its start tag sits in `buffer`, and whether
-  // anything kept went in since
-  /** @type {Array<{tag: string, index: number, empty: boolean, omittedStartTag?: {tag: string, text: string} | undefined, omittedEndTag?: {tag: string, text: string} | undefined, impliedEnds?: Array<{tag: string, text: string}> | undefined}>} */
+  // Open elements under `removeEmptyElements`, so an element whose content went
+  // is removed, too: where its start tag sits in `buffer`, and whether anything
+  // kept went in since, and what the text before it was
+  /** @type {Array<{tag: string, index: number, empty: boolean, before: {chars: string, prevTag: string}, omittedStartTag?: {tag: string, text: string} | undefined, omittedEndTag?: {tag: string, text: string} | undefined, impliedEnds?: Array<{tag: string, text: string}> | undefined}>} */
   const openElements = [];
   // End tags not written, for the start tag that comes next (`text` is empty where one can’t be)
   /** @type {Array<{tag: string, text: string}>} */
@@ -1728,6 +1729,10 @@ async function minifyHTML(value, options, partialMarkup) {
         trimSettledIndex = indexStart;
         return;
       }
+      // Pending whitespace waits for what follows the elements that don’t render
+      if (index === transparentGapIndex) {
+        return;
+      }
       const str = buffer[index] ?? '';
       if (!str) {
         continue;
@@ -1791,13 +1796,30 @@ async function minifyHTML(value, options, partialMarkup) {
       charsIndex--;
     }
     // Right before an element that doesn’t render, the text’s own pass has
-    // weighed both sides already
-    //
-    // @@ Spare a pending gap, too (`charsIndex === transparentGapIndex`): 3+ empties lose a space
-    if (charsIndex === buffer.length - 1 && inlineElementsTransparent.has(nextTag)) {
+    // weighed both sides already, and pending whitespace waits for what follows
+    if ((charsIndex === buffer.length - 1 || charsIndex === transparentGapIndex) && inlineElementsTransparent.has(nextTag)) {
+      return;
+    }
+    if (holdTransparentGap(charsIndex, nextTag)) {
       return;
     }
     trimTrailingWhitespace(charsIndex, nextTag);
+  }
+
+  // Whitespace weighed against a comment or an element removed since waits for what follows
+  // the element that doesn’t render, too; returns whether it does
+  function holdTransparentGap(/** @type {number} */ index, /** @type {string} */ nextTag) {
+    if (transparentGapIndex !== -1 || transparentDepth || !inlineElementsTransparent.has(nextTag)) {
+      return false;
+    }
+    while (index > 0 && !buffer[index]) {
+      index--;
+    }
+    if (!endsWithWhitespace(buffer[index] ?? '')) {
+      return false;
+    }
+    transparentGapIndex = index;
+    return true;
   }
 
   // Keep or trim the whitespace pending before or between elements that don’t render
@@ -1899,21 +1921,25 @@ async function minifyHTML(value, options, partialMarkup) {
         // decisions; this is only used in `collapseWhitespaceSmart`—`textPrevTag` itself is not
         // modified, to avoid side effects on the `inlineTextSet` branch below
         let effectivePrevTag = textPrevTag;
-        if (textPrevTag === 'comment') {
+        const followsComment = textPrevTag === 'comment';
+        if (followsComment) {
           const prevComment = buffer[buffer.length - 1] ?? '';
           if (!uidIgnore || prevComment.indexOf(uidIgnore) === -1) {
             if (!prevComment) {
               textPrevTag = charsPrevTag;
               effectivePrevTag = textPrevTag;
             }
-            if (buffer.length > 1 && (!prevComment || (!options.conservativeCollapse && / $/.test(currentChars)))) {
-              const charsIndex = buffer.length - 2;
+            // Past comments removed before, and leaving pending whitespace where it is
+            let charsIndex = buffer.length - 2;
+            while (charsIndex > 0 && !buffer[charsIndex]) {
+              charsIndex--;
+            }
+            if (charsIndex >= 0 && charsIndex !== transparentGapIndex && (!prevComment || (!options.conservativeCollapse && / $/.test(currentChars)))) {
               bufferSet(charsIndex, (buffer[charsIndex] ?? '').replace(/\s+$/, function (trailingSpaces) {
                 text = trailingSpaces + text;
-                // It moved, and is judged again as part of this text
-                if (currentChars.endsWith(trailingSpaces)) {
-                  currentChars = currentChars.slice(0, -trailingSpaces.length);
-                }
+                // It moved, and is judged again as part of this text; what is left before it
+                // doesn’t end in whitespace anymore
+                currentChars = currentChars.replace(/\s+$/, '');
                 return '';
               }));
             }
@@ -1977,6 +2003,10 @@ async function minifyHTML(value, options, partialMarkup) {
             }
           } else {
             text = collapsed;
+            // A comment doesn’t render either, so text after it decides on pending whitespace
+            if (transparentGapIndex !== -1 && !transparentDepth && followsComment && text) {
+              settleTransparentGap(!RE_LEADING_WHITESPACE.test(text));
+            }
             // Whitespace before an element that doesn’t render waits for what follows it, too
             if (!transparentDepth && inlineElementsTransparent.has(textNextTag) && endsWithWhitespace(text)) {
               transparentGapPending = true;
@@ -1985,7 +2015,7 @@ async function minifyHTML(value, options, partialMarkup) {
         } else {
           text = collapseWhitespace(text, options, true, true);
         }
-        if (!text && RE_TRAILING_WHITESPACE.test(currentChars) && textPrevTag && textPrevTag.charAt(0) === '/') {
+        if (!text && RE_TRAILING_WHITESPACE.test(currentChars) && textPrevTag && textPrevTag.charAt(0) === '/' && !holdTransparentGap(buffer.length - 1, textNextTag)) {
           trimTrailingWhitespace(buffer.length - 1, textNextTag);
         }
       }
@@ -2456,9 +2486,12 @@ async function minifyHTML(value, options, partialMarkup) {
         }
         replaceContentTypePragma(attrs, markers);
       }
+      const charsBefore = currentChars;
+      const charsPrevTagBefore = charsPrevTag;
       currentTag = tag;
       charsPrevTag = tag;
-      if (!inlineTextSet.has(lowerTag || tag)) {
+      // An empty element that doesn’t render leaves the text before it in play
+      if (!inlineTextSet.has(lowerTag || tag) && !inlineElementsTransparentVoid.has(lowerTag || tag)) {
         // Replaced content counts as content for the whitespace after what holds it
         currentChars = inlineElementsToKeepWhitespace.has(lowerTag || tag) ? '|' : '';
       }
@@ -2567,7 +2600,7 @@ async function minifyHTML(value, options, partialMarkup) {
           markOpenElementFilled();
         } else {
           // A start tag not written can’t be removed with its element
-          openElements.push({ tag, index: buffer.length - 1, empty: !autoGenerated || Boolean(options.includeAutoGeneratedTags), omittedStartTag, omittedEndTag, impliedEnds: impliedEndsClosed });
+          openElements.push({ tag, index: buffer.length - 1, empty: !autoGenerated || Boolean(options.includeAutoGeneratedTags), omittedStartTag, omittedEndTag, impliedEnds: impliedEndsClosed, before: { chars: charsBefore, prevTag: charsPrevTagBefore } });
         }
       }
 
@@ -2756,6 +2789,11 @@ async function minifyHTML(value, options, partialMarkup) {
           optionalStartTag = '';
           optionalEndTag = '';
           optionalEndTagEmitted = false;
+          // The text before it is what comes before what follows now
+          if (openElement) {
+            currentChars = openElement.before.chars;
+            charsPrevTag = openElement.before.prevTag;
+          }
           // What it made optional is up to what comes next now
           if (openElement?.omittedEndTag) {
             bufferPush(openElement.omittedEndTag.text, true);
