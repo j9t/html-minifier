@@ -4,7 +4,7 @@ As of version 5.0.0, all notable changes to HTML Minifier (HM) are documented in
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [5.3.1] - 2026-11-18
+## [5.3.1] - 2026-11-19
 
 ### Fixed
 
