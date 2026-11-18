@@ -1015,11 +1015,14 @@ async function minifyHTML(value, options, partialMarkup) {
   let currentChars = '';
   /** @type {boolean} */
   let hasChars = false;
-  // Open elements under `removeEmptyElements`, so an element whose content went
-  // is removed, too: where its start tag sits in `buffer`, and whether anything
-  // kept went in since, and what the text before it was
-  /** @type {Array<{tag: string, index: number, empty: boolean, before: {chars: string, prevTag: string}, omittedStartTag?: {tag: string, text: string} | undefined, omittedEndTag?: {tag: string, text: string} | undefined, impliedEnds?: Array<{tag: string, text: string}> | undefined}>} */
+  // Open elements under `removeEmptyElements`, so an element whose content went is removed,
+  // too: where its start tag sits in `buffer`, and whether anything kept went in since,
+  // and what the text before it was (including entries its start tag trimmed)
+  /** @type {Array<{tag: string, index: number, empty: boolean, before: {chars: string, prevTag: string, gapIndex: number, trims: Array<[number, string]>}, omittedStartTag?: {tag: string, text: string} | undefined, omittedEndTag?: {tag: string, text: string} | undefined, impliedEnds?: Array<{tag: string, text: string}> | undefined}>} */
   const openElements = [];
+  // Entries changed while a start tag trims, with what they were, while recording
+  /** @type {Array<[number, string]> | null} */
+  let trimsRecorded = null;
   // End tags not written, for the start tag that comes next (`text` is empty where one can’t be)
   /** @type {Array<{tag: string, text: string}>} */
   let impliedEnds = [];
@@ -1304,12 +1307,14 @@ async function minifyHTML(value, options, partialMarkup) {
   }
 
   function bufferPush(/** @type {string} */ entry, /** @type {boolean} */ isTag) {
+    textTrimmedEndIndex = -1;
     buffer.push(entry);
     bufferTags?.push(isTag);
     if (entry) removed = false;
   }
 
   function bufferSet(/** @type {number} */ index, /** @type {string} */ entry) {
+    trimsRecorded?.push([index, buffer[index] ?? '']);
     buffer[index] = entry;
     if (index <= trimSettledIndex) trimSettledIndex = -1;
   }
@@ -1911,9 +1916,14 @@ async function minifyHTML(value, options, partialMarkup) {
   // and so is to be escaped again
   let textForeign = false;
   let textForeignDecoded = false;
+  // Whether the text lost its trailing whitespace to the tag after it, and where it went
+  // in `buffer` then, for that whitespace to come back should the element go
+  let textTrimmedEnd = false;
+  let textTrimmedEndIndex = -1;
 
   // Whitespace collapsing phase (sync)
   function charsCollapse(/** @type {string} */ text) {
+    const textIn = text;
     // Trim a single trailing newline inside `pre`, often a template engine artifact (several are
     // likely intentional formatting); in `textarea`, it is part of the value
     if (options.collapseWhitespace && stackNoTrimWhitespace.length) {
@@ -2013,8 +2023,9 @@ async function minifyHTML(value, options, partialMarkup) {
             }
           } else {
             text = collapsed;
-            // A comment doesn’t render either, so text after it decides on pending whitespace
-            if (transparentGapIndex !== -1 && !transparentDepth && followsComment && text) {
+            // Neither does a comment or an element removed, so text after one decides on
+            // pending whitespace
+            if (transparentGapIndex !== -1 && !transparentDepth && text) {
               settleTransparentGap(!startsWithWhitespace(text));
             }
             // Whitespace before an element that doesn’t render waits for what follows it, too
@@ -2037,6 +2048,7 @@ async function minifyHTML(value, options, partialMarkup) {
         text = collapseNoBreakSpaces(text, options);
       }
     }
+    textTrimmedEnd = Boolean(options.removeEmptyElements && text) && endsWithWhitespace(textIn) && !endsWithWhitespace(text);
     return text;
   }
 
@@ -2141,6 +2153,7 @@ async function minifyHTML(value, options, partialMarkup) {
       if (text) transparentGapIndex = buffer.length;
     }
     bufferPush(text, false);
+    textTrimmedEndIndex = textTrimmedEnd ? buffer.length - 1 : -1;
     if (followsRemoval) {
       removeWhitespaceLine(buffer.length - 1);
     }
@@ -2551,10 +2564,29 @@ async function minifyHTML(value, options, partialMarkup) {
         optionalEndTagEmitted = false;
       }
 
+      // What the text before loses to an element that may go, with what it was, to come back
+      // should it go: As it trims there, and as the text did before, knowing what came next
+      /** @type {Array<[number, string]>} */
+      const trims = [];
+      let charsBeforeRestored = charsBefore;
+      const recordsTrims = Boolean(options.removeEmptyElements) && !unary;
+      if (recordsTrims && textTrimmedEndIndex !== -1 && textTrimmedEndIndex === buffer.length - 1 && !endsWithWhitespace(buffer[textTrimmedEndIndex] ?? '')) {
+        trims.push([textTrimmedEndIndex, buffer[textTrimmedEndIndex] + ' ']);
+        charsBeforeRestored += ' ';
+      }
       // Set whitespace flags for nested tags (e.g., `<code>` within a `<pre>`); verbatim
       // whitespace is tracked without `collapseWhitespace` too, as `removeWhitespaceLine` spares it
       if (options.collapseWhitespace && !stackNoTrimWhitespace.length) {
+        if (recordsTrims) trimsRecorded = trims;
         squashTrailingWhitespace(lowerTag || tag);
+        trimsRecorded = null;
+      }
+      // Whitespace that comes back is pending, as before what doesn’t render
+      let gapIndexBefore = -1;
+      if (!transparentDepth) {
+        for (const [index, text] of trims) {
+          if (index > gapIndexBefore && endsWithWhitespace(text) && !endsWithWhitespace(buffer[index] ?? '')) gapIndexBefore = index;
+        }
       }
       if (options.collapseWhitespace && !unary && inlineElementsTransparent.has(lowerTag || tag)) {
         transparentDepth++;
@@ -2610,7 +2642,7 @@ async function minifyHTML(value, options, partialMarkup) {
           markOpenElementFilled();
         } else {
           // A start tag not written can’t be removed with its element
-          openElements.push({ tag, index: buffer.length - 1, empty: !autoGenerated || Boolean(options.includeAutoGeneratedTags), omittedStartTag, omittedEndTag, impliedEnds: impliedEndsClosed, before: { chars: charsBefore, prevTag: charsPrevTagBefore } });
+          openElements.push({ tag, index: buffer.length - 1, empty: !autoGenerated || Boolean(options.includeAutoGeneratedTags), omittedStartTag, omittedEndTag, impliedEnds: impliedEndsClosed, before: { chars: charsBeforeRestored, prevTag: charsPrevTagBefore, gapIndex: gapIndexBefore, trims } });
         }
       }
 
@@ -2803,6 +2835,12 @@ async function minifyHTML(value, options, partialMarkup) {
           if (openElement) {
             currentChars = openElement.before.chars;
             charsPrevTag = openElement.before.prevTag;
+            const trims = openElement.before.trims;
+            for (let i = trims.length - 1; i >= 0; i--) {
+              const [index, text] = /** @type {[number, string]} */ (trims[i]);
+              bufferSet(index, text);
+            }
+            if (openElement.before.gapIndex !== -1) transparentGapIndex = openElement.before.gapIndex;
           }
           // What it made optional is up to what comes next now
           if (openElement?.omittedEndTag) {
