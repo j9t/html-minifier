@@ -13,6 +13,7 @@
 	--color-panel: light-dark(#f7f7f5, #202226);
 	--color-success: light-dark(#007000, #5fd068);
 	--color-text: light-dark(#26282c, #e6e6e3);
+	--font-code: ui-monospace, sfmono-regular, menlo, consolas, 'liberation mono', monospace;
 	--radius: 4px;
 	color-scheme: light dark;
 }
@@ -27,9 +28,10 @@ p {
 	margin: 0;
 }
 
+/* Font sizes stay on a scale of .5, .75, .875, 1, and 1.25rem (8–20px), leading at 1.5 or, airier, 1.75 */
 html,
 body {
-	font-size: 16px;
+	font-size: 100%;
 	line-height: 1.5;
 	padding: 0;
 }
@@ -63,7 +65,6 @@ header {
 }
 
 footer {
-	line-height: 1.75;
 	margin-top: 2rem;
 }
 
@@ -111,6 +112,7 @@ input[type='number'] {
 	background: var(--color-field);
 	border: 1px solid var(--color-field-border);
 	border-radius: var(--radius);
+	font-size: .875rem;
 	margin: .2rem 0;
 	padding: .125rem .25rem;
 }
@@ -172,18 +174,17 @@ i {
 }
 
 code,
-.quiet {
-	font-size: smaller;
+.badge {
+	font-size: .75rem;
 }
 
 code {
-	word-break: break-all;
+	font-family: var(--font-code);
 }
 
 .badge {
 	border-radius: var(--radius);
 	display: inline-flex;
-	font-size: .75rem;
 	overflow: hidden;
 	text-decoration: none;
 }
@@ -222,6 +223,7 @@ code {
 
 .quiet {
 	color: var(--color-muted);
+	font-size: .875rem;
 }
 
 .options {
@@ -277,7 +279,7 @@ code {
 
 .invisible.zero-width::after {
 	content: attr(data-marker);
-	font-size: .7em;
+	font-size: .5rem;
 	padding: 0 1px;
 	vertical-align: middle;
 }
@@ -308,12 +310,13 @@ code {
 	box-sizing: border-box;
 	color: var(--color-text);
 	display: block;
-	font-size: .8333rem;
+	font-family: var(--font-code);
+	font-size: .75rem;
 	height: 36vh;
-	line-height: normal;
+	line-height: 1.75;
 	margin: 0 0 5px;
 	min-height: 15rem;
-	padding: 2px 4px;
+	padding: .25rem;
 	resize: vertical;
 	width: 100%;
 }
