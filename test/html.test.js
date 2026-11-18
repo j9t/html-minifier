@@ -5435,21 +5435,39 @@ describe('HTML', () => {
     assert.strictEqual(await minify('<p>a<slot> b </slot>c</p>', { collapseWhitespace: true }), '<p>a<slot> b </slot>c</p>');
   });
 
-  test('Does not degrade to a quadratic scan on repeated removed comments', async () => {
-    const input = '<div>x</div>' + '<!--c--> '.repeat(40000) + '<div>y</div>';
-    const start = performance.now();
+  test('Removes repeated comments and empty elements in linear time', async () => {
+    const comments = { collapseWhitespace: true, removeComments: true };
+    const elements = { collapseWhitespace: true, removeEmptyElements: true };
+    assert.strictEqual(await minify('<div>x</div>' + '<!--c--> '.repeat(3) + '<div>y</div>', comments), '<div>x</div><div>y</div>');
 
-    assert.strictEqual(await minify(input, { collapseWhitespace: true, removeComments: true }), '<div>x</div><div>y</div>');
-    assert.ok(performance.now() - start < 1000, 'Collapsing should stay linear in the input length');
-  });
+    // Compare growth rather than absolute time (see “Trims trailing whitespace in linear time on
+    // deeply nested markup”)
+    for (const [before, part, after, options] of [
+      ['<div>x</div>', '<!--c--> ', '<div>y</div>', comments],
+      ['<div>x ', '<span></span> ', 'y</div>', elements],
+      ['<div>x ', '<div></div> ', 'y</div>', elements],
+      ['<div>x ', '<script></script> ', 'y</div>', elements],
+      ['<div>x ', '<!--c--><b></b> ', 'y</div>', elements]
+    ]) {
+      const time = async (/** @type {number} */ count) => {
+        const input = before + part.repeat(count) + after;
+        const started = performance.now();
+        await minify(input, options);
+        return performance.now() - started;
+      };
 
-  test('Does not degrade to a quadratic scan on repeated removed elements', async () => {
-    for (const part of ['<span></span> ', '<div></div> ', '<script></script> ', '<!--c--><b></b> ']) {
-      const input = '<div>x ' + part.repeat(40000) + 'y</div>';
-      const start = performance.now();
+      await time(1000);
+      let small = Infinity;
+      let large = Infinity;
+      for (let run = 0; run < 3; run++) {
+        small = Math.min(small, await time(10000));
+        large = Math.min(large, await time(20000));
+      }
 
-      await minify(input, { collapseWhitespace: true, removeEmptyElements: true });
-      assert.ok(performance.now() - start < 1000, `Removing ${part.trim()} should stay linear in the input length`);
+      assert.ok(
+        large <= small * 3 + 50,
+        `Removing ${part.trim()} grew from ${small.toFixed(1)} ms to ${large.toFixed(1)} ms on twice the input`
+      );
     }
   });
 
