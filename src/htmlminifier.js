@@ -2757,8 +2757,9 @@ async function minifyHTML(value, options, partialMarkup) {
           selfCloses = false;
         }
         // Restore parent context when exiting SVG/MathML or HTML-in-foreign-content elements
+        // (a stray end tag, which partial markup keeps, has none to restore)
         if (lowerTag === 'svg' || lowerTag === 'math') {
-          options = /** @type {ProcessedOptions} */ (options.optionsParent);
+          options = options.optionsParent ?? options;
         } else if ((lowerTag === 'foreignobject' || lowerTag === 'annotation-xml') &&
                    !options.insideForeignContent && options.optionsParent?.insideForeignContent) {
           options = options.optionsParent;

@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+### Fixed
+
+* Fixed `partialMarkup` failing on a stray `</svg>` or `</math>` end tag (e.g., `</svg><svg><rect/></svg>` threw “Cannot read properties of undefined”)
+
 ### Changed
 
 * Made pages with inline SVG or MathML faster to minify, as the first `svg` or `math` element slowed down the minification of the rest of the page (by 10–20% on pages without much SVG or MathML)

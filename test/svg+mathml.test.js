@@ -1647,6 +1647,14 @@ describe('SVG and MathML', () => {
     await assertLinearGrowth(count => minify('<div>'.repeat(count * 10) + '<textarea>a</textarea>'.repeat(count)), 2000, 'Reading the namespace');
   });
 
+  test('Keeps stray `svg` and `math` end tags in partial markup', async () => {
+    for (const tag of ['svg', 'math']) {
+      const input = `</${tag}><${tag}><rect/></${tag}><img/>`;
+      assert.strictEqual(await minify(input, { partialMarkup: true }), input.replace('<img/>', '<img>'));
+      assert.strictEqual(await minify(input, { partialMarkup: true, collapseWhitespace: true, keepClosingSlash: true }), input);
+    }
+  });
+
   test('Costs a page little more for a single inline SVG', () => {
     // Slowing the rest of the page down shows only in a process that hasn’t minified foreign
     // content before, so each attempt runs in a new one, timing the page without SVG first
