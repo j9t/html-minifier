@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { minify, getPreset } from '../src/htmlminifier.js';
 import { HTMLParser } from '../src/htmlparser.js';
 import { trimWhitespace, collapseWhitespaceAll, collapseWhitespace } from '../src/lib/whitespace.js';
+import { assertLinearGrowth } from './timing.js';
 
 describe('HTML', () => {
   test('Exports `minify`', () => {
@@ -1336,10 +1337,10 @@ describe('HTML', () => {
     assert.strictEqual(await minify('<p class="a\ta">x</p>'), '<p class="a">x</p>');
     assert.strictEqual(await minify('<p class="a\nb\ta">x</p>'), '<p class="a b">x</p>');
     // In linear time, also for a long list without repeats
-    const names = Array.from({ length: 50000 }, (_, i) => 'c' + i).join(' ');
-    const start = Date.now();
-    assert.strictEqual(await minify(`<p class="${names}">x</p>`), `<p class="${names}">x</p>`);
-    assert.ok(Date.now() - start < 500, 'should deduplicate in linear time');
+    await assertLinearGrowth(async count => {
+      const names = Array.from({ length: count }, (_, i) => 'c' + i).join(' ');
+      assert.strictEqual(await minify(`<p class="${names}">x</p>`), `<p class="${names}">x</p>`);
+    }, 20000, 'Deduplicating class names');
 
     // Names around template fragments may not be repeats once the template renders
     input = '<p class="{% if x %} a {% endif %} a">x</p>';
@@ -3797,12 +3798,8 @@ describe('HTML', () => {
   });
 
   test('Stays cheap on custom fragments that are never closed', async () => {
-    // Running the patterns as a regex costs O(n²) here, seconds at this size
-    const input = '<p>' + '<% '.repeat(200000) + '</p>';
-    const start = Date.now();
-    await minify(input, { continueOnParseError: true });
-    const elapsed = Date.now() - start;
-    assert.ok(elapsed < 5000, `Expected a linear scan, took ${elapsed}ms`);
+    // Running the patterns as a regex costs O(n²) here
+    await assertLinearGrowth(count => minify('<p>' + '<% '.repeat(count) + '</p>', { continueOnParseError: true }), 20000, 'Scanning unclosed fragments');
   });
 
   test('Applies `strictCustomFragments`', async () => {
@@ -5440,8 +5437,6 @@ describe('HTML', () => {
     const elements = { collapseWhitespace: true, removeEmptyElements: true };
     assert.strictEqual(await minify('<div>x</div>' + '<!--c--> '.repeat(3) + '<div>y</div>', comments), '<div>x</div><div>y</div>');
 
-    // Compare growth rather than absolute time (see “Trims trailing whitespace in linear time on
-    // deeply nested markup”)
     for (const [before, part, after, options] of [
       ['<div>x</div>', '<!--c--> ', '<div>y</div>', comments],
       ['<div>x ', '<span></span> ', 'y</div>', elements],
@@ -5449,25 +5444,7 @@ describe('HTML', () => {
       ['<div>x ', '<script></script> ', 'y</div>', elements],
       ['<div>x ', '<!--c--><b></b> ', 'y</div>', elements]
     ]) {
-      const time = async (/** @type {number} */ count) => {
-        const input = before + part.repeat(count) + after;
-        const started = performance.now();
-        await minify(input, options);
-        return performance.now() - started;
-      };
-
-      await time(1000);
-      let small = Infinity;
-      let large = Infinity;
-      for (let run = 0; run < 3; run++) {
-        small = Math.min(small, await time(10000));
-        large = Math.min(large, await time(20000));
-      }
-
-      assert.ok(
-        large <= small * 3 + 50,
-        `Removing ${part.trim()} grew from ${small.toFixed(1)} ms to ${large.toFixed(1)} ms on twice the input`
-      );
+      await assertLinearGrowth(count => minify(before + part.repeat(count) + after, options), 10000, `Removing ${part.trim()}`);
     }
   });
 
@@ -6254,28 +6231,8 @@ describe('HTML', () => {
   });
 
   test('Trims trailing whitespace in linear time on deeply nested markup', async () => {
-    // Each end tag walked back over all those before it; compare growth rather than
-    // absolute time, keeping the best of several runs (see the raw-text scan test in
-    // css.test.js), and alternating sizes so that load from parallel tests hits both
-    const time = async (/** @type {number} */ depth) => {
-      const input = '<div> a '.repeat(depth) + 'x' + ' </div>'.repeat(depth);
-      const started = performance.now();
-      await minify(input, { collapseWhitespace: true });
-      return performance.now() - started;
-    };
-
-    await time(500);
-    let small = Infinity;
-    let large = Infinity;
-    for (let run = 0; run < 5; run++) {
-      small = Math.min(small, await time(2000));
-      large = Math.min(large, await time(4000));
-    }
-
-    assert.ok(
-      large <= small * 3 + 50,
-      `Minifying grew from ${small.toFixed(1)} ms to ${large.toFixed(1)} ms on twice the depth`
-    );
+    // Each end tag walked back over all those before it
+    await assertLinearGrowth(depth => minify('<div> a '.repeat(depth) + 'x' + ' </div>'.repeat(depth), { collapseWhitespace: true }), 2000, 'Minifying');
   });
 
   test('Collapses to a no-break space between consecutive `htmlmin:ignore` blocks', async () => {
@@ -7402,48 +7359,43 @@ describe('HTML', () => {
   });
 
   test('Prevents ReDoS in custom fragments processing', async () => {
-    // Long whitespace that a backtracking pattern would scan quadratically: milliseconds when
-    // linear, far past the bound otherwise (`node:test` has no default timeout to catch it)
-    const longWhitespace = ' '.repeat(100000);
-    const phpFragments = [/<%[\s\S]*?%>/g, /<\?[\s\S]*?\?>/g];
-    const start = Date.now();
-
-    // Long whitespace before custom fragment
-    let result = await minify(`<div>${longWhitespace}<?php echo "test"; ?></div>`, {
-      ignoreCustomFragments: phpFragments,
+    // Long whitespace that a backtracking pattern would scan quadratically
+    const options = {
+      ignoreCustomFragments: [/<%[\s\S]*?%>/g, /<\?[\s\S]*?\?>/g],
       collapseWhitespace: true
-    });
-    assert.strictEqual(result, '<div> <?php echo "test"; ?></div>');
+    };
 
-    // Multiple consecutive fragments with long whitespace
-    result = await minify(`<div>${longWhitespace}<?php echo "test1"; ?>${longWhitespace}<?php echo "test2"; ?>${longWhitespace}</div>`, {
-      ignoreCustomFragments: phpFragments,
-      collapseWhitespace: true
-    });
-    assert.strictEqual(result, '<div> <?php echo "test1"; ?> <?php echo "test2"; ?> </div>');
-    assert.ok(Date.now() - start < 5000, 'Whitespace around fragments should be processed in linear time');
+    await assertLinearGrowth(async count => {
+      const longWhitespace = ' '.repeat(count);
+
+      // Long whitespace before custom fragment
+      let result = await minify(`<div>${longWhitespace}<?php echo "test"; ?></div>`, options);
+      assert.strictEqual(result, '<div> <?php echo "test"; ?></div>');
+
+      // Multiple consecutive fragments with long whitespace
+      result = await minify(`<div>${longWhitespace}<?php echo "test1"; ?>${longWhitespace}<?php echo "test2"; ?>${longWhitespace}</div>`, options);
+      assert.strictEqual(result, '<div> <?php echo "test1"; ?> <?php echo "test2"; ?> </div>');
+    }, 10000, 'Processing whitespace around fragments');
   });
 
   test('Avoids ReDoS on a long unclosed end tag', async () => {
     // A long end-tag name with no closing `>` (e.g., `</aaaa…`) makes the end-tag regex backtrack
-    // quadratically (O(n²)), so the parser skips that regex when no `>` lies ahead. Quadratic
-    // behavior blows past the wall-clock bound (or the runner timeout): 500,000 chars take ~30 s
-    // per call that way, ~1 ms without.
-    const longName = 'a'.repeat(500000);
-    const unclosed = '<body></' + longName;
+    // quadratically (O(n²)), so the parser skips that regex when no `>` lies ahead: 500,000
+    // chars take ~30 s per call that way, ~1 ms without
+    const unclosed = (/** @type {number} */ count) => '<body></' + 'a'.repeat(count);
 
     // `continueOnParseError` recovers, treating the unterminated end tag as text
-    let start = Date.now();
-    const recovered = await minify(unclosed, { continueOnParseError: true });
-    assert.ok(Date.now() - start < 5000, 'unclosed end tag should parse in linear time');
-    assert.strictEqual(recovered, unclosed);
+    await assertLinearGrowth(async count => {
+      assert.strictEqual(await minify(unclosed(count), { continueOnParseError: true }), unclosed(count));
+    }, 50000, 'Parsing an unclosed end tag');
 
     // The default path throws a parse error—but must do so promptly, not after an O(n²) scan
-    start = Date.now();
-    await assert.rejects(minify(unclosed), { message: /^Parse error at line 1, column 7/ });
-    assert.ok(Date.now() - start < 5000, 'parse error should be raised in linear time');
+    await assertLinearGrowth(async count => {
+      await assert.rejects(minify(unclosed(count)), { message: /^Parse error at line 1, column 7/ });
+    }, 50000, 'Raising a parse error on an unclosed end tag');
 
     // Sanity: A well-formed long end tag is unaffected by the guard
+    const longName = 'a'.repeat(500000);
     const nested = '<x-' + longName + '>hi</x-' + longName + '>';
     assert.strictEqual(await minify(nested), nested);
   });
@@ -7451,21 +7403,20 @@ describe('HTML', () => {
   test('Avoids ReDoS on a long tagless `htmlmin:ignore` block', async () => {
     // Finding the block’s last tag (for whitespace collapsing before the next element) took a
     // regex that backtracked quadratically over content without tags: ~3 s for 64,000 chars
-    const content = 'a'.repeat(300000);
-    const start = Date.now();
-    const result = await minify('<!-- htmlmin:ignore -->' + content + '<!-- htmlmin:ignore -->b<p>y</p>', { collapseWhitespace: true });
-    assert.ok(Date.now() - start < 5000, 'Ignored content should be scanned in linear time');
-    assert.strictEqual(result, content + 'b<p>y</p>');
+    await assertLinearGrowth(async count => {
+      const content = 'a'.repeat(count);
+      const result = await minify('<!-- htmlmin:ignore -->' + content + '<!-- htmlmin:ignore -->b<p>y</p>', { collapseWhitespace: true });
+      assert.strictEqual(result, content + 'b<p>y</p>');
+    }, 20000, 'Scanning ignored content');
   });
 
   test('Avoids ReDoS on long whitespace inside a custom fragment', async () => {
     // Splitting a fragment’s leading and trailing whitespace off took a regex that backtracked
     // quadratically over inner whitespace runs: ~3 s for 64,000 chars, with default options
-    const input = '<p><?php a' + ' '.repeat(300000) + 'a ?></p>';
-    const start = Date.now();
-    const result = await minify(input);
-    assert.ok(Date.now() - start < 5000, 'Fragment whitespace should be split in linear time');
-    assert.strictEqual(result, input);
+    await assertLinearGrowth(async count => {
+      const input = '<p><?php a' + ' '.repeat(count) + 'a ?></p>';
+      assert.strictEqual(await minify(input), input);
+    }, 20000, 'Splitting fragment whitespace');
   });
 
   test('Handles inline custom elements', async () => {
@@ -8752,43 +8703,24 @@ describe('HTML', () => {
 
   test('Stays cheap on end tags that are never complete', async () => {
     // Scanning for the end tag with a regex lazy enough to skip the content rescans the rest
-    // of the input at every near match, which costs minutes at this size
+    // of the input at every near match
     for (const tag of ['textarea', 'script']) {
-      const benign = `<${tag}>a</${tag}>`.repeat(50000);
-      const input = `<${tag}>` + `</${tag} `.repeat(50000);
-
-      const startBaseline = Date.now();
-      await minify(benign);
-      const baseline = Date.now() - startBaseline;
-
-      const start = Date.now();
-      assert.strictEqual(await minify(input), input, tag);
-      const elapsed = Date.now() - start;
-
-      assert.ok(elapsed < Math.max(baseline * 20, 2000), `Expected a linear scan for \`${tag}\`, took ${elapsed}ms (${baseline}ms baseline)`);
+      await assertLinearGrowth(async count => {
+        const input = `<${tag}>` + `</${tag} `.repeat(count);
+        assert.strictEqual(await minify(input), input, tag);
+      }, 10000, `Scanning \`${tag}\``);
     }
   });
 
   test('Comments that are never terminated stay cheap', async () => {
     // Searching for the end of a comment that has none rescans the rest of the input, at
     // every opener. Only `continueOnParseError` reaches the second one—without it the first
-    // ends the run—so that is where this costs minutes at this size.
-    for (const [opener, closed] of [['<!--', '<!---->'], ['<![', '<![ ]>']]) {
-      // The baseline says how fast this machine is only where it does about as much work as
-      // the run it stands against, and an opener that closes is read faster than one that
-      // never does—so it takes more of them to weigh the same
-      const benign = closed.repeat(150000);
-      const input = opener.repeat(50000);
-
-      const startBaseline = Date.now();
-      await minify(benign, { continueOnParseError: true });
-      const baseline = Date.now() - startBaseline;
-
-      const start = Date.now();
-      assert.strictEqual(await minify(input, { continueOnParseError: true }), input, opener);
-      const elapsed = Date.now() - start;
-
-      assert.ok(elapsed < Math.max(baseline * 20, 2000), `Expected a linear scan for \`${opener}\`, took ${elapsed}ms (${baseline}ms baseline)`);
+    // ends the run—so that is where this turns quadratic.
+    for (const opener of ['<!--', '<![']) {
+      await assertLinearGrowth(async count => {
+        const input = opener.repeat(count);
+        assert.strictEqual(await minify(input, { continueOnParseError: true }), input, opener);
+      }, 50000, `Scanning \`${opener}\``);
     }
   });
 
