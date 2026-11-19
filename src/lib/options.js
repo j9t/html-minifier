@@ -52,12 +52,13 @@ import { optionDefinitions, optionDefaults } from './option-definitions.js';
  *   cssContext?: CSSContext,
  *   baseState?: {hasBase: boolean | undefined, selectedAttrs?: Set<string>, source: string},
  *   parallelJS?: boolean,
- *   nameParent?: (name: string) => string,
+ *   nameParent?: ((name: string) => string) | undefined,
  *   namesAsWritten?: boolean,
- *   keepClosingSlashHTML?: boolean,
+ *   keepClosingSlashHTML?: boolean | undefined,
  *   insideSVG?: boolean,
  *   insideForeignContent?: boolean,
- *   namespaceForeign?: 'svg' | 'math'
+ *   namespaceForeign?: 'svg' | 'math' | undefined,
+ *   optionsParent?: ProcessedOptions | undefined
  * }} ProcessedOptions
  */
 

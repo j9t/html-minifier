@@ -1,4 +1,5 @@
 import assert from 'node:assert';
+import { spawnSync } from 'node:child_process';
 import {describe, test} from 'node:test';
 import { minify, getCacheStats } from '../src/htmlminifier.js';
 import { assertLinearGrowth } from './timing.js';
@@ -1644,6 +1645,50 @@ describe('SVG and MathML', () => {
     // Reading it off the stack costs as much as the stack is deep, for every element whose
     // content is text—which a deep document turns quadratic
     await assertLinearGrowth(count => minify('<div>'.repeat(count * 10) + '<textarea>a</textarea>'.repeat(count)), 2000, 'Reading the namespace');
+  });
+
+  test('Keeps stray `svg` and `math` end tags in partial markup', async () => {
+    for (const tag of ['svg', 'math']) {
+      const input = `</${tag}><${tag}><rect/></${tag}><img/>`;
+      assert.strictEqual(await minify(input, { partialMarkup: true }), input.replace('<img/>', '<img>'));
+      assert.strictEqual(await minify(input, { partialMarkup: true, collapseWhitespace: true, keepClosingSlash: true }), input);
+    }
+  });
+
+  test('Costs a page little more for a single inline SVG', () => {
+    // Slowing the rest of the page down shows only in a process that hasn’t minified foreign
+    // content before, so each attempt runs in a new one, timing the page without SVG first
+    const urlMinifier = new URL('../src/htmlminifier.js', import.meta.url).href;
+    const script = `
+      import { minify } from ${JSON.stringify(urlMinifier)};
+      const item = i => '<li class="item item-' + (i % 7) + '" id="i' + i + '"><a href="/topic/' + i + '" title="Topic ' + i + '">Topic <b>' + i + '</b></a> <span data-n="' + i + '">text  ' + i + '</span></li>\\n';
+      const body = '<ul>' + Array.from({ length: 1500 }, (_, i) => item(i)).join('') + '</ul>';
+      const page = svg => '<!DOCTYPE html><html lang="en"><head><title>T</title></head><body>' + svg + body + '</body></html>';
+      const best = async html => {
+        let min = Infinity;
+        for (let i = 0; i < 15; i++) {
+          const started = performance.now();
+          await minify(html, { preset: 'comprehensive' });
+          min = Math.min(min, performance.now() - started);
+        }
+        return min;
+      };
+      const plain = await best(page(''));
+      const svg = await best(page('<svg viewBox="0 0 10 10"><path d="M0 0L10 10"/></svg>'));
+      console.log(JSON.stringify({ plain, svg }));
+    `;
+    let plain = 0;
+    let svg = Infinity;
+    for (let attempt = 0; attempt < 3 && svg > plain * 1.08; attempt++) {
+      const { stdout, stderr, status, error } = spawnSync(process.execPath, ['--input-type=module', '--eval', script], {
+        encoding: 'utf8',
+        timeout: 60000
+      });
+      assert.strictEqual(status, 0, `Probe process failed: ${error?.message ?? stderr}`);
+      ({ plain, svg } = JSON.parse(stdout));
+    }
+    // Noise stays within 5%, the slowdown this catches is about 15%
+    assert.ok(svg <= plain * 1.08, `The page took ${svg.toFixed(1)} ms with an SVG, ${plain.toFixed(1)} ms without`);
   });
 
   test('Applies `minifySVG` from a preset, and lets `minifySVG: false` override it', async () => {

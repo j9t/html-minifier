@@ -4,6 +4,16 @@ As of version 5.0.0, all notable changes to HTML Minifier (HM) are documented in
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+* Fixed `partialMarkup` failing on a stray `</svg>` or `</math>` end tag (e.g., `</svg><svg><rect/></svg>` threw “Cannot read properties of undefined”)
+
+### Changed
+
+* Made pages with inline SVG or MathML faster to minify, as the first `svg` or `math` element slowed down the minification of the rest of the page (by 10–20% on pages without much SVG or MathML)
+
 ## [5.3.1] - 2026-11-19
 
 ### Fixed
