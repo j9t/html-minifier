@@ -4,6 +4,14 @@ As of version 5.0.0, all notable changes to HTML Minifier (HM) are documented in
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.3.1] - 2026-11-19
+
+### Fixed
+
+* Fixed `</form>` closing the elements open in the form, which browsers leave open (e.g., `<form><div></form>x</div>y` became `<form><div></form>xy`), and closing elements beyond a scope boundary, where browsers ignore it (e.g., in a table cell, which lost the `</table>` that followed)
+* Fixed `collapseWhitespace` removing spaces that separate text around elements that don’t render (like `script` and `link`) when custom fragments, comments, or elements removed by `removeComments` or `removeEmptyElements` follow them (e.g., `a <script></script><!--c-->b` became `a<script></script><!--c-->b`, and `<p>a<script></script> <script></script> <script></script>b</p>` with `removeEmptyElements` became `<p>ab</p>`)
+* Fixed `removeEmptyElements` with `collapseWhitespace` dropping the space before or after an empty block element it removes (e.g., `<div>a <div></div>b</div>` and `<div>a<div></div> b</div>` became `<div>ab</div>`)
+
 ## [5.3.0] - 2026-11-17
 
 ### Changed

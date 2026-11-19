@@ -2317,6 +2317,25 @@ describe('HTML', () => {
     output = '<div>both</div>';
     assert.strictEqual(await minify(input, { collapseWhitespace: true, removeEmptyElements: true }), output);
 
+    // A block trims the space next to it, which has to come back when the block goes
+    output = '<div>a b</div>';
+    assert.strictEqual(await minify('<div>a<div></div> b</div>', { collapseWhitespace: true, removeEmptyElements: true }), output);
+    assert.strictEqual(await minify('<div>a<p></p> <i>b</i></div>', { collapseWhitespace: true, removeEmptyElements: true }), '<div>a <i>b</i></div>');
+    assert.strictEqual(await minify('<div>a<div></div> </div>', { collapseWhitespace: true, removeEmptyElements: true }), '<div>a</div>');
+    assert.strictEqual(await minify('<div><div></div> b</div>', { collapseWhitespace: true, removeEmptyElements: true }), '<div>b</div>');
+    // A custom fragment’s placeholder is padded with tabs, which aren’t whitespace to restore
+    const fragments = { collapseWhitespace: true, removeEmptyElements: true, ignoreCustomFragments: [/\{\{.*?\}\}/] };
+    assert.strictEqual(await minify('<div>a{{x}}<div></div>b</div>', fragments), '<div>a{{x}}b</div>');
+    assert.strictEqual(await minify('<div>a{{x}} <div></div>b</div>', fragments), '<div>a{{x}} b</div>');
+    assert.strictEqual(await minify('<div>a <div></div>b</div>', { collapseWhitespace: true, removeEmptyElements: true }), output);
+    assert.strictEqual(await minify('<div>a <p></p> b</div>', { collapseWhitespace: true, removeEmptyElements: true }), output);
+    assert.strictEqual(await minify('<div>a <div><p></p></div>b</div>', { collapseWhitespace: true, removeEmptyElements: true }), output);
+    assert.strictEqual(await minify('<div><span>a </span><div></div>b</div>', { collapseWhitespace: true, removeEmptyElements: true }), '<div><span>a </span>b</div>');
+    assert.strictEqual(await minify('<div>a <script></script><div></div>b</div>', { collapseWhitespace: true, removeEmptyElements: true }), output);
+    assert.strictEqual(await minify('<div>a <noscript>x</noscript><div></div>b</div>', { collapseWhitespace: true, removeEmptyElements: true }), '<div>a <noscript>x</noscript>b</div>');
+    assert.strictEqual(await minify('<div>a <noscript>x</noscript><div></div></div>', { collapseWhitespace: true, removeEmptyElements: true }), '<div>a<noscript>x</noscript></div>');
+    assert.strictEqual(await minify('<div>a <div></div><div>b</div></div>', { collapseWhitespace: true, removeEmptyElements: true }), '<div>a<div>b</div></div>');
+
     input = '<div>unary <span></span><link></div>';
     output = '<div>unary <link></div>';
     assert.strictEqual(await minify(input, { removeEmptyElements: true }), output);
@@ -5416,6 +5435,42 @@ describe('HTML', () => {
     assert.strictEqual(await minify('<p>a<slot> b </slot>c</p>', { collapseWhitespace: true }), '<p>a<slot> b </slot>c</p>');
   });
 
+  test('Removes repeated comments and empty elements in linear time', async () => {
+    const comments = { collapseWhitespace: true, removeComments: true };
+    const elements = { collapseWhitespace: true, removeEmptyElements: true };
+    assert.strictEqual(await minify('<div>x</div>' + '<!--c--> '.repeat(3) + '<div>y</div>', comments), '<div>x</div><div>y</div>');
+
+    // Compare growth rather than absolute time (see “Trims trailing whitespace in linear time on
+    // deeply nested markup”)
+    for (const [before, part, after, options] of [
+      ['<div>x</div>', '<!--c--> ', '<div>y</div>', comments],
+      ['<div>x ', '<span></span> ', 'y</div>', elements],
+      ['<div>x ', '<div></div> ', 'y</div>', elements],
+      ['<div>x ', '<script></script> ', 'y</div>', elements],
+      ['<div>x ', '<!--c--><b></b> ', 'y</div>', elements]
+    ]) {
+      const time = async (/** @type {number} */ count) => {
+        const input = before + part.repeat(count) + after;
+        const started = performance.now();
+        await minify(input, options);
+        return performance.now() - started;
+      };
+
+      await time(1000);
+      let small = Infinity;
+      let large = Infinity;
+      for (let run = 0; run < 3; run++) {
+        small = Math.min(small, await time(10000));
+        large = Math.min(large, await time(20000));
+      }
+
+      assert.ok(
+        large <= small * 3 + 50,
+        `Removing ${part.trim()} grew from ${small.toFixed(1)} ms to ${large.toFixed(1)} ms on twice the input`
+      );
+    }
+  });
+
   test('Preserves whitespace next to text around elements that don’t render', async () => {
     for (const [element, end] of [['script', '</script>'], ['template', '</template>'], ['noscript', '</noscript>'], ['datalist', '</datalist>'], ['link rel="x"', ''], ['meta itemprop="x"', '']]) {
       const input = `<div>a <${element}>${end}b</div>`;
@@ -5471,6 +5526,30 @@ describe('HTML', () => {
       assert.strictEqual(await minify(input, { collapseWhitespace: true, maxLineLength: 1000 }), input.replace('> b<', '>b<'));
     }
     assert.strictEqual(await minify('<p><img src="a" alt="b"> <link rel="x"> c</p>', { collapseWhitespace: true, maxLineLength: 1000 }), '<p><img src="a" alt="b"><link rel="x"> c</p>');
+
+    // Comments and removed elements after such elements don’t take the space either
+    for (const input of ['<p>a <script></script><!--c-->b</p>', '<p>a<script></script> <script></script><!--c-->b</p>', '<p>a <link rel="x"><!--c--><!--d-->b</p>']) {
+      assert.strictEqual(await minify(input, { collapseWhitespace: true }), input);
+    }
+    assert.strictEqual(await minify('<p>a<script></script> <!--c--><script></script>b</p>', { collapseWhitespace: true, removeComments: true }), '<p>a<script></script> <script></script>b</p>');
+    assert.strictEqual(await minify('<p>a<script></script> <!--c--><!--d--><!--e--><script></script>b</p>', { collapseWhitespace: true, removeComments: true }), '<p>a<script></script> <script></script>b</p>');
+    assert.strictEqual(await minify('<p>a<script></script> <!--c--><!--d--> <script></script>b</p>', { collapseWhitespace: true, removeComments: true }), '<p>a<script></script> <script></script>b</p>');
+    assert.strictEqual(await minify('<p>a<script></script><span></span> b</p>', { collapseWhitespace: true, removeEmptyElements: true }), '<p>a b</p>');
+    assert.strictEqual(await minify('<p>a<link rel="x"><span></span> b</p>', { collapseWhitespace: true, removeEmptyElements: true }), '<p>a<link rel="x"> b</p>');
+    assert.strictEqual(await minify('<p>a<link rel="x"> <span></span> <link rel="y">b</p>', { collapseWhitespace: true, removeEmptyElements: true }), '<p>a<link rel="x"> <link rel="y">b</p>');
+    assert.strictEqual(await minify('<p>a<script></script> <script></script> <script></script>b</p>', { collapseWhitespace: true, removeEmptyElements: true }), '<p>a b</p>');
+    assert.strictEqual(await minify('<p>a<script></script> <script></script><!--c--><link rel="x">b</p>', { collapseWhitespace: true, removeComments: true, removeEmptyElements: true }), '<p>a <link rel="x">b</p>');
+    assert.strictEqual(await minify('<p>a <template></template><!--c-->b</p>', { collapseWhitespace: true, removeComments: true, removeEmptyElements: true }), '<p>a b</p>');
+    assert.strictEqual(await minify('<p>a <script></script> <span></span><!--c-->b</p>', { collapseWhitespace: true, removeComments: true, removeEmptyElements: true }), '<p>a b</p>');
+    assert.strictEqual(await minify('<p>a<script></script> <!--c--><span></span> <script></script>b</p>', { collapseWhitespace: true, removeComments: true, removeEmptyElements: true }), '<p>a b</p>');
+    assert.strictEqual(await minify('<p>a <link rel="x"> <span></span> <!--c-->b</p>', { collapseWhitespace: true, removeComments: true, removeEmptyElements: true }), '<p>a<link rel="x"> b</p>');
+    assert.strictEqual(await minify('<p>a<link rel="x"> <link rel="y"><!--c--> <link rel="z">b</p>', { collapseWhitespace: true, removeComments: true }), '<p>a<link rel="x"> <link rel="y"><link rel="z">b</p>');
+
+    // A custom fragment may render text, so it takes the space, too, unless it starts with one
+    for (const input of ['<p>a <script></script><?php echo 1 ?></p>', '<p>a <script></script><!--c--><?php echo 1 ?></p>']) {
+      assert.strictEqual(await minify(input, { collapseWhitespace: true }), input);
+    }
+    assert.strictEqual(await minify('<p>a <script></script> <?php echo 1 ?></p>', { collapseWhitespace: true }), '<p>a<script></script> <?php echo 1 ?></p>');
 
     // At the end of the document, nothing follows that would render pending whitespace
     assert.strictEqual(await minify('a <link rel="x">', { collapseWhitespace: true }), 'a<link rel="x">');
@@ -5588,6 +5667,38 @@ describe('HTML', () => {
     // A formatting element closed along with the `p` is reopened by browsers,
     // so it stays even when empty
     assert.strictEqual(await minify('<p><em><ul><li>b</ul></em></p>', { removeEmptyElements: true }), '<p><em><ul><li>b</ul></em></p>');
+  });
+
+  test('Closes only the `form` at `</form>`', async () => {
+    // Browsers leave open what is open in it (after closing elements with implied end tags)
+    assert.strictEqual(await minify('<form><div></form>x</div>y'), '<form><div></form>x</div>y');
+    assert.strictEqual(await minify('<form><span></form>x</span>y'), '<form><span></form>x</span>y');
+    assert.strictEqual(await minify('<form><div><p></form>x</div>y'), '<form><div><p></form>x</div>y');
+    // With the mode unknown, a `p` holding a `table` gets no end tag, which could add a `p`
+    assert.strictEqual(await minify('<form><div><p><table><tr><td>a</table></form>b</div>', { includeAutoGeneratedTags: true }), '<form><div><p><table><tr><td>a</td></tr></table></form>b</div>');
+    assert.strictEqual(await minify('<div><form><div></form>x</div>y</div>z', { collapseWhitespace: true, removeOptionalTags: true }), '<div><form><div></form>x</div>y</div>z');
+
+    // Within a `template`, it closes what is open in it, too
+    assert.strictEqual(await minify('<template><form><div></form>x</div>y</template>'), '<template><form><div></form>xy</template>');
+
+    // Beyond a scope boundary, it closes nothing, but stays to let a later `form` open
+    assert.strictEqual(await minify('<form><table><tr><td></form>x</table>y'), '<form><table><tr><td></form>x</table>y');
+    assert.strictEqual(await minify('<form><table><tr><td></form><form>x</form></table>y'), '<form><table><tr><td></form><form>x</form></table>y');
+    assert.strictEqual(await minify('<form><template></form>x</template>y'), '<form><template>x</template>y');
+    // Such boundaries include SVG and MathML integration points
+    assert.strictEqual(await minify('<template><form><svg><foreignObject></form>x</foreignObject></svg>y</form>z</template>'), '<template><form><svg><foreignObject>x</foreignObject></svg>y</form>z</template>');
+    assert.strictEqual(await minify('<template><form><math><mi></form>x</mi></math>y</form>z</template>'), '<template><form><math><mi>x</mi></math>y</form>z</template>');
+
+    // Once that cleared the form element pointer, a later `</form>` is ignored (`p` stays open)
+    const quirks = '<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">';
+    assert.strictEqual(await minify(quirks + '<form><p><table><tr><td></form></table></form>x', { includeAutoGeneratedTags: true }), quirks + '<form><p><table><tr><td></form></td></tr></table>x</p></form>');
+    assert.strictEqual(await minify('<form><table><tr><td></form><form>a</form></table>b'), '<form><table><tr><td></form><form>a</form></table>b');
+
+    // Inside `pre`, the `form` closed on its own no longer keeps whitespace as written after it
+    assert.strictEqual(await minify('<pre><form><div></form>x</div></pre><p>  a   b  </p>', { collapseWhitespace: true }), '<pre><form><div></form>x</div></pre><p>a b</p>');
+
+    // A `form` in SVG closes like any SVG element
+    assert.strictEqual(await minify('<svg><form><g></form><rect></rect></svg>x', { includeAutoGeneratedTags: true }), '<svg><form><g></g></form><rect></rect></svg>x');
   });
 
   test('Preserves whitespace around `data`', async () => {

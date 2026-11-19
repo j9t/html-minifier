@@ -25,6 +25,7 @@ import {
   inlineElementsToKeepWhitespaceWithin,
   inlineElementsTransparent,
   inlineElementsTransparentAfter,
+  inlineElementsTransparentVoid,
   specialContentElements,
   rawTextElements,
   htmlElements,
@@ -999,6 +1000,19 @@ async function minifyHTML(value, options, partialMarkup) {
   // Where the last trim walk began that came to text it couldn’t trim, past end tags alone: A
   // later walk that gets there finds the same, until an entry up to there changes
   let trimSettledIndex = -1;
+  // Runs of entries that walks back through `buffer` step over, empty ones and empty ones or
+  // comments—where the last such walk began and the entry it stopped at, so a later walk that
+  // gets there can skip them, until one of those changes
+  /** @type {{top: number, bottom: number, skips: (entry: string) => boolean}} */
+  const runEmpty = { top: -1, bottom: -1, skips: entry => !entry };
+  /** @type {{top: number, bottom: number, skips: (entry: string) => boolean}} */
+  const runQuiet = {
+    top: -1,
+    bottom: -1,
+    // Comments as `<!…`, not `htmlmin:ignore` content, which renders
+    skips: entry => !entry || (entry.charCodeAt(0) === 60 /* < */ && entry.charCodeAt(1) === 33 /* ! */ && !(uidIgnore && entry.indexOf(uidIgnore) !== -1))
+  };
+  const runsSkipped = [runEmpty, runQuiet];
   // Parallel to `buffer`: whether the entry is a tag—the only place lines may break
   const bufferTags = options.maxLineLength ? /** @type {boolean[]} */ ([]) : null;
   // Under `mergeStyles` and `mergeScripts`, the elements that may be merged, by where their
@@ -1014,11 +1028,16 @@ async function minifyHTML(value, options, partialMarkup) {
   let currentChars = '';
   /** @type {boolean} */
   let hasChars = false;
-  // Open elements under `removeEmptyElements`, so an element whose content
-  // went is removed, too: where its start tag sits in `buffer`, and whether
-  // anything kept went in since
-  /** @type {Array<{tag: string, index: number, empty: boolean, omittedStartTag?: {tag: string, text: string} | undefined, omittedEndTag?: {tag: string, text: string} | undefined, impliedEnds?: Array<{tag: string, text: string}> | undefined}>} */
+  // Open elements under `removeEmptyElements`, so an element whose content went is removed,
+  // too: where its start tag sits in `buffer`, and whether anything kept went in since,
+  // and what the text before it was (including entries its start tag trimmed)
+  /** @type {Array<{tag: string, index: number, empty: boolean, before: {chars: string, prevTag: string, gapIndex: number, trims: Array<[number, string]>}, omittedStartTag?: {tag: string, text: string} | undefined, omittedEndTag?: {tag: string, text: string} | undefined, impliedEnds?: Array<{tag: string, text: string}> | undefined}>} */
   const openElements = [];
+  // Entries changed while a start tag trims, with what they were, while recording
+  /** @type {Array<[number, string]> | null} */
+  let trimsRecorded = null;
+  // Whether the last element is a removed block, which text after it reads past
+  let followsRemovedBlock = false;
   // End tags not written, for the start tag that comes next (`text` is empty where one can’t be)
   /** @type {Array<{tag: string, text: string}>} */
   let impliedEnds = [];
@@ -1083,6 +1102,8 @@ async function minifyHTML(value, options, partialMarkup) {
   let uidPattern;
   /** @type {RegExp | undefined} */
   let uidAttrLeadingPattern;
+  /** @type {RegExp | undefined} */
+  let uidAttrTrailingPattern;
   /** @type {RegExp | undefined} */
   let uidAttrExactPattern;
   // Create inline tags/text sets with custom elements
@@ -1158,6 +1179,7 @@ async function minifyHTML(value, options, partialMarkup) {
         uidAttr = uniqueId(value);
         uidPattern = new RegExp('(\\s*)' + uidAttr + '([0-9]+)' + uidAttr + '(\\s*)', 'g');
         uidAttrLeadingPattern = new RegExp('^\\s*' + uidAttr + '(\\d+)' + uidAttr);
+        uidAttrTrailingPattern = new RegExp(uidAttr + '(\\d+)' + uidAttr + '\\s*$');
         uidAttrExactPattern = new RegExp('^' + uidAttr + '(\\d+)' + uidAttr + '$');
 
         const uidPlaceholderPattern = new RegExp(uidAttr + '\\d+' + uidAttr, 'g');
@@ -1303,14 +1325,22 @@ async function minifyHTML(value, options, partialMarkup) {
   }
 
   function bufferPush(/** @type {string} */ entry, /** @type {boolean} */ isTag) {
+    textTrimmedEndIndex = -1;
     buffer.push(entry);
     bufferTags?.push(isTag);
-    if (entry) removed = false;
+    if (entry) {
+      removed = false;
+      followsRemovedBlock = false;
+    }
   }
 
   function bufferSet(/** @type {number} */ index, /** @type {string} */ entry) {
+    trimsRecorded?.push([index, buffer[index] ?? '']);
     buffer[index] = entry;
     if (index <= trimSettledIndex) trimSettledIndex = -1;
+    for (const run of runsSkipped) {
+      if (index <= run.top && (index === run.bottom ? run.skips(entry) : index > run.bottom && !run.skips(entry))) run.top = -1;
+    }
   }
 
   // Entries after `index` move down by one, so a settled walk from there on is no longer one
@@ -1318,6 +1348,10 @@ async function minifyHTML(value, options, partialMarkup) {
     buffer.splice(index, 1);
     bufferTags?.splice(index, 1);
     if (index <= trimSettledIndex) trimSettledIndex = -1;
+    // Past an empty entry removed from the run, the run is one shorter
+    for (const run of runsSkipped) {
+      if (index <= run.top) run.top = index > run.bottom ? run.top - 1 : -1;
+    }
     if (mergeRecords) {
       // Recorded in buffer order, so those before `index` stay as they are
       for (let i = mergeRecords.length - 1; i >= 0; i--) {
@@ -1341,6 +1375,9 @@ async function minifyHTML(value, options, partialMarkup) {
   function bufferTruncate(/** @type {number} */ length) {
     buffer.length = Math.max(0, length);
     if (length <= trimSettledIndex) trimSettledIndex = -1;
+    for (const run of runsSkipped) {
+      if (length <= run.top) run.top = length > run.bottom + 1 ? length - 1 : -1;
+    }
     if (bufferTags) bufferTags.length = buffer.length;
     if (transparentGapIndex >= buffer.length) transparentGapIndex = -1;
     if (noTrimEndIndex >= buffer.length) noTrimEndIndex = -1;
@@ -1353,6 +1390,25 @@ async function minifyHTML(value, options, partialMarkup) {
       else if (mergeRecord && mergeRecord.content >= buffer.length) mergeRecord.content = -1;
     }
     removed = true;
+  }
+
+  // The nearest entry from `index` down that `run` doesn’t skip (or 0), past what a walk went past
+  // before, so that walking back over removed nodes and comments doesn’t grow quadratic
+  function skipRun(/** @type {typeof runEmpty} */ run, /** @type {number} */ index) {
+    const indexStart = index;
+    while (index > 0 && run.skips(buffer[index] ?? '')) {
+      if (index <= run.top && index > run.bottom) {
+        index = run.bottom;
+        break;
+      }
+      index--;
+    }
+    // A shorter run doesn’t replace a longer one, which entries removed above it may expose again
+    if (index < indexStart && indexStart > run.top && indexStart - index >= run.top - run.bottom) {
+      run.top = indexStart;
+      run.bottom = index;
+    }
+    return index;
   }
 
   // The nearest entries before and from `index` that aren’t empty, as removed nodes leave them
@@ -1633,13 +1689,13 @@ async function minifyHTML(value, options, partialMarkup) {
     return formattingElements.has((lowerTag || tag).toLowerCase());
   }
 
-  // Returns whether `tag` was open
-  function removeClosedTag(/** @type {string[]} */ tags, /** @type {string} */ tag, /** @type {string} */ lowerTag) {
+  // Returns whether `tag` was open (`belowTop` where the parser closed it below the top)
+  function removeClosedTag(/** @type {string[]} */ tags, /** @type {string} */ tag, /** @type {string} */ lowerTag, belowTop = false) {
     if (tags[tags.length - 1] === tag) {
       tags.pop();
       return true;
     }
-    const index = canCloseBelowTop(tag, lowerTag) ? tags.lastIndexOf(tag) : -1;
+    const index = belowTop || canCloseBelowTop(tag, lowerTag) ? tags.lastIndexOf(tag) : -1;
     if (index === -1) {
       return false;
     }
@@ -1728,8 +1784,17 @@ async function minifyHTML(value, options, partialMarkup) {
         trimSettledIndex = indexStart;
         return;
       }
+      // Pending whitespace waits for what follows the elements that don’t render
+      if (index === transparentGapIndex) {
+        return;
+      }
       const str = buffer[index] ?? '';
       if (!str) {
+        // Up to an entry the checks above stop at
+        const indexTo = skipRun(runEmpty, index);
+        if (indexTo < index - 1 && !(trimSettledIndex > indexTo && trimSettledIndex < index) && !(transparentGapIndex > indexTo && transparentGapIndex < index)) {
+          index = indexTo + 1;
+        }
         continue;
       }
       const endTagName = matchPlainEndTag(str);
@@ -1777,27 +1842,52 @@ async function minifyHTML(value, options, partialMarkup) {
     if (transparentGapIndex !== -1 && !transparentDepth && !inlineElementsTransparentAfter.has(nextTag) && !inlineElementsTransparent.has(nextTag)) {
       settleTransparentGap(collapseWhitespaceSmart(' ', '', nextTag, emptyAttrs, emptyAttrs, options, inlineSets) !== '');
     }
-    let charsIndex = buffer.length - 1;
     // Step back over every trailing comment and empty entry, not just one—a single step
     // stops the search at the comment itself, leaving whitespace behind that a second
     // minification run then removes
-    while (charsIndex > 0) {
-      const item = buffer[charsIndex] ?? '';
-      // Comments and empty entries only, as `<!…` or nothing at all
-      const skippable = item === '' || (item.charCodeAt(0) === 60 /* < */ && item.charCodeAt(1) === 33 /* ! */);
-      if (!skippable || (uidIgnore && item.indexOf(uidIgnore) !== -1)) {
-        break;
-      }
-      charsIndex--;
-    }
+    const charsIndex = skipRun(runQuiet, buffer.length - 1);
     // Right before an element that doesn’t render, the text’s own pass has
-    // weighed both sides already
-    //
-    // @@ Spare a pending gap, too (`charsIndex === transparentGapIndex`): 3+ empties lose a space
-    if (charsIndex === buffer.length - 1 && inlineElementsTransparent.has(nextTag)) {
+    // weighed both sides already, and pending whitespace waits for what follows
+    if ((charsIndex === buffer.length - 1 || charsIndex === transparentGapIndex) && inlineElementsTransparent.has(nextTag)) {
+      return;
+    }
+    if (holdTransparentGap(charsIndex, nextTag)) {
       return;
     }
     trimTrailingWhitespace(charsIndex, nextTag);
+  }
+
+  // Whitespace weighed against a comment or an element removed since waits for what follows
+  // the element that doesn’t render, too; returns whether it does
+  function holdTransparentGap(/** @type {number} */ index, /** @type {string} */ nextTag) {
+    if (transparentGapIndex !== -1 || transparentDepth || !inlineElementsTransparent.has(nextTag)) {
+      return false;
+    }
+    index = skipRun(runEmpty, index);
+    if (!endsWithWhitespace(buffer[index] ?? '')) {
+      return false;
+    }
+    transparentGapIndex = index;
+    return true;
+  }
+
+  // Whether text starts with whitespace, which the tab padding a custom fragment’s placeholder
+  // isn’t, unlike whitespace the fragment itself starts with
+  function startsWithWhitespace(/** @type {string} */ text) {
+    if (uidAttr && text.startsWith('\t' + uidAttr)) {
+      const match = uidAttrLeadingPattern?.exec(text);
+      return Boolean(match && ignoredCustomMarkupChunks[+(match[1] ?? 0)]?.[1]);
+    }
+    return RE_LEADING_WHITESPACE.test(text);
+  }
+
+  // Whether text ends with whitespace, likewise
+  function endsWithTextWhitespace(/** @type {string} */ text) {
+    if (uidAttr && text.endsWith(uidAttr + '\t')) {
+      const match = uidAttrTrailingPattern?.exec(text);
+      return Boolean(match && ignoredCustomMarkupChunks[+(match[1] ?? 0)]?.[2]);
+    }
+    return endsWithWhitespace(text);
   }
 
   // Keep or trim the whitespace pending before or between elements that don’t render
@@ -1879,9 +1969,14 @@ async function minifyHTML(value, options, partialMarkup) {
   // and so is to be escaped again
   let textForeign = false;
   let textForeignDecoded = false;
+  // Whether the text loses its trailing whitespace to the tag after it, and its entry
+  // in `buffer`, for that whitespace to come back should the element go
+  let textTrimmedEnd = false;
+  let textTrimmedEndIndex = -1;
 
   // Whitespace collapsing phase (sync)
   function charsCollapse(/** @type {string} */ text) {
+    const textIn = text;
     // Trim a single trailing newline inside `pre`, often a template engine artifact (several are
     // likely intentional formatting); in `textarea`, it is part of the value
     if (options.collapseWhitespace && stackNoTrimWhitespace.length) {
@@ -1899,21 +1994,22 @@ async function minifyHTML(value, options, partialMarkup) {
         // decisions; this is only used in `collapseWhitespaceSmart`—`textPrevTag` itself is not
         // modified, to avoid side effects on the `inlineTextSet` branch below
         let effectivePrevTag = textPrevTag;
-        if (textPrevTag === 'comment') {
+        const followsComment = textPrevTag === 'comment';
+        if (followsComment) {
           const prevComment = buffer[buffer.length - 1] ?? '';
           if (!uidIgnore || prevComment.indexOf(uidIgnore) === -1) {
             if (!prevComment) {
               textPrevTag = charsPrevTag;
               effectivePrevTag = textPrevTag;
             }
-            if (buffer.length > 1 && (!prevComment || (!options.conservativeCollapse && / $/.test(currentChars)))) {
-              const charsIndex = buffer.length - 2;
+            // Past comments removed before, and leaving pending whitespace where it is
+            const charsIndex = skipRun(runEmpty, buffer.length - 2);
+            if (charsIndex >= 0 && charsIndex !== transparentGapIndex && (!prevComment || (!options.conservativeCollapse && / $/.test(currentChars)))) {
               bufferSet(charsIndex, (buffer[charsIndex] ?? '').replace(/\s+$/, function (trailingSpaces) {
                 text = trailingSpaces + text;
-                // It moved, and is judged again as part of this text
-                if (currentChars.endsWith(trailingSpaces)) {
-                  currentChars = currentChars.slice(0, -trailingSpaces.length);
-                }
+                // It moved, and is judged again as part of this text; what is left before it
+                // doesn’t end in whitespace anymore
+                currentChars = currentChars.replace(/\s+$/, '');
                 return '';
               }));
             }
@@ -1964,7 +2060,7 @@ async function minifyHTML(value, options, partialMarkup) {
             } else {
               // Text that follows decides, while a tag that follows does so in
               // `squashTrailingWhitespace`
-              if (RE_LEADING_WHITESPACE.test(collapsed)) {
+              if (startsWithWhitespace(collapsed)) {
                 if (transparentGapIndex !== -1) settleTransparentGap(false);
                 // Where nothing before the elements renders a space, the text’s own goes, too
                 if (!options.conservativeCollapse && !precedesTransparentRun(true)) {
@@ -1977,6 +2073,11 @@ async function minifyHTML(value, options, partialMarkup) {
             }
           } else {
             text = collapsed;
+            // Neither does a comment or an element removed, so text after one decides on
+            // pending whitespace
+            if (transparentGapIndex !== -1 && !transparentDepth && text) {
+              settleTransparentGap(!startsWithWhitespace(text));
+            }
             // Whitespace before an element that doesn’t render waits for what follows it, too
             if (!transparentDepth && inlineElementsTransparent.has(textNextTag) && endsWithWhitespace(text)) {
               transparentGapPending = true;
@@ -1985,7 +2086,7 @@ async function minifyHTML(value, options, partialMarkup) {
         } else {
           text = collapseWhitespace(text, options, true, true);
         }
-        if (!text && RE_TRAILING_WHITESPACE.test(currentChars) && textPrevTag && textPrevTag.charAt(0) === '/') {
+        if (!text && RE_TRAILING_WHITESPACE.test(currentChars) && textPrevTag && textPrevTag.charAt(0) === '/' && !holdTransparentGap(buffer.length - 1, textNextTag)) {
           trimTrailingWhitespace(buffer.length - 1, textNextTag);
         }
       }
@@ -1997,6 +2098,9 @@ async function minifyHTML(value, options, partialMarkup) {
         text = collapseNoBreakSpaces(text, options);
       }
     }
+    // Whitespace-only text loses its whitespace to the next tag if text in its place keeps it
+    textTrimmedEnd = Boolean(options.removeEmptyElements && options.collapseWhitespace) && endsWithTextWhitespace(textIn) && !endsWithWhitespace(text) &&
+      (text !== '' || (!stackNoTrimWhitespace.length && !endsWithWhitespace(currentChars) && Boolean(textNextTag) && textNextTag.charAt(0) !== '/' && collapseWhitespaceSmart(textIn, textPrevTag, 'comment', textPrevAttrs, emptyAttrs, options, inlineSets) !== ''));
     return text;
   }
 
@@ -2101,6 +2205,7 @@ async function minifyHTML(value, options, partialMarkup) {
       if (text) transparentGapIndex = buffer.length;
     }
     bufferPush(text, false);
+    textTrimmedEndIndex = textTrimmedEnd ? buffer.length - 1 : -1;
     if (followsRemoval) {
       removeWhitespaceLine(buffer.length - 1);
     }
@@ -2456,9 +2561,12 @@ async function minifyHTML(value, options, partialMarkup) {
         }
         replaceContentTypePragma(attrs, markers);
       }
+      const charsBefore = currentChars;
+      const charsPrevTagBefore = charsPrevTag;
       currentTag = tag;
       charsPrevTag = tag;
-      if (!inlineTextSet.has(lowerTag || tag)) {
+      // An empty element that doesn’t render leaves the text before it in play
+      if (!inlineTextSet.has(lowerTag || tag) && !inlineElementsTransparentVoid.has(lowerTag || tag)) {
         // Replaced content counts as content for the whitespace after what holds it
         currentChars = inlineElementsToKeepWhitespace.has(lowerTag || tag) ? '|' : '';
       }
@@ -2508,10 +2616,29 @@ async function minifyHTML(value, options, partialMarkup) {
         optionalEndTagEmitted = false;
       }
 
+      // What the text before loses to an element that may go, with what it was, to come back
+      // should it go: What trims here, and what the text trims seeing this tag next
+      /** @type {Array<[number, string]>} */
+      const trims = [];
+      let charsBeforeRestored = charsBefore;
+      const recordsTrims = Boolean(options.removeEmptyElements) && !unary;
+      if (recordsTrims && textTrimmedEndIndex !== -1 && textTrimmedEndIndex === buffer.length - 1 && !endsWithWhitespace(buffer[textTrimmedEndIndex] ?? '')) {
+        trims.push([textTrimmedEndIndex, buffer[textTrimmedEndIndex] + ' ']);
+        charsBeforeRestored += ' ';
+      }
       // Set whitespace flags for nested tags (e.g., `<code>` within a `<pre>`); verbatim
       // whitespace is tracked without `collapseWhitespace` too, as `removeWhitespaceLine` spares it
       if (options.collapseWhitespace && !stackNoTrimWhitespace.length) {
+        if (recordsTrims) trimsRecorded = trims;
         squashTrailingWhitespace(lowerTag || tag);
+        trimsRecorded = null;
+      }
+      // Whitespace that comes back is pending, as before what doesn’t render
+      let gapIndexBefore = -1;
+      if (!transparentDepth) {
+        for (const [index, text] of trims) {
+          if (index > gapIndexBefore && endsWithWhitespace(text) && !endsWithWhitespace(buffer[index] ?? '')) gapIndexBefore = index;
+        }
       }
       if (options.collapseWhitespace && !unary && inlineElementsTransparent.has(lowerTag || tag)) {
         transparentDepth++;
@@ -2567,7 +2694,7 @@ async function minifyHTML(value, options, partialMarkup) {
           markOpenElementFilled();
         } else {
           // A start tag not written can’t be removed with its element
-          openElements.push({ tag, index: buffer.length - 1, empty: !autoGenerated || Boolean(options.includeAutoGeneratedTags), omittedStartTag, omittedEndTag, impliedEnds: impliedEndsClosed });
+          openElements.push({ tag, index: buffer.length - 1, empty: !autoGenerated || Boolean(options.includeAutoGeneratedTags), omittedStartTag, omittedEndTag, impliedEnds: impliedEndsClosed, before: { chars: charsBeforeRestored, prevTag: charsPrevTagBefore, gapIndex: gapIndexBefore, trims } });
         }
       }
 
@@ -2611,7 +2738,7 @@ async function minifyHTML(value, options, partialMarkup) {
       emitStartTag(/** @type {Array<{name: string, value: string | undefined, attr: HTMLAttribute} | undefined>} */ (attrResults), tag, unary, autoGenerated, fragmentJoinsTag, hasUnarySlash, optional, restoreOptions, optionsTag);
       return undefined;
     },
-    end: function (/** @type {string} */ tag, /** @type {HTMLAttribute[]} */ attrs, /** @type {boolean} */ autoGenerated, /** @type {string | undefined} */ rest, /** @type {boolean | undefined} */ holdsTable) {
+    end: function (/** @type {string} */ tag, /** @type {HTMLAttribute[]} */ attrs, /** @type {boolean} */ autoGenerated, /** @type {string | undefined} */ rest, /** @type {boolean | undefined} */ holdsTable, /** @type {boolean | undefined} */ closesBelowTop) {
       // As in `start`: `lowerTag` stays '' when no foreign content is around
       let lowerTag = '';
       // Named as the start tag was: an `svg` or `math` element in its own context,
@@ -2669,7 +2796,7 @@ async function minifyHTML(value, options, partialMarkup) {
       const insideNoTrim = stackNoTrimWhitespace.length > 0;
       let closesNoTrim = false;
       if (stackNoTrimWhitespace.length) {
-        if (removeClosedTag(stackNoTrimWhitespace, tag, lowerTag)) {
+        if (removeClosedTag(stackNoTrimWhitespace, tag, lowerTag, closesBelowTop)) {
           const tagLower = lowerTag || tag;
           if (tagLower === 'pre') preDepth--;
           closesNoTrim = !stackNoTrimWhitespace.length;
@@ -2681,7 +2808,7 @@ async function minifyHTML(value, options, partialMarkup) {
         transparentDepth--;
       }
       let closesNoCollapse = false;
-      if (stackNoCollapseWhitespace.length && removeClosedTag(stackNoCollapseWhitespace, tag, lowerTag)) {
+      if (stackNoCollapseWhitespace.length && removeClosedTag(stackNoCollapseWhitespace, tag, lowerTag, closesBelowTop)) {
         closesNoCollapse = !stackNoCollapseWhitespace.length;
       }
 
@@ -2704,7 +2831,7 @@ async function minifyHTML(value, options, partialMarkup) {
       if (options.removeEmptyElements && openElements.length) {
         if (openElements[openElements.length - 1]?.tag === tag) {
           openElement = openElements.pop();
-        } else if (canCloseBelowTop(tag, lowerTag)) {
+        } else if (closesBelowTop || canCloseBelowTop(tag, lowerTag)) {
           const index = openElements.findLastIndex(entry => entry.tag === tag);
           if (index !== -1) {
             openElement = openElements.splice(index, 1)[0];
@@ -2756,6 +2883,19 @@ async function minifyHTML(value, options, partialMarkup) {
           optionalStartTag = '';
           optionalEndTag = '';
           optionalEndTagEmitted = false;
+          // The text before it is what comes before what follows now
+          if (openElement) {
+            currentChars = openElement.before.chars;
+            charsPrevTag = openElement.before.prevTag;
+            const trims = openElement.before.trims;
+            for (let i = trims.length - 1; i >= 0; i--) {
+              const [index, text] = /** @type {[number, string]} */ (trims[i]);
+              bufferSet(index, text);
+            }
+            if (openElement.before.gapIndex !== -1) transparentGapIndex = openElement.before.gapIndex;
+          }
+          // @@ Keep space by removed inline elements near `script` (`a<script>1</script><b></b> c`)
+          followsRemovedBlock = !inlineElements.has(lowerTag || tag) && !inlineElementsTransparent.has(lowerTag || tag);
           // What it made optional is up to what comes next now
           if (openElement?.omittedEndTag) {
             bufferPush(openElement.omittedEndTag.text, true);
@@ -2861,7 +3001,7 @@ async function minifyHTML(value, options, partialMarkup) {
         if (mergeRecord.kind === 'style' && markers.length && markers.some(marker => text.includes(marker))) mergeRecord.key = null;
       }
       // Publish this node’s context for the `charsCollapse`/`charsFinalize` phases
-      textPrevTag = prevTag === '' ? 'comment' : prevTag;
+      textPrevTag = followsRemovedBlock ? charsPrevTag || 'comment' : prevTag === '' ? 'comment' : prevTag;
       textNextTag = nextTag === '' ? 'comment' : nextTag;
       textPrevAttrs = prevAttrs || [];
       textNextAttrs = nextAttrs || [];

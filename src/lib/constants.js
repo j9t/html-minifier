@@ -475,6 +475,7 @@ export {
   inlineElementsToKeepWhitespaceBetweenEnd,
   inlineElementsTransparent,
   inlineElementsTransparentAfter,
+  inlineElementsTransparentVoid,
   inlineElementsToKeepWhitespace,
   processingInstructionTag,
   formControlElementsEither,
