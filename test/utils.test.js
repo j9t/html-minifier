@@ -2,6 +2,7 @@ import { describe, test } from 'node:test';
 import assert from 'node:assert';
 import { decodeHTML } from 'entities';
 import { LRU, decodeForeignText, describeDependencyFailure, describeQuantifierRisk, embedSource, escapeXML, isQuirksDoctype, stableStringify } from '../src/lib/utils.js';
+import { assertLinearGrowth } from './timing.js';
 
 /** @param {string} source */
 const hasRiskyQuantifiers = source => describeQuantifierRisk(source) !== null;
@@ -375,7 +376,7 @@ describe('Utils', () => {
       assert.strictEqual(hasRiskyQuantifiers(/<%[-=]?([\s\S]*?)%>/.source), false);
     });
 
-    test('Analysis stays bounded on pathological patterns', () => {
+    test('Analysis stays bounded on pathological patterns', async () => {
       // Nesting past the depth limit is judged risky rather than recursed into,
       // while nesting within it is read for what it is
       assert.strictEqual(hasRiskyQuantifiers('('.repeat(60) + 'a' + ')'.repeat(60)), true);
@@ -386,11 +387,14 @@ describe('Utils', () => {
       assert.strictEqual(hasRiskyQuantifiers('a'.repeat(10000)), false);
 
       // A pattern that is nothing but repeats compares against a bounded number
-      // of them, rather than against every one that came before
-      const repeats = 'a*b*'.repeat(2500);
-      const started = Date.now();
-      assert.strictEqual(hasRiskyQuantifiers(repeats), true);
-      assert.ok(Date.now() - started < 1000, 'Expected the reach to stay bounded');
+      // of them, rather than against every one that came before. The repeats share
+      // no character, so that no comparison ends the search early, and the length
+      // limit keeps a single analysis short, so it runs ten times to show its growth.
+      assert.strictEqual(hasRiskyQuantifiers('a*b*'.repeat(2500)), true);
+      await assertLinearGrowth(count => {
+        const repeats = Array.from({ length: count }, (_, i) => String.fromCodePoint(0x4e00 + i) + '*').join('');
+        for (let i = 0; i < 10; i++) assert.strictEqual(hasRiskyQuantifiers(repeats), false);
+      }, 1200, 'Comparing repeats');
 
       // Extreme nesting trips the length limit before the walk ever starts
       const nested = '('.repeat(20000) + 'a' + ')'.repeat(20000);

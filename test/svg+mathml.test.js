@@ -1,6 +1,7 @@
 import assert from 'node:assert';
 import {describe, test} from 'node:test';
 import { minify, getCacheStats } from '../src/htmlminifier.js';
+import { assertLinearGrowth } from './timing.js';
 
 // Makes SVGO fail whatever it reads
 const failingSVGOPlugin = { name: 'fail', fn: () => { throw new Error('SVGO plugin failure'); } };
@@ -1641,19 +1642,8 @@ describe('SVG and MathML', () => {
 
   test('Stays cheap reading the namespace an element sits in', async () => {
     // Reading it off the stack costs as much as the stack is deep, for every element whose
-    // content is text—which a deep document turns quadratic, minutes at this size
-    const benign = '<div>a</div>'.repeat(46000);
-    const input = '<div>'.repeat(80000) + '<textarea>a</textarea>'.repeat(8000);
-
-    const startBaseline = Date.now();
-    await minify(benign);
-    const baseline = Date.now() - startBaseline;
-
-    const start = Date.now();
-    await minify(input);
-    const elapsed = Date.now() - start;
-
-    assert.ok(elapsed < Math.max(baseline * 20, 2000), `Expected the namespace to be kept, not walked, took ${elapsed}ms (${baseline}ms baseline)`);
+    // content is text—which a deep document turns quadratic
+    await assertLinearGrowth(count => minify('<div>'.repeat(count * 10) + '<textarea>a</textarea>'.repeat(count)), 2000, 'Reading the namespace');
   });
 
   test('Applies `minifySVG` from a preset, and lets `minifySVG: false` override it', async () => {

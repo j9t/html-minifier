@@ -2,6 +2,7 @@ import { describe, test } from 'node:test';
 import assert from 'node:assert';
 import { minify } from '../src/htmlminifier.js';
 import { extractScriptBodies } from '../src/lib/content.js';
+import { assertLinearGrowth } from './timing.js';
 
 describe('JS', () => {
   test('Keeps names with `mangle: false`', async () => {
@@ -484,20 +485,16 @@ describe('JS', () => {
       assert.deepStrictEqual(codesOf('<script>var a = 1;</script'), []);
     });
 
-    test('Does not degrade to a quadratic scan on repeated `</script`', () => {
-      const input = '<script>var a = 1;' + '</script'.repeat(20000);
-      const start = performance.now();
-
-      assert.deepStrictEqual(codesOf(input), []);
-      assert.ok(performance.now() - start < 500, 'Extraction should stay linear in the input length');
+    test('Does not degrade to a quadratic scan on repeated `</script`', async () => {
+      await assertLinearGrowth(count => {
+        assert.deepStrictEqual(codesOf('<script>var a = 1;' + '</script'.repeat(count)), []);
+      }, 10000, 'Extraction');
     });
 
-    test('Does not degrade to a quadratic scan on repeated `<script`', () => {
-      const input = '<script '.repeat(20000);
-      const start = performance.now();
-
-      assert.deepStrictEqual(codesOf(input), []);
-      assert.ok(performance.now() - start < 500, 'Extraction should stay linear in the input length');
+    test('Does not degrade to a quadratic scan on repeated `<script`', async () => {
+      await assertLinearGrowth(count => {
+        assert.deepStrictEqual(codesOf('<script '.repeat(count)), []);
+      }, 10000, 'Extraction');
     });
   });
 

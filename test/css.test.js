@@ -2,6 +2,7 @@ import { describe, test } from 'node:test';
 import assert from 'node:assert';
 import { minify } from '../src/htmlminifier.js';
 import { collectUsedSymbols } from '../src/lib/unused-css.js';
+import { assertLinearGrowth } from './timing.js';
 
 describe('CSS', () => {
   test('Minifies CSS', async () => {
@@ -559,34 +560,12 @@ describe('CSS', () => {
       assert.ok(!styleOf(output).includes('.gone'), 'Unreferenced rule should still be removed');
     });
 
-    test('Scans raw-text elements in linear time', () => {
+    test('Scans raw-text elements in linear time', async () => {
       // A regular expression permissive enough for malformed end tags backtracked
-      // quadratically over near-matches; compare growth rather than absolute time,
-      // which would depend on the machine, and keep the best of several runs, as a
-      // lone sample largely reports what else the machine was doing. No `>` may
-      // follow the repetitions—one lets the pattern succeed immediately, which is
-      // what makes the near-matches pathological rather than merely long.
-      const measure = (/** @type {number} */ count) => {
-        const input = '<style>' + '</style\t'.repeat(count);
-        let best = Infinity;
-        for (let run = 0; run < 3; run++) {
-          const started = performance.now();
-          collectUsedSymbols(input, true);
-          best = Math.min(best, performance.now() - started);
-        }
-        return best;
-      };
-
-      measure(1000); // Warm up, so the first timed run is not the one that compiles
-      const small = measure(8000);
-      const large = measure(16000);
-
-      // Doubling the input doubles a linear scan but quadruples a quadratic one; the
-      // constant absorbs timer noise, which dominates when both runs are near-instant
-      assert.ok(
-        large <= small * 3 + 50,
-        `Scanning grew from ${small.toFixed(1)} ms to ${large.toFixed(1)} ms on twice the input`
-      );
+      // quadratically over near-matches. No `>` may follow the repetitions—one lets
+      // the pattern succeed immediately, which is what makes the near-matches
+      // pathological rather than merely long.
+      await assertLinearGrowth(count => collectUsedSymbols('<style>' + '</style\t'.repeat(count), true), 8000, 'Scanning');
     });
 
     test('Finds style sheets, scripts, and elements in any ASCII case', () => {

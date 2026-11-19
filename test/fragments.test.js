@@ -1,6 +1,7 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert';
 import { toDelimitedFragment, toFragment, replaceCustomFragments, isMinifiedCodeSafe } from '../src/lib/fragments.js';
+import { assertLinearGrowth } from './timing.js';
 
 describe('Fragments', () => {
   describe('`toDelimitedFragment`', () => {
@@ -145,7 +146,7 @@ describe('Fragments', () => {
       }
     });
 
-    test('Gives up on a pattern run as a regex where its closing literal is nowhere ahead', () => {
+    test('Gives up on a pattern run as a regex where its closing literal is nowhere ahead', async () => {
       assert.strictEqual(toFragment(/<\?(?:php[\t\n\r ]|=|\$|xml(?:-stylesheet)?(?![\w-])|\s)[\s\S]*?\?>/i).close, '?>');
       assert.strictEqual(toFragment(/a|<%[\s\S]*?%>/).close, null, 'A match of `a` ends anywhere');
       assert.strictEqual(toFragment(/(<%|\{\{)[\s\S]*?%>/).close, '%>');
@@ -153,10 +154,11 @@ describe('Fragments', () => {
       assert.strictEqual(toFragment(/(<%).*?%>/).close, null, 'The body stops at line terminators');
 
       // Each opener would otherwise run to the end of the input, which costs O(n²)
-      const input = '<?php '.repeat(50000);
-      const start = Date.now();
-      assert.strictEqual(replaceCustomFragments(input, prepare([/<\?(?:php[\t\n\r ]|=|\$|xml(?:-stylesheet)?(?![\w-])|\s)[\s\S]*?\?>/i]), marker), input);
-      assert.ok(Date.now() - start < 200, 'should fail in linear time');
+      const fragments = prepare([/<\?(?:php[\t\n\r ]|=|\$|xml(?:-stylesheet)?(?![\w-])|\s)[\s\S]*?\?>/i]);
+      await assertLinearGrowth(count => {
+        const input = '<?php '.repeat(count);
+        assert.strictEqual(replaceCustomFragments(input, fragments, marker), input);
+      }, 20000, 'Failing on unclosed openers');
     });
 
     test('Does not let a pattern that matches nothing stall the scan', () => {
@@ -179,24 +181,21 @@ describe('Fragments', () => {
       assert.strictEqual(isMinifiedCodeSafe('a; b: U0U', 'a;b:U0U', placeholder, true), false);
     });
 
-    test('Scans long inputs in linear time', () => {
-      const count = 50000;
-      const sources = [
-        ['case '.repeat(count) + ': U0U', true],
-        ['l: U0U '.repeat(count), true],
-        ['{ '.repeat(count) + 'l: U0U', true],
-        ['"'.repeat(count * 2 + 1) + 'U0U', true],
-        ['/*'.repeat(count) + 'U0U', true],
-        ['a ? '.repeat(count) + 'b : U0U', true],
-        [' '.repeat(count * 4) + ': U0U', true],
-        ['@import U0U;'.repeat(count), false],
-        ['@import '.repeat(count) + 'U0U', false],
-        ['/*'.repeat(count) + '@import U0U', false]
-      ];
-      for (const [source, isJS] of /** @type {[string, boolean][]} */ (sources)) {
-        const start = performance.now();
-        isMinifiedCodeSafe(source, 'x', placeholder, isJS);
-        assert.ok(performance.now() - start < 1000, source.slice(0, 20));
+    test('Scans long inputs in linear time', async () => {
+      const sources = /** @type {[(count: number) => string, boolean][]} */ ([
+        [count => 'case '.repeat(count) + ': U0U', true],
+        [count => 'l: U0U '.repeat(count), true],
+        [count => '{ '.repeat(count) + 'l: U0U', true],
+        [count => '"'.repeat(count * 2 + 1) + 'U0U', true],
+        [count => '/*'.repeat(count) + 'U0U', true],
+        [count => 'a ? '.repeat(count) + 'b : U0U', true],
+        [count => ' '.repeat(count * 4) + ': U0U', true],
+        [count => '@import U0U;'.repeat(count), false],
+        [count => '@import '.repeat(count) + 'U0U', false],
+        [count => '/*'.repeat(count) + '@import U0U', false]
+      ]);
+      for (const [source, isJS] of sources) {
+        await assertLinearGrowth(count => isMinifiedCodeSafe(source(count), 'x', placeholder, isJS), 20000, source(1).slice(0, 20));
       }
     });
   });
