@@ -2492,7 +2492,7 @@ async function minifyHTML(value, options, partialMarkup) {
           // Preserve the surrounding HTML context’s slash handling so
           // `foreignObject`/`annotation-xml` can restore it
           const keepClosingSlashHTML = Boolean(options.keepClosingSlash);
-          options = Object.create(options);
+          options = { ...options, optionsParent: options };
           // SVGO reads an SVG block whole, nested MathML included, so what the
           // block is stays true inside it
           options.insideSVG = lowerTag === 'svg' || Boolean(options.insideSVG);
@@ -2529,7 +2529,7 @@ async function minifyHTML(value, options, partialMarkup) {
             (lowerTag === 'annotation-xml' && RE_HTML_ENCODING.test(
               attrs.find((/** @type {HTMLAttribute} */ a) => a.name.toLowerCase() === 'encoding')?.value ?? '')))) {
           const nameParent = options.name;
-          options = Object.create(options);
+          options = { ...options, optionsParent: options };
           options.caseSensitive = false;
           // What the parser read the slash as, so that the two agree here as they do in HTML
           options.keepClosingSlash = options.keepClosingSlashHTML ?? false;
@@ -2752,16 +2752,16 @@ async function minifyHTML(value, options, partialMarkup) {
         lowerTag = tag.toLowerCase();
         // An integration point is named in its parent’s context, which it opened one inside of
         selfCloses &&= Boolean(options.insideForeignContent) || ((lowerTag === 'foreignobject' || lowerTag === 'annotation-xml') &&
-          Boolean(Object.getPrototypeOf(options).insideForeignContent));
+          Boolean(options.optionsParent?.insideForeignContent));
         if (foreignScopes.length && !leaveForeignScope(lowerTag)) {
           selfCloses = false;
         }
         // Restore parent context when exiting SVG/MathML or HTML-in-foreign-content elements
         if (lowerTag === 'svg' || lowerTag === 'math') {
-          options = Object.getPrototypeOf(options);
+          options = /** @type {ProcessedOptions} */ (options.optionsParent);
         } else if ((lowerTag === 'foreignobject' || lowerTag === 'annotation-xml') &&
-                   !options.insideForeignContent && Object.getPrototypeOf(options).insideForeignContent) {
-          options = Object.getPrototypeOf(options);
+                   !options.insideForeignContent && options.optionsParent?.insideForeignContent) {
+          options = options.optionsParent;
           name = options.name;
         }
       }
@@ -3451,10 +3451,21 @@ export const minify = async function (value, options) {
   // Whether the document holds a `base` element, looked up in it on the first `target=_self`
   /** @type {NonNullable<ProcessedOptions['baseState']>} */
   const baseState = { hasBase: undefined, source: value };
-  // Work on a shallow copy so per-call reassignments don’t reach the cached base. The
-  // per-document state is part of the copy from the start, as properties added to it
-  // later slow down every option lookup.
-  const processedOptions = /** @type {ProcessedOptions} */ ({ ...processedBase, cssContext, baseState });
+  // Work on a shallow copy so per-call reassignments don’t reach the cached base.
+  // The per-document state is part of the copy from the start, as properties added
+  // to it later slow down every option lookup; so are the keys of the SVG and MathML
+  // contexts, so that their copies share its shape.
+  const processedOptions = /** @type {ProcessedOptions} */ ({
+    ...processedBase,
+    cssContext,
+    baseState,
+    insideForeignContent: false,
+    insideSVG: false,
+    keepClosingSlashHTML: undefined,
+    namespaceForeign: undefined,
+    nameParent: undefined,
+    optionsParent: undefined
+  });
 
   // Unused-CSS removal needs the whole document’s symbols before the first `style` element is
   // minified, so they are collected upfront from the raw input—where there is a style sheet at all
