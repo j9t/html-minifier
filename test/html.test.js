@@ -7387,12 +7387,12 @@ describe('HTML', () => {
     // `continueOnParseError` recovers, treating the unterminated end tag as text
     await assertLinearGrowth(async count => {
       assert.strictEqual(await minify(unclosed(count), { continueOnParseError: true }), unclosed(count));
-    }, 20000, 'Parsing an unclosed end tag');
+    }, 50000, 'Parsing an unclosed end tag');
 
     // The default path throws a parse error—but must do so promptly, not after an O(n²) scan
     await assertLinearGrowth(async count => {
       await assert.rejects(minify(unclosed(count)), { message: /^Parse error at line 1, column 7/ });
-    }, 20000, 'Raising a parse error on an unclosed end tag');
+    }, 50000, 'Raising a parse error on an unclosed end tag');
 
     // Sanity: A well-formed long end tag is unaffected by the guard
     const longName = 'a'.repeat(500000);
