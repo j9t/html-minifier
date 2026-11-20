@@ -7984,9 +7984,16 @@ describe('HTML', () => {
       [' \n ', ' '],
       // So may what precedes elements that don’t render
       ['a <link rel="x">', 'a <link rel="x">'],
-      ['a <link rel="x"> ', 'a <link rel="x">'],
+      ['a <link rel="x"> ', 'a<link rel="x"> '],
       [' <link rel="x"> b', '<link rel="x"> b'],
       ['<span>x</span> <link rel="x">', '<span>x</span> <link rel="x">'],
+      // And what follows them, as does an edge where nothing but such elements stand
+      [' <link rel="x"><b>y</b>', ' <link rel="x"><b>y</b>'],
+      ['<b>y</b><link rel="x"> ', '<b>y</b><link rel="x"> '],
+      [' <script>a</script>b', ' <script>a</script>b'],
+      [' <link rel="x"> ', '<link rel="x"> '],
+      [' <link rel="x"><p>y</p>', '<link rel="x"><p>y</p>'],
+      ['<p>y</p><link rel="x"> ', '<p>y</p><link rel="x">'],
       // Next to block elements, whitespace doesn’t render
       ['\n<p>x</p>\n', '<p>x</p>'],
       ['</div> ', '</div>'],
@@ -8002,6 +8009,11 @@ describe('HTML', () => {
     // Comments, kept or removed
     assert.strictEqual(await minify('foo <!-- c --> ', options), 'foo<!-- c --> ');
     assert.strictEqual(await minify('foo <!-- c -->', { ...options, removeComments: true }), 'foo ');
+
+    // Nor do omitted end tags or merged scripts take whitespace along
+    assert.strictEqual(await minify('<ruby>a<rt>b</rt> ', { ...options, removeOptionalTags: true }), '<ruby>a<rt>b ');
+    assert.strictEqual(await minify('<b>a</b><script>x()</script> <script>y()</script>', { ...options, mergeScripts: true }), '<b>a</b><script>x();y()</script> ');
+    assert.strictEqual(await minify('<b>a</b><script>x()</script> <script>y()</script>', { collapseWhitespace: true, mergeScripts: true }), '<b>a</b><script>x();y()</script>');
 
     // `preserveLineBreaks` keeps a line break, and a space where there is none
     assert.strictEqual(await minify('\n<span>x</span>\n', { ...options, preserveLineBreaks: true }), '\n<span>x</span>\n');

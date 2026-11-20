@@ -39,6 +39,7 @@ import {
   pClosingParents,
   namesForeignMixedCase,
   integrationPointsForeign,
+  processingInstructionTag,
   MISSING_DEPENDENCY
 } from './lib/constants.js';
 
@@ -1543,7 +1544,7 @@ async function minifyHTML(value, options, partialMarkup) {
         const [, after] = findNeighbors(last.end + 1);
         const textBefore = buffer[before] ?? '';
         const textAfter = buffer[after] ?? '';
-        if (before < 0 || after >= buffer.length || RE_WS_END.test(textBefore) || RE_WS_START.test(textAfter)) {
+        if ((!keepsEdges && (before < 0 || after >= buffer.length)) || RE_WS_END.test(textBefore) || RE_WS_START.test(textAfter)) {
           for (let i = gapFrom; i < gapTo; i++) bufferSet(i, '');
         }
       }
@@ -1753,8 +1754,9 @@ async function minifyHTML(value, options, partialMarkup) {
     }
   }
 
-  // `insideNoTrim` stands in for the stack once the end tag that omits this one has left it
-  function removeEndTag(/** @type {boolean} */ insideNoTrim = false) {
+  // `insideNoTrim` stands in for the stack once the end tag that omits this one has left it;
+  // with `keepsFollowing`, whatever follows the tag stays
+  function removeEndTag(/** @type {boolean} */ insideNoTrim = false, /** @type {boolean} */ keepsFollowing = false) {
     let index = buffer.length - 1;
     while (index > 0 && !RE_END_TAG.test(buffer[index] ?? '')) {
       index--;
@@ -1764,7 +1766,7 @@ async function minifyHTML(value, options, partialMarkup) {
     // verbatim—in `pre`, in `textarea`, or wherever `canTrimWhitespace` says so—counts as
     // kept text too, no matter how whitespace is collapsed elsewhere.
     const noTrim = insideNoTrim || stackNoTrimWhitespace.length > 0;
-    if (index < buffer.length - 1 && (keepsWhitespace() || noTrim) && RE_END_TAG.test(text)) {
+    if (index < buffer.length - 1 && (keepsWhitespace() || keepsFollowing || noTrim) && RE_END_TAG.test(text)) {
       bufferRemove(index);
       // Collapsed whitespace can merge, kept whitespace can leave a line of only whitespace
       if (!noTrim) {
@@ -2056,7 +2058,10 @@ async function minifyHTML(value, options, partialMarkup) {
           }
         }
         if (textPrevTag || textNextTag) {
-          let collapsed = collapseWhitespaceSmart(text, effectivePrevTag, textNextTag, textPrevAttrs, textNextAttrs, options, inlineSets, !stackNoCollapseWhitespace.length);
+          // Beyond an edge of partial markup, anything may render, as for a processing instruction
+          const smartPrevTag = keepsEdges && effectivePrevTag === '' ? processingInstructionTag : effectivePrevTag;
+          const smartNextTag = keepsEdges && textNextTag === '' ? processingInstructionTag : textNextTag;
+          let collapsed = collapseWhitespaceSmart(text, smartPrevTag, smartNextTag, textPrevAttrs, textNextAttrs, options, inlineSets, !stackNoCollapseWhitespace.length);
           if (!transparentDepth && inlineElementsTransparentAfter.has(textPrevTag)) {
             // Between elements that don’t render, whitespace stays pending when it may
             // separate text, and one space does
@@ -3157,7 +3162,8 @@ async function minifyHTML(value, options, partialMarkup) {
     }
     // Except for `</dt>` or `</thead>`, end tags may be omitted if no more content in parent
     if (optionalEndTag && optionalEndTagEmitted && !trailingElements.has(optionalEndTag)) {
-      removeEndTag();
+      // Whitespace kept at the end of partial markup stays
+      removeEndTag(false, keepsEdges);
     }
   }
   // Collapsing also trims whitespace before trailing inline end tags; trimming the output
