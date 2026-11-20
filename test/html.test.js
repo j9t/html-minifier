@@ -3446,11 +3446,13 @@ describe('HTML', () => {
     assert.strictEqual(await minify(' <p>a</p> ', { collapseWhitespace: true, conservativeCollapse: true }), ' <p>a</p> ');
     assert.strictEqual(await minify('\n<p>a</p>\n', { collapseWhitespace: true, preserveLineBreaks: true }), '\n<p>a</p>\n');
 
-    // Partial markup ends where other markup joins it, so `collapseWhitespace` alone decides
+    // Partial markup ends where other markup joins it, so `collapseWhitespace` collapses
+    // whitespace there as next to text
     assert.strictEqual(await minify('Hello ', { partialMarkup: true }), 'Hello ');
     assert.strictEqual(await minify(' <b>x</b> ', { partialMarkup: true }), ' <b>x</b> ');
     assert.strictEqual(await minify('<!-- c --> world', { partialMarkup: true, removeComments: true }), ' world');
-    assert.strictEqual(await minify(' <b>x</b> ', { partialMarkup: true, collapseWhitespace: true }), '<b>x</b>');
+    assert.strictEqual(await minify(' \n<b>x</b>\n ', { partialMarkup: true, collapseWhitespace: true }), ' <b>x</b> ');
+    assert.strictEqual(await minify(' <p>x</p> ', { partialMarkup: true, collapseWhitespace: true }), '<p>x</p>');
   });
 
   // https://github.com/kangax/html-minifier/issues/10
@@ -7969,6 +7971,65 @@ describe('HTML', () => {
     // `partialMarkup` and `removeOptionalTags` work independently
     assert.strictEqual(await minify(input, { partialMarkup: true, removeOptionalTags: true }), '<div><p>Text</div>',
       'partialMarkup and removeOptionalTags work independently (optional </p> is removed)');
+  });
+
+  test('Collapses whitespace at the edges of partial markup', async () => {
+    const options = { partialMarkup: true, collapseWhitespace: true };
+    const cases = [
+      // Text and inline elements may join what surrounds the fragment
+      ['  foo  ', ' foo '],
+      [' <b>x</b> ', ' <b>x</b> '],
+      ['\n\t<span>x</span>\n', ' <span>x</span> '],
+      ['<p>foo ', '<p>foo '],
+      [' \n ', ' '],
+      // So may what precedes elements that don’t render
+      ['a <link rel="x">', 'a <link rel="x">'],
+      ['a <link rel="x"> ', 'a<link rel="x"> '],
+      [' <link rel="x"> b', '<link rel="x"> b'],
+      ['<span>x</span> <link rel="x">', '<span>x</span> <link rel="x">'],
+      // And what follows them, as does an edge where nothing but such elements stand
+      [' <link rel="x"><b>y</b>', ' <link rel="x"><b>y</b>'],
+      ['<b>y</b><link rel="x"> ', '<b>y</b><link rel="x"> '],
+      [' <script>a</script>b', ' <script>a</script>b'],
+      [' <link rel="x"> ', '<link rel="x"> '],
+      [' <link rel="x"><p>y</p>', '<link rel="x"><p>y</p>'],
+      ['<p>y</p><link rel="x"> ', '<p>y</p><link rel="x">'],
+      // Next to block elements, whitespace doesn’t render
+      ['\n<p>x</p>\n', '<p>x</p>'],
+      ['</div> ', '</div>'],
+      ['  <div>x</div>  ', '<div>x</div>'],
+      // Whitespace inside stays collapsed as before
+      ['<div> x </div>', '<div>x</div>'],
+      ['</div>  </div>  <div class="clearfix"></div>', '</div></div><div class="clearfix"></div>']
+    ];
+    for (const [input, output] of cases) {
+      assert.strictEqual(await minify(input, options), output, JSON.stringify(input));
+    }
+
+    // Comments, kept or removed
+    assert.strictEqual(await minify('foo <!-- c --> ', options), 'foo<!-- c --> ');
+    assert.strictEqual(await minify('foo <!-- c -->', { ...options, removeComments: true }), 'foo ');
+
+    // Kept whitespace keeps the end tag before it, and merged scripts keep it, too
+    assert.strictEqual(await minify('<ruby>a<rt>b</rt> ', { ...options, removeOptionalTags: true }), '<ruby>a<rt>b</rt> ');
+    assert.strictEqual(await minify('<ruby>a<rt>b</rt>', { ...options, removeOptionalTags: true }), '<ruby>a<rt>b');
+    assert.strictEqual(await minify('<b>a</b><script>x()</script> <script>y()</script>', { ...options, mergeScripts: true }), '<b>a</b><script>x();y()</script> ');
+    assert.strictEqual(await minify('<b>a</b><script>x()</script> <script>y()</script>', { collapseWhitespace: true, mergeScripts: true }), '<b>a</b><script>x();y()</script>');
+
+    // Script and style content isn’t an edge
+    assert.strictEqual(await minify('<script> x() </script>', options), '<script>x()</script>');
+    assert.strictEqual(await minify('<style> p{} </style>', options), '<style>p{}</style>');
+
+    // `preserveLineBreaks` keeps a line break, and a space where there is none
+    assert.strictEqual(await minify('\n<span>x</span>\n', { ...options, preserveLineBreaks: true }), '\n<span>x</span>\n');
+    assert.strictEqual(await minify('  foo  ', { ...options, preserveLineBreaks: true }), ' foo ');
+    assert.strictEqual(await minify('\n<p>x</p>\n', { ...options, preserveLineBreaks: true }), '\n<p>x</p>\n');
+
+    // Unchanged: Full documents, `conservativeCollapse`, and no `collapseWhitespace`
+    assert.strictEqual(await minify('  foo  ', { collapseWhitespace: true }), 'foo');
+    assert.strictEqual(await minify('a <link rel="x">', { collapseWhitespace: true }), 'a<link rel="x">');
+    assert.strictEqual(await minify('\n<p>x</p>\n', { ...options, conservativeCollapse: true }), ' <p>x</p> ');
+    assert.strictEqual(await minify('  foo  ', { partialMarkup: true }), '  foo  ');
   });
 
   test('Runs the code minifiers once with `sortAttributes` and `sortClassNames`', async () => {

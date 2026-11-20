@@ -10,7 +10,7 @@
     "entities": "^9.0.0",
     "lightningcss": "^1.33.0",
     "svgo": "^4.1.0",
-    "terser": "^5.51.2"
+    "terser": "^5.51.3"
   },
   "description": "Highly effective, super-configurable, well-tested web page minifier",
   "devDependencies": {
@@ -98,5 +98,5 @@
   },
   "type": "module",
   "types": "dist/types/htmlminifier.d.ts",
-  "version": "5.3.1"
+  "version": "5.4.0"
 }

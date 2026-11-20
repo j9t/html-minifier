@@ -39,6 +39,7 @@ import {
   pClosingParents,
   namesForeignMixedCase,
   integrationPointsForeign,
+  processingInstructionTag,
   MISSING_DEPENDENCY
 } from './lib/constants.js';
 
@@ -973,6 +974,13 @@ function matchPlainEndTag(str) {
   return str.slice(2, end - 1);
 }
 
+// At either end of partial markup, collapsed whitespace may separate the fragment from what
+// surrounds it, and so stays where text in its place would keep it
+/** @param {ProcessedOptions} options */
+function keepsEdgeWhitespace(options) {
+  return Boolean(options.collapseWhitespace && options.partialMarkup && !options.conservativeCollapse);
+}
+
 /**
  * @param {string} value
  * @param {ProcessedOptions} options
@@ -985,7 +993,9 @@ async function minifyHTML(value, options, partialMarkup) {
     throw new Error(`Input length (${value.length}) exceeds maximum allowed length (${options.maxInputLength})`);
   }
 
-  if (options.collapseWhitespace) {
+  const keepsEdges = keepsEdgeWhitespace(options);
+
+  if (options.collapseWhitespace && !keepsEdges) {
     value = collapseWhitespace(value, options, true, true);
   }
 
@@ -1534,7 +1544,7 @@ async function minifyHTML(value, options, partialMarkup) {
         const [, after] = findNeighbors(last.end + 1);
         const textBefore = buffer[before] ?? '';
         const textAfter = buffer[after] ?? '';
-        if (before < 0 || after >= buffer.length || RE_WS_END.test(textBefore) || RE_WS_START.test(textAfter)) {
+        if ((!keepsEdges && (before < 0 || after >= buffer.length)) || RE_WS_END.test(textBefore) || RE_WS_START.test(textAfter)) {
           for (let i = gapFrom; i < gapTo; i++) bufferSet(i, '');
         }
       }
@@ -1949,7 +1959,8 @@ async function minifyHTML(value, options, partialMarkup) {
         index--;
       }
     }
-    return false;
+    // What precedes partial markup may run into it, too
+    return keepsEdges;
   }
 
   // Per-text-node context for `charsCollapse`/`charsFinalize`, set by the `chars`
@@ -2046,7 +2057,10 @@ async function minifyHTML(value, options, partialMarkup) {
           }
         }
         if (textPrevTag || textNextTag) {
-          let collapsed = collapseWhitespaceSmart(text, effectivePrevTag, textNextTag, textPrevAttrs, textNextAttrs, options, inlineSets, !stackNoCollapseWhitespace.length);
+          // Beyond an edge of partial markup, anything may render, as for a processing instruction
+          const smartPrevTag = keepsEdges && effectivePrevTag === '' ? processingInstructionTag : effectivePrevTag;
+          const smartNextTag = keepsEdges && textNextTag === '' ? processingInstructionTag : textNextTag;
+          let collapsed = collapseWhitespaceSmart(text, smartPrevTag, smartNextTag, textPrevAttrs, textNextAttrs, options, inlineSets, !stackNoCollapseWhitespace.length);
           if (!transparentDepth && inlineElementsTransparentAfter.has(textPrevTag)) {
             // Between elements that don’t render, whitespace stays pending when it may
             // separate text, and one space does
@@ -2084,7 +2098,8 @@ async function minifyHTML(value, options, partialMarkup) {
             }
           }
         } else {
-          text = collapseWhitespace(text, options, true, true);
+          // Raw text has no tag on either side, unlike an edge of partial markup
+          text = collapseWhitespace(text, options, !keepsEdges || textPrevTag !== '', !keepsEdges || textNextTag !== '');
         }
         if (!text && RE_TRAILING_WHITESPACE.test(currentChars) && textPrevTag && textPrevTag.charAt(0) === '/' && !holdTransparentGap(buffer.length - 1, textNextTag)) {
           trimTrailingWhitespace(buffer.length - 1, textNextTag);
@@ -2995,15 +3010,16 @@ async function minifyHTML(value, options, partialMarkup) {
         }
       }
     },
-    chars: function (/** @type {string} */ text, /** @type {string} */ prevTag, /** @type {string} */ nextTag, /** @type {HTMLAttribute[]} */ prevAttrs, /** @type {HTMLAttribute[]} */ nextAttrs, /** @type {boolean} */ source) {
+    chars: function (/** @type {string} */ text, /** @type {string} */ prevTag, /** @type {string} */ nextTag, /** @type {HTMLAttribute[]} */ prevAttrs, /** @type {HTMLAttribute[]} */ nextAttrs, /** @type {boolean} */ source, /** @type {boolean} */ first, /** @type {boolean} */ last) {
       if (mergeRecord) {
         if (mergeRecord.content === -1) mergeRecord.content = buffer.length;
         // Custom fragments may hold anything, which minified CSS can’t take as written
         if (mergeRecord.kind === 'style' && markers.length && markers.some(marker => text.includes(marker))) mergeRecord.key = null;
       }
       // Publish this node’s context for the `charsCollapse`/`charsFinalize` phases
-      textPrevTag = followsRemovedBlock ? charsPrevTag || 'comment' : prevTag === '' ? 'comment' : prevTag;
-      textNextTag = nextTag === '' ? 'comment' : nextTag;
+      // An edge of partial markup reads as no tag, so that whitespace there may stay
+      textPrevTag = followsRemovedBlock ? charsPrevTag || 'comment' : first && keepsEdges ? '' : prevTag === '' ? 'comment' : prevTag;
+      textNextTag = last && keepsEdges ? '' : nextTag === '' ? 'comment' : nextTag;
       textPrevAttrs = prevAttrs || [];
       textNextAttrs = nextAttrs || [];
 
@@ -3103,7 +3119,7 @@ async function minifyHTML(value, options, partialMarkup) {
 
   // Nothing follows at the end, so pending whitespace goes (before SVG blocks shift the buffer)
   if (transparentGapIndex !== -1) {
-    settleTransparentGap(Boolean(options.conservativeCollapse));
+    settleTransparentGap(Boolean(options.conservativeCollapse) || keepsEdges);
   }
 
   if (mergeRecords && (mergeRecords.length > 1 || mergeRecords[0]?.deferred)) {
@@ -3144,14 +3160,16 @@ async function minifyHTML(value, options, partialMarkup) {
     if (topLevelElements.has(optionalStartTag)) {
       removeStartTag();
     }
-    // Except for `</dt>` or `</thead>`, end tags may be omitted if no more content in parent
-    if (optionalEndTag && optionalEndTagEmitted && !trailingElements.has(optionalEndTag)) {
+    // Except for `</dt>` or `</thead>`, end tags may be omitted if no more content in parent;
+    // whitespace kept at the end of partial markup follows the tag, which then stays
+    if (optionalEndTag && optionalEndTagEmitted && !trailingElements.has(optionalEndTag) &&
+        !(keepsEdges && !RE_END_TAG.test(buffer[skipRun(runEmpty, buffer.length - 1)] ?? ''))) {
       removeEndTag();
     }
   }
   // Collapsing also trims whitespace before trailing inline end tags; trimming the output
   // catches what it leaves at either end, like a space after a removed leading comment
-  if (options.collapseWhitespace) {
+  if (options.collapseWhitespace && !keepsEdges) {
     squashTrailingWhitespace('br');
   }
   trimOutputWhitespace();
@@ -3264,7 +3282,11 @@ function joinResultSegments(results, resultTags, markers, options, restoreCustom
   } else {
     str = restoreIgnore(restoreCustom(results.join('')));
   }
-  return options.collapseWhitespace ? collapseWhitespace(str, options, true, true) : str;
+  if (!options.collapseWhitespace) {
+    return str;
+  }
+  const trims = !keepsEdgeWhitespace(options);
+  return collapseWhitespace(str, options, trims, trims);
 }
 
 /**

@@ -4,7 +4,7 @@ As of version 5.0.0, all notable changes to HTML Minifier (HM) are documented in
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [5.4.0] - 2026-11-20
 
 ### Fixed
 
@@ -12,6 +12,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Changed
 
+* Changed `collapseWhitespace` to keep whitespace at either end of `partialMarkup` fragments as a single space (or line break, with `preserveLineBreaks`) where it may separate the fragment from what surrounds it, as next to text, inline elements, and elements that don’t render (previously, ` <b>Jane</b>\n` became `<b>Jane</b>`, and `a <link rel="x">` became `a<link rel="x">`), while it still goes next to block elements
 * Made pages with inline SVG or MathML faster to minify, as the first `svg` or `math` element slowed down the minification of the rest of the page (by 10–20% on pages without much SVG or MathML)
 
 ## [5.3.1] - 2026-11-19
