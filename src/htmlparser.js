@@ -808,8 +808,9 @@ export class HTMLParser {
         }
 
         if (handler.chars) {
-          // An element whose end tag follows its start tag’s text alone has that text for content
-          const result = handler.chars(text, prevTag, nextTag, prevAttrs, nextAttrs, sourcePos !== -1 && isSource(pos - text.length));
+          // An element whose end tag follows its start tag’s text alone has that text for content;
+          // the last two arguments say whether the text starts or ends the input
+          const result = handler.chars(text, prevTag, nextTag, prevAttrs, nextAttrs, sourcePos !== -1 && isSource(pos - text.length), pos === text.length, pos === fullLength);
           if (isThenable(result)) await result;
         }
         prevTag = '';
