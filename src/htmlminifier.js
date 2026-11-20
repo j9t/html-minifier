@@ -1754,9 +1754,8 @@ async function minifyHTML(value, options, partialMarkup) {
     }
   }
 
-  // `insideNoTrim` stands in for the stack once the end tag that omits this one has left it;
-  // with `keepsFollowing`, whatever follows the tag stays
-  function removeEndTag(/** @type {boolean} */ insideNoTrim = false, /** @type {boolean} */ keepsFollowing = false) {
+  // `insideNoTrim` stands in for the stack once the end tag that omits this one has left it
+  function removeEndTag(/** @type {boolean} */ insideNoTrim = false) {
     let index = buffer.length - 1;
     while (index > 0 && !RE_END_TAG.test(buffer[index] ?? '')) {
       index--;
@@ -1766,7 +1765,7 @@ async function minifyHTML(value, options, partialMarkup) {
     // verbatim—in `pre`, in `textarea`, or wherever `canTrimWhitespace` says so—counts as
     // kept text too, no matter how whitespace is collapsed elsewhere.
     const noTrim = insideNoTrim || stackNoTrimWhitespace.length > 0;
-    if (index < buffer.length - 1 && (keepsWhitespace() || keepsFollowing || noTrim) && RE_END_TAG.test(text)) {
+    if (index < buffer.length - 1 && (keepsWhitespace() || noTrim) && RE_END_TAG.test(text)) {
       bufferRemove(index);
       // Collapsed whitespace can merge, kept whitespace can leave a line of only whitespace
       if (!noTrim) {
@@ -2099,7 +2098,8 @@ async function minifyHTML(value, options, partialMarkup) {
             }
           }
         } else {
-          text = collapseWhitespace(text, options, !keepsEdges, !keepsEdges);
+          // Raw text has no tag on either side, unlike an edge of partial markup
+          text = collapseWhitespace(text, options, !keepsEdges || textPrevTag !== '', !keepsEdges || textNextTag !== '');
         }
         if (!text && RE_TRAILING_WHITESPACE.test(currentChars) && textPrevTag && textPrevTag.charAt(0) === '/' && !holdTransparentGap(buffer.length - 1, textNextTag)) {
           trimTrailingWhitespace(buffer.length - 1, textNextTag);
@@ -3160,10 +3160,11 @@ async function minifyHTML(value, options, partialMarkup) {
     if (topLevelElements.has(optionalStartTag)) {
       removeStartTag();
     }
-    // Except for `</dt>` or `</thead>`, end tags may be omitted if no more content in parent
-    if (optionalEndTag && optionalEndTagEmitted && !trailingElements.has(optionalEndTag)) {
-      // Whitespace kept at the end of partial markup stays
-      removeEndTag(false, keepsEdges);
+    // Except for `</dt>` or `</thead>`, end tags may be omitted if no more content in parent;
+    // whitespace kept at the end of partial markup follows the tag, which then stays
+    if (optionalEndTag && optionalEndTagEmitted && !trailingElements.has(optionalEndTag) &&
+        !(keepsEdges && !RE_END_TAG.test(buffer[skipRun(runEmpty, buffer.length - 1)] ?? ''))) {
+      removeEndTag();
     }
   }
   // Collapsing also trims whitespace before trailing inline end tags; trimming the output

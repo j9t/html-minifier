@@ -8010,10 +8010,15 @@ describe('HTML', () => {
     assert.strictEqual(await minify('foo <!-- c --> ', options), 'foo<!-- c --> ');
     assert.strictEqual(await minify('foo <!-- c -->', { ...options, removeComments: true }), 'foo ');
 
-    // Nor do omitted end tags or merged scripts take whitespace along
-    assert.strictEqual(await minify('<ruby>a<rt>b</rt> ', { ...options, removeOptionalTags: true }), '<ruby>a<rt>b ');
+    // Kept whitespace keeps the end tag before it, and merged scripts keep it, too
+    assert.strictEqual(await minify('<ruby>a<rt>b</rt> ', { ...options, removeOptionalTags: true }), '<ruby>a<rt>b</rt> ');
+    assert.strictEqual(await minify('<ruby>a<rt>b</rt>', { ...options, removeOptionalTags: true }), '<ruby>a<rt>b');
     assert.strictEqual(await minify('<b>a</b><script>x()</script> <script>y()</script>', { ...options, mergeScripts: true }), '<b>a</b><script>x();y()</script> ');
     assert.strictEqual(await minify('<b>a</b><script>x()</script> <script>y()</script>', { collapseWhitespace: true, mergeScripts: true }), '<b>a</b><script>x();y()</script>');
+
+    // Script and style content isn’t an edge
+    assert.strictEqual(await minify('<script> x() </script>', options), '<script>x()</script>');
+    assert.strictEqual(await minify('<style> p{} </style>', options), '<style>p{}</style>');
 
     // `preserveLineBreaks` keeps a line break, and a space where there is none
     assert.strictEqual(await minify('\n<span>x</span>\n', { ...options, preserveLineBreaks: true }), '\n<span>x</span>\n');
