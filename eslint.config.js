@@ -2,14 +2,14 @@ import js from '@eslint/js';
 import globals from 'globals';
 
 // The page script and its modules; everything else, web version tests included, runs in Node
-const FILES_BROWSER = ['demo/*.js', 'demo/lib/**/*.js'];
+const FILES_BROWSER = ['site/*.js', 'site/lib/**/*.js'];
 
 export default [
   {
     ignores: [
-      'demo/build/**',
-      'demo/public/**',
-      'dist/**'
+      'dist/**',
+      'site/build/**',
+      'site/public/**'
     ]
   },
   js.configs.recommended,

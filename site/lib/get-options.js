@@ -1,7 +1,7 @@
 import { describeQuantifierRisk, parseRegExp } from '../../src/lib/utils.js';
 import { optionDefinitions } from '../../src/lib/option-definitions.js';
 
-// Turn the demo’s option controls into the options object the minifier takes,
+// Turn the web version’s option controls into the options object the minifier takes,
 // kept apart from the page so that it can be read without one
 
 /**

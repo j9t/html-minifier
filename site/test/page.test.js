@@ -5,7 +5,7 @@ import { getOptions } from '../lib/get-options.js';
 import { annotateInvisibles } from '../lib/show-invisibles.js';
 import { decodeState, encodeState } from '../lib/url-state.js';
 
-// The demo takes LZ-String from a script the page loads, which is read the way a page
+// The web version takes LZ-String from a script the page loads, which is read the way a page
 // would read it: as a script that hands itself to whatever holds it
 const lzString = { exports: {} };
 new Function('module', readFileSync(new URL('../public/lz-string.min.js', import.meta.url), 'utf8'))(lzString);
@@ -33,10 +33,10 @@ const roundTrip = (state) => decodeState(encodeState({
  */
 const textOption = (id, value) => ({ id, type: 'text', value });
 
-describe('Demo', () => {
+describe('Web version', () => {
   describe('`getOptions`', () => {
     test('Reads a `/…/flags` pattern as the pattern it spells', () => {
-      // The form the demo’s own `customAttrCollapse` example shows
+      // The form the web version’s own `customAttrCollapse` example shows
       const options = getOptions([textOption('customAttrCollapse', '/ng-class/i')]);
       assert.ok(options.customAttrCollapse instanceof RegExp);
       assert.strictEqual(options.customAttrCollapse.source, 'ng-class');

@@ -12,15 +12,15 @@ import pkg from '../package.json' with { type: 'json' };
 // names—recasing the flag would lose the case of acronyms (`minifyCSS`, `minifyJS`)
 const optionNamesByFlag = new Map(Object.keys(optionDefinitions).map(key => [paramCase(key), key]));
 
-// Convert CLI-style descriptions to demo-style HTML
+// Convert CLI-style descriptions to HTML for the web version
 // - Backticks → `<code>` elements (with HTML escaping)
 // - `--kebab-case` → `camelCase` (for option cross-references)
 const toHtml = (desc = '') => String(desc)
   .replace(/`--([a-z-]+)`/g, (_, kebab) => `<code>${optionNamesByFlag.get(kebab) ?? kebab}</code>`)
   .replace(/`([^`]+)`/g, (_, content) => `<code>${escapeHtml(content)}</code>`);
 
-// Demo-specific UI configuration
-const demoConfig = {
+// UI configuration for the web version
+const siteConfig = {
   // Input types and labels
   caseSensitive: {
     label: 'Case-sensitive'
@@ -205,13 +205,13 @@ const demoConfig = {
   }
 };
 
-// Options to show in demo (subset of all options)
-const demoOptionIds = Object.keys(demoConfig);
+// Options to show in the web version (subset of all options)
+const siteOptionIds = Object.keys(siteConfig);
 
-// Build `defaultOptions` from `optionDefinitions` + `demoConfig`
-const defaultOptions = demoOptionIds.map(id => {
+// Build `defaultOptions` from `optionDefinitions` + `siteConfig`
+const defaultOptions = siteOptionIds.map(id => {
   const def = optionDefinitions[id];
-  const cfg = demoConfig[id];
+  const cfg = siteConfig[id];
   const inputType = cfg.inputType || 'checkbox';
   return {
     id,

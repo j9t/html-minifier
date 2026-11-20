@@ -8,10 +8,10 @@ const PREFIX_STUB = '\0virtual:stub:';
 // and LZ-String is a public script rather than a bundled one
 /** @type {[string, string][]} */
 const LICENSES_EXTRA = [
-  ['alpinejs (license text)', 'demo/licenses/alpinejs.txt'],
+  ['alpinejs (license text)', 'site/licenses/alpinejs.txt'],
   ['@vue/reactivity (bundled in alpinejs)', 'node_modules/@vue/reactivity/LICENSE'],
   ['@vue/shared (bundled in alpinejs)', 'node_modules/@vue/shared/LICENSE'],
-  ['lz-string', 'demo/licenses/lz-string.txt']
+  ['lz-string', 'site/licenses/lz-string.txt']
 ];
 
 // Node-only dependencies, replaced by modules that throw if called, keeping them out of the bundle
@@ -30,7 +30,7 @@ const STUBS = {
 };
 
 const config = defineConfig({
-  root: 'demo',
+  root: 'site',
   build: {
     license: { fileName: FILE_NOTICES },
     outDir: 'build'

@@ -1,7 +1,7 @@
 import { escapeHtml } from './utils.js';
 
 // Mark characters that carry meaning but show nothing—or no more than a gap—so that
-// the demo shows what options like `decodeEntities` and whitespace collapsing do to them,
+// the web version shows what options like `decodeEntities` and whitespace collapsing do to them,
 // kept apart from the page so that it can be read without one. These are Unicode’s
 // whitespace and default-ignorable characters, plus control characters.
 //
@@ -10,7 +10,7 @@ import { escapeHtml } from './utils.js';
 // markup. Variation selectors are left alone, as they would mark every emoji.
 //
 // The characters are written as escapes: spelled out, they would be as invisible in this
-// file as they are in the demo.
+// file as they are in the web version.
 
 // Characters that take up room of their own, where a tint alone shows them
 const SPACES = new Map([

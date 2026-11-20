@@ -1,4 +1,4 @@
-// Helpers the demo shares, kept apart from the page so that they can be read without one
+// Helpers the web version shares, kept apart from the page so that they can be read without one
 
 // Escape HTML entities for safe rendering as markup
 

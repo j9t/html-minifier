@@ -1,4 +1,4 @@
-// Read and write the state the demo carries in the URL hash,
+// Read and write the state the web version carries in the URL hash,
 // kept apart from the page so that it can be read without one
 
 // Option migration map for backward compatibility;

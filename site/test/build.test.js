@@ -11,7 +11,7 @@ describe('Build', () => {
   let notices;
 
   before(async () => {
-    await promisify(exec)('npm run build:docs', { cwd: new URL('../..', import.meta.url) });
+    await promisify(exec)('npm run build:site', { cwd: new URL('../..', import.meta.url) });
     html = read('build/index.html');
     notices = read('build/THIRD-PARTY-NOTICES.txt');
   }, { timeout: 120_000 });
@@ -59,11 +59,11 @@ describe('Build', () => {
 
   test('Publishes the license of all bundled third-party software', () => {
     for (const path of [
-      'demo/licenses/alpinejs.txt',
-      'demo/licenses/lz-string.txt',
       'node_modules/@vue/reactivity/LICENSE',
       'node_modules/@vue/shared/LICENSE',
-      'node_modules/terser/LICENSE'
+      'node_modules/terser/LICENSE',
+      'site/licenses/alpinejs.txt',
+      'site/licenses/lz-string.txt'
     ]) {
       const license = readFileSync(new URL(`../../${path}`, import.meta.url), 'utf8');
       assert.ok(notices.includes(license.trim()), `Missing the license of ${path}`);

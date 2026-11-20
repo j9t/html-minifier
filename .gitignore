@@ -3,7 +3,7 @@ backtest/input/
 backtest/benchmark-baseline.json
 backtest/errors.log
 backtest/results.json
-demo/build/
 dist/
 node_modules/
+site/build/
 .DS_Store
