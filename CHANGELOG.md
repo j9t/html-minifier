@@ -4,6 +4,12 @@ As of version 5.0.0, all notable changes to HTML Minifier (HM) are documented in
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+* Changed the backtest’s user agent to `html-minifier-backtest (+https://github.com/j9t/html-minifier/tree/main/backtest)`, dropping the placeholder version and adding a URL
+
 ## [5.4.0] - 2026-11-20
 
 ### Fixed

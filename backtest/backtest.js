@@ -78,7 +78,7 @@ async function downloadFile(url, pathFile, redirectsLeft = 5) {
       path: parsedUrl.pathname + parsedUrl.search,
       headers: {
         'Accept-Encoding': 'gzip, br, deflate',
-        'User-Agent': 'html-minifier-backtest/0.0'
+        'User-Agent': 'html-minifier-backtest (+https://github.com/j9t/html-minifier/tree/main/backtest)'
       }
     }, function (res) {
       const status = res.statusCode;
