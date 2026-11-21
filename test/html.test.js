@@ -470,6 +470,11 @@ describe('HTML', () => {
     // Case-insensitive deduplication in HTML mode
     assert.strictEqual(await minify('<div Class="a" CLASS="b" class="c"></div>'), '<div class="a"></div>');
 
+    // Many attributes
+    const attrsMany = Array.from({ length: 10 }, (_, i) => `data-a${i}="${i}"`).join(' ');
+    assert.strictEqual(await minify(`<div ${attrsMany} DATA-A3="x"></div>`), `<div ${attrsMany}></div>`);
+    assert.strictEqual(await minify(`<div ${attrsMany}></div>`), `<div ${attrsMany}></div>`);
+
     // Case-sensitive deduplication in SVG mode
     assert.strictEqual(await minify('<svg viewBox="0 0 100 100" viewBox="0 0 200 200"></svg>'), '<svg viewBox="0 0 100 100"></svg>');
   });
@@ -1336,6 +1341,9 @@ describe('HTML', () => {
     // Any ASCII whitespace separates names, tabs included
     assert.strictEqual(await minify('<p class="a\ta">x</p>'), '<p class="a">x</p>');
     assert.strictEqual(await minify('<p class="a\nb\ta">x</p>'), '<p class="a b">x</p>');
+    // Long lists, too
+    const namesLong = Array.from({ length: 20 }, (_, i) => 'c' + i).join(' ');
+    assert.strictEqual(await minify(`<p class="${namesLong} c3">x</p>`), `<p class="${namesLong}">x</p>`);
     // In linear time, also for a long list without repeats
     await assertLinearGrowth(async count => {
       const names = Array.from({ length: count }, (_, i) => 'c' + i).join(' ');
@@ -4187,11 +4195,35 @@ describe('HTML', () => {
       '<script>var r = /["\']/; l: <?= $x ?>;</script>',
       '<script>var r = /\\/*/; l: <?= $x ?>;</script>',
       '<script>function f() { return /[/*]/; l: <?= $x ?> }</script>',
-      '<script>a++ / 2; l: <?= $x ?>; b / 2</script>'
+      '<script>a++ / 2; l: <?= $x ?>; b / 2</script>',
+      '<script>var s = `${"`"}`; b(); l: <?= $x ?>;</script>',
+      '<script>var s = `${`a`}`; b(); l: <?= $x ?>;</script>',
+      '<script>ü: <?= $x ?>;</script>',
+      '<script>switch (a) { case 1: { l: <?= $x ?> } }</script>',
+      '<script>m: { l: <?= $x ?> }</script>'
     ];
     for (const input of inputs) {
       assert.strictEqual(await minify(input, { minifyJS: true }), input);
     }
+  });
+
+  test('Keeps scripts as written where minifying would requote or repeat a custom fragment, or change whitespace next to it', async () => {
+    const inputs = [
+      '<script>var a = "a\t<?= $x ?>"; f(a);</script>',
+      '<script>var a = \'<?= $x ?>\';</script>',
+      '<script>var a = `<?= $x ?>`;</script>',
+      '<script>var a = `\n<?= $x ?>\n`; f(a);</script>',
+      '<script>f(`${a}\n<?= $x ?>`);</script>',
+      '<script>x = { <?= $x ?> }</script>'
+    ];
+    for (const input of inputs) {
+      assert.strictEqual(await minify(input, { minifyJS: true }), input);
+    }
+  });
+
+  test('Keeps scripts as written where a custom fragment leaves them unparsable', async () => {
+    const input = '<script><? if ($a) { ?> f(); <? } ?></script>';
+    assert.strictEqual(await minify(input, { minifyJS: true, ignoreCustomFragments: [/<\?[\s\S]*?\?>/] }), input);
   });
 
   test('Minifies scripts with custom fragments within values', async () => {
@@ -4210,11 +4242,27 @@ describe('HTML', () => {
       ['var a = /[:]/.test(b) ? c : <?= $x ?>;', 'var a=/[:]/.test(b)?c: <?= $x ?>'],
       ['/* <?= $x ?> */ a()', 'a()'],
       ['/* case 1: <?= $x ?> */ a()', 'a()'],
-      ['if (0) { var b = <?= $x ?>; }', 'var b']
+      ['if (0) { var b = <?= $x ?>; }', 'var b'],
+      ['var a = "<?= $x ?>";  f(a);', 'var a="<?= $x ?>";f(a)'],
+      ['f(`${a}-<?= $x ?>`);', 'f(`${a}-<?= $x ?>`)'],
+      ['f(`${ <?= $x ?> }`);', 'f(`${ <?= $x ?> }`)'],
+      ['var r = /<?= $x ?>/;  f(r);', 'var r=/<?= $x ?>/;f(r)'],
+      ['class A { <?= $x ?> }', 'class A{ <?= $x ?> }']
     ];
     for (const [source, output] of cases) {
       assert.strictEqual(await minify('<script>' + source + '</script>', { minifyJS: true }), '<script>' + output + '</script>');
     }
+  });
+
+  test('Minifies module scripts and event handlers with custom fragments', async () => {
+    assert.strictEqual(
+      await minify('<script type="module">import "a";  f(<?= $x ?>);</script>', { minifyJS: true }),
+      '<script type="module">import"a";f(<?= $x ?>)</script>'
+    );
+    assert.strictEqual(
+      await minify('<a onclick="if (a) { return <?= $x ?>; }  return false">', { minifyJS: true }),
+      '<a onclick="return!!a&& <?= $x ?>">'
+    );
   });
 
   test('Treats non-string results of custom minifiers alike with and without custom fragments', async () => {
@@ -4283,7 +4331,11 @@ describe('HTML', () => {
     output = '<div onclick="alert(a+ <?= b ?>)"></div>';
     assert.strictEqual(await minify(input, { minifyJS: true }), output);
 
+    // Terser would requote the string the fragment sits in
     input = '<div onclick="alert(a + \'<?= b ?>\')"></div>';
+    assert.strictEqual(await minify(input, { minifyJS: true }), input);
+
+    input = '<div onclick=\'alert(a + "<?= b ?>")\'></div>';
     output = '<div onclick=\'alert(a+"<?= b ?>")\'></div>';
     assert.strictEqual(await minify(input, { minifyJS: true }), output);
   });
@@ -4853,7 +4905,21 @@ describe('HTML', () => {
     }
   });
 
+  test('Keeps `style` elements as written where minifying would requote a custom fragment', async () => {
+    const inputs = [
+      '<style>a { content: \'<?= $x ?>\' }</style>',
+      '<style>a { font-family: \'<?= $f ?>\' }</style>',
+      '<style>a { background: url(\'<?= $u ?>\') }</style>',
+      '<style>a { background: url("<?= $u ?>.png") }</style>'
+    ];
+    for (const input of inputs) {
+      assert.strictEqual(await minify(input, { minifyCSS: true }), input);
+    }
+  });
+
   test('Minifies `style` elements with custom fragments within values', async () => {
+    assert.strictEqual(await minify('<style>a { content: "<?= $x ?>" }</style>', { minifyCSS: true }), '<style>a{content:"<?= $x ?>"}</style>');
+    assert.strictEqual(await minify('<style>a { background: url(<?= $u ?>.png) }</style>', { minifyCSS: true }), '<style>a{background:url(<?= $u ?>.png)}</style>');
     assert.strictEqual(await minify('<style>a { color: <?= $c ?>; top: 0 }</style>', { minifyCSS: true }), '<style>a{color: <?= $c ?>;top:0}</style>');
     assert.strictEqual(await minify('<style>a { font-family: myelse <?= $f ?> }</style>', { minifyCSS: true }), '<style>a{font-family:myelse <?= $f ?> }</style>');
     assert.strictEqual(await minify('<style>a { font-family: my-else <?= $f ?> }</style>', { minifyCSS: true }), '<style>a{font-family:my-else <?= $f ?> }</style>');

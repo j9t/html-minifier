@@ -1,6 +1,6 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert';
-import { toDelimitedFragment, toFragment, replaceCustomFragments, isMinifiedCodeSafe } from '../src/lib/fragments.js';
+import { toDelimitedFragment, toFragment, replaceCustomFragments, isMinifiedCSSSafe, isMinifiedJSSafe } from '../src/lib/fragments.js';
 import { assertLinearGrowth } from './timing.js';
 
 describe('Fragments', () => {
@@ -168,34 +168,91 @@ describe('Fragments', () => {
     });
   });
 
-  describe('`isMinifiedCodeSafe`', () => {
+  describe('`isMinifiedCSSSafe`', () => {
     const placeholder = /U\d+U/g;
 
     test('Passes through non-string results', () => {
-      assert.strictEqual(isMinifiedCodeSafe('a\nU0U', /** @type {any} */ ({}), placeholder), true);
-      assert.strictEqual(isMinifiedCodeSafe('l: U0U', /** @type {any} */ (undefined), placeholder, true), true);
+      assert.strictEqual(isMinifiedCSSSafe('a\nU0U', /** @type {any} */ ({}), placeholder), true);
     });
 
-    test('Reads colons as statement starts only in JavaScript', () => {
-      assert.strictEqual(isMinifiedCodeSafe('a { top: 0; b: U0U }', 'a{top:0;b:U0U}', placeholder), true);
-      assert.strictEqual(isMinifiedCodeSafe('a; b: U0U', 'a;b:U0U', placeholder, true), false);
+    test('Reads colons as values, not labels', () => {
+      assert.strictEqual(isMinifiedCSSSafe('a { top: 0; b: U0U }', 'a{top:0;b:U0U}', placeholder), true);
+    });
+
+    test('Fails on fragments that change quotes or lose them', () => {
+      assert.strictEqual(isMinifiedCSSSafe('a { content: \'U0U\' }', 'a{content:"U0U"}', placeholder), false);
+      assert.strictEqual(isMinifiedCSSSafe('a { b: url("U0U") }', 'a{b:url(U0U)}', placeholder), false);
+      assert.strictEqual(isMinifiedCSSSafe('a { b: url(U0U) }', 'a{b:url("U0U")}', placeholder), true);
+      assert.strictEqual(isMinifiedCSSSafe('a { content: " U0U" }', 'a{content:"U0U"}', placeholder), false);
+    });
+
+    test('Fails on fragments written twice', () => {
+      assert.strictEqual(isMinifiedCSSSafe('a { top: U0U }', 'a{top:U0U}b{top:U0U}', placeholder), false);
     });
 
     test('Scans long inputs in linear time', async () => {
-      const sources = /** @type {[(count: number) => string, boolean][]} */ ([
-        [count => 'case '.repeat(count) + ': U0U', true],
-        [count => 'l: U0U '.repeat(count), true],
-        [count => '{ '.repeat(count) + 'l: U0U', true],
-        [count => '"'.repeat(count * 2 + 1) + 'U0U', true],
-        [count => '/*'.repeat(count) + 'U0U', true],
-        [count => 'a ? '.repeat(count) + 'b : U0U', true],
-        [count => ' '.repeat(count * 4) + ': U0U', true],
-        [count => '@import U0U;'.repeat(count), false],
-        [count => '@import '.repeat(count) + 'U0U', false],
-        [count => '/*'.repeat(count) + '@import U0U', false]
-      ]);
-      for (const [source, isJS] of sources) {
-        await assertLinearGrowth(count => isMinifiedCodeSafe(source(count), 'x', placeholder, isJS), 20000, source(1).slice(0, 20));
+      const sources = [
+        (/** @type {number} */ count) => '@import U0U;'.repeat(count),
+        (/** @type {number} */ count) => '@import '.repeat(count) + 'U0U',
+        (/** @type {number} */ count) => '/*'.repeat(count) + '@import U0U',
+        (/** @type {number} */ count) => 'url('.repeat(count) + 'U0U',
+        (/** @type {number} */ count) => 'url("'.repeat(count) + 'U0U',
+        (/** @type {number} */ count) => '"' + ' '.repeat(count * 4) + 'U0U"',
+        (/** @type {number} */ count) => ' '.repeat(count * 4) + ': U0U'
+      ];
+      for (const source of sources) {
+        await assertLinearGrowth(count => isMinifiedCSSSafe(source(count), 'x', placeholder), 20000, source(1).slice(0, 20));
+      }
+    });
+  });
+
+  describe('`isMinifiedJSSafe`', () => {
+    const placeholder = /U\d+U/g;
+
+    test('Passes through non-string results', async () => {
+      assert.strictEqual(await isMinifiedJSSafe('l: U0U', /** @type {any} */ (undefined), placeholder), true);
+    });
+
+    test('Fails on fragments starting statements next to labels or other code', async () => {
+      assert.strictEqual(await isMinifiedJSSafe('a; b: U0U', 'a;b:U0U', placeholder), false);
+      assert.strictEqual(await isMinifiedJSSafe('a();\nU0U', 'a(),U0U', placeholder), false);
+      assert.strictEqual(await isMinifiedJSSafe('\nU0U\n', 'U0U', placeholder), true);
+    });
+
+    test('Fails on code that doesn’t parse', async () => {
+      assert.strictEqual(await isMinifiedJSSafe('U0U if (a) {} U1U', 'x', placeholder), false);
+      assert.strictEqual(await isMinifiedJSSafe('a = "U0U"', 'a="U0U', placeholder), false);
+    });
+
+    test('Allows `return` in event handlers and `import` in modules only', async () => {
+      assert.strictEqual(await isMinifiedJSSafe('return U0U', 'return U0U;', placeholder, true), true);
+      assert.strictEqual(await isMinifiedJSSafe('return U0U', 'return U0U;', placeholder), false);
+      assert.strictEqual(await isMinifiedJSSafe('import "a"; f(U0U)', 'import"a";f(U0U)', placeholder, false, true), true);
+      assert.strictEqual(await isMinifiedJSSafe('import "a"; f(U0U)', 'import"a";f(U0U)', placeholder), false);
+    });
+
+    test('Fails on fragments that move into another kind of string', async () => {
+      assert.strictEqual(await isMinifiedJSSafe('a = \'U0U\'', 'a="U0U"', placeholder), false);
+      assert.strictEqual(await isMinifiedJSSafe('a = `U0U`', 'a="U0U"', placeholder), false);
+      assert.strictEqual(await isMinifiedJSSafe('a = `${U0U}`', 'a=`${U0U}`', placeholder), true);
+      assert.strictEqual(await isMinifiedJSSafe('a = "U0U"; b()', 'a="U0U",b()', placeholder), true);
+      assert.strictEqual(await isMinifiedJSSafe('a = `\nU0U`', 'a=`\\nU0U`', placeholder), false);
+    });
+
+    test('Fails on fragments written twice', async () => {
+      assert.strictEqual(await isMinifiedJSSafe('x = { U0U }', 'x={U0U:U0U}', placeholder), false);
+    });
+
+    test('Parses long inputs in linear time', async () => {
+      const sources = [
+        (/** @type {number} */ count) => 'l: U0U; '.repeat(count),
+        (/** @type {number} */ count) => 'a("U0U"); '.repeat(count),
+        (/** @type {number} */ count) => '`' + 'U0U${a}'.repeat(count) + '`',
+        (/** @type {number} */ count) => '"' + ' '.repeat(count * 4) + 'U0U"',
+        (/** @type {number} */ count) => '/*'.repeat(count) + 'U0U'
+      ];
+      for (const source of sources) {
+        await assertLinearGrowth(count => isMinifiedJSSafe(source(count), 'x', placeholder), 20000, source(1).slice(0, 20));
       }
     });
   });

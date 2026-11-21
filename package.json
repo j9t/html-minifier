@@ -6,11 +6,12 @@
   },
   "bugs": "https://github.com/j9t/html-minifier/issues",
   "dependencies": {
+    "acorn": "^8.19.0",
     "commander": "^15.1.0",
     "entities": "^9.0.0",
     "lightningcss": "^1.33.0",
     "svgo": "^4.1.0",
-    "terser": "^5.51.3"
+    "terser": "^5.51.4"
   },
   "description": "Highly effective, super-configurable, well-tested web page minifier",
   "devDependencies": {
@@ -98,5 +99,5 @@
   },
   "type": "module",
   "types": "dist/types/htmlminifier.d.ts",
-  "version": "5.4.0"
+  "version": "5.4.1"
 }

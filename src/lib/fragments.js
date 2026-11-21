@@ -1,5 +1,5 @@
 /**
- * Custom fragment matching
+ * Custom fragment matching, and checks that minified CSS and JavaScript keep fragments intact
  *
  * `ignoreCustomFragments` patterns nearly always describe the same shape: a literal
  * opening delimiter, an any-character or negated-class body, and a literal closing
@@ -13,16 +13,8 @@
 import { LRU } from './utils.js';
 
 const RE_WHITESPACE = /\s/;
-const RE_NAME_CHAR = /[\w$-]/;
-
-// Run on at most the eight characters ending in the word
-const RE_BLOCK_KEYWORD = /(?:^|[^\w$.])(?:do|else|finally|try)$/;
-
-// The last character before a `/` that starts a regular expression, not a division
-const RE_BEFORE_REGEX = /[(,=:[!&|?{};+*%<>~^}-]/;
-
-// Run on at most the eleven characters ending in the word
-const RE_BEFORE_REGEX_KEYWORD = /(?:^|[^\w$.])(?:await|case|delete|do|else|in|instanceof|new|of|return|throw|typeof|void|yield)$/;
+const RE_CSS_NAME_CHAR = /[\w-]/;
+const RE_URL_OPEN = /url\(\s*/iy;
 
 // Run on at most the eleven characters from the `@`
 const RE_DROPPABLE_AT_RULE = /^@(?:charset|import|namespace)(?![\w-])/i;
@@ -356,186 +348,143 @@ function replaceCustomFragments(value, fragments, replacer) {
 }
 
 /**
- * Index past the regular expression starting at the `/` at an index
- * @param {string} source
- * @param {number} index
- * @returns {number} The index itself when the line ends before the expression does
+ * @typedef {{start: number, end: number, context: string}} Span
+ *  Stretch of code that a placeholder within reads as text of in: a comment, a string
+ *  (as its quote), a template literal, a regular expression, or an unquoted URL
+ * @typedef {{text: string, index: number, context: string, padding: string}} Placement
+ *  A placeholder, where it stands, what it reads as there (`code` outside spans), and,
+ *  within a string or the like, the whitespace around it
  */
-function skipRegex(source, index) {
-  let inClass = false;
-  for (let position = index + 1; position < source.length; position++) {
-    const current = source[position];
-    if (current === '\n' || current === '\r') return index;
-    if (current === '\\') position++;
-    else if (current === '[') inClass = true;
-    else if (current === ']') inClass = false;
-    else if (current === '/' && !inClass) return position + 1;
-  }
-  return index;
-}
 
 /**
- * Index past the comment, string, or regular expression starting at an index
+ * Index past the CSS comment or string starting at an index
  * @param {string} source
  * @param {number} index
- * @param {boolean} isJS
  * @returns {number} The index itself when none starts there
  */
-function skipCommentOrString(source, index, isJS) {
+function skipCommentOrString(source, index) {
   const char = source[index];
-  const next = source[index + 1];
 
-  if (char === '/' && next === '*') {
+  if (char === '/' && source[index + 1] === '*') {
     const end = source.indexOf('*/', index + 2);
     return end === -1 ? source.length : end + 2;
   }
-  if (isJS && char === '/' && next === '/') {
-    const end = source.indexOf('\n', index + 2);
-    return end === -1 ? source.length : end;
-  }
-  if (isJS && char === '/') return isRegexStart(source, index) ? skipRegex(source, index) : index;
-  if (char !== '"' && char !== '\'' && !(isJS && char === '`')) return index;
+  if (char !== '"' && char !== '\'') return index;
 
   for (let position = index + 1; position < source.length; position++) {
     const current = source[position];
     if (current === '\\') position++;
     else if (current === char) return position + 1;
-    else if (current === '\n' && char !== '`') return position;
+    else if (current === '\n') return position;
   }
   return source.length;
 }
 
 /**
- * Index of the last non-whitespace character before an index
+ * Comments, strings, and unquoted URLs in CSS, in order
  * @param {string} source
- * @param {number} index
- * @returns {number} -1 when there is none
+ * @returns {Span[]}
  */
-function findPreviousToken(source, index) {
-  let position = index - 1;
-  while (position >= 0 && RE_WHITESPACE.test(source[position] ?? '')) position--;
-  return position;
-}
-
-/**
- * Whether a `/` starts a regular expression rather than a division, going by what precedes
- * it; after a `)`, which `if (a) /b/.test(c)` leaves open, it’s read as a division
- * @param {string} source
- * @param {number} slash
- * @returns {boolean}
- */
-function isRegexStart(source, slash) {
-  const before = findPreviousToken(source, slash);
-  if (before === -1) return true;
-
-  const char = source[before] ?? '';
-  // `++` and `--` can only end an operand here, as a literal cannot be incremented
-  if ((char === '+' || char === '-') && source[before - 1] === char) return false;
-  return RE_BEFORE_REGEX.test(char) || RE_BEFORE_REGEX_KEYWORD.test(source.slice(Math.max(before - 10, 0), before + 1));
-}
-
-/**
- * Whether a block keyword ends at an index
- * @param {string} source
- * @param {number} index
- * @returns {boolean}
- */
-function isBlockKeywordEnd(source, index) {
-  return RE_BLOCK_KEYWORD.test(source.slice(Math.max(index - 7, 0), index + 1));
-}
-
-/**
- * Whether a `{` opens a block rather than an object literal
- * @param {string} source
- * @param {number} brace
- * @returns {boolean}
- */
-function isBlockBrace(source, brace) {
-  const before = findPreviousToken(source, brace);
-  if (before === -1) return true;
-
-  const char = source[before] ?? '';
-  if (char === ';' || char === '{' || char === '}' || char === ')') return true;
-  if (char === '>') return source[before - 1] === '=';
-  return isBlockKeywordEnd(source, before);
-}
-
-/**
- * Whether a colon ends a statement label or `default`, going by what precedes the name.
- * Two expressions cannot follow each other, so a name after one of these tokens cannot
- * be the middle of a ternary
- * @param {string} source
- * @param {number} colon
- * @returns {boolean}
- */
-function isLabelColon(source, colon) {
-  const end = findPreviousToken(source, colon);
-  let start = end;
-  while (start >= 0 && RE_NAME_CHAR.test(source[start] ?? '')) start--;
-  if (start === end) return false;
-
-  const before = findPreviousToken(source, start + 1);
-  const char = source[before];
-  // After `:`, any other name may be a nested ternary’s branch
-  if (char === ':') return source.slice(start + 1, end + 1) === 'default';
-  return before === -1 || char === ';' || char === '}' || char === ')' || (char === '{' && isBlockBrace(source, before));
-}
-
-/**
- * Whether the `case` keyword starts at an index, rather than a name or property holding it
- * @param {string} source
- * @param {number} index
- * @returns {boolean}
- */
-function isCaseKeyword(source, index) {
-  if (!source.startsWith('case', index) || RE_NAME_CHAR.test(source[index + 4] ?? '')) return false;
-
-  const before = source[index - 1] ?? '';
-  if (before === '.' || RE_NAME_CHAR.test(before)) return false;
-
-  let after = index + 4;
-  while (RE_WHITESPACE.test(source[after] ?? '')) after++;
-  return source[after] !== ':';
-}
-
-/**
- * Indexes of the colons after which a JavaScript statement starts
- * @param {string} source
- * @returns {Set<number>}
- */
-function findStatementColons(source) {
-  const colons = new Set();
-  // Unpaired `?` in the current `case` expression, -1 outside of one
-  let ternaries = -1;
+function findCSSSpans(source) {
+  /** @type {Span[]} */
+  const spans = [];
 
   for (let i = 0; i < source.length; i++) {
-    const end = skipCommentOrString(source, i, true);
+    const end = skipCommentOrString(source, i);
     if (end > i) {
+      spans.push({ start: i, end, context: source[i] === '/' ? 'comment' : source[i] ?? '' });
       i = end - 1;
       continue;
     }
 
     const char = source[i];
-    if (ternaries === -1) {
-      if (char === ':') {
-        if (isLabelColon(source, i)) colons.add(i);
-      } else if (char === 'c' && isCaseKeyword(source, i)) {
-        ternaries = 0;
-        i += 3;
-      }
-    } else if (char === '?') {
-      // `?.` and `??` have no `:` to pair with
-      if (source[i + 1] === '.' || source[i + 1] === '?') i++;
-      else ternaries++;
-    } else if (char === ':') {
-      if (ternaries === 0) colons.add(i);
-      ternaries--;
-    } else if (char === ';' || char === '{' || char === '}') {
-      ternaries = -1;
+    if ((char !== 'u' && char !== 'U') || RE_CSS_NAME_CHAR.test(source[i - 1] ?? '')) continue;
+    RE_URL_OPEN.lastIndex = i;
+    if (!RE_URL_OPEN.test(source)) continue;
+    const start = RE_URL_OPEN.lastIndex;
+    // A quoted URL is a string, read as one on the next turn
+    if (source[start] !== '"' && source[start] !== '\'') {
+      const close = source.indexOf(')', start);
+      const urlEnd = close === -1 ? source.length : close;
+      spans.push({ start, end: urlEnd, context: 'url' });
+      i = urlEnd;
+    } else {
+      i = start - 1;
     }
   }
 
-  return colons;
+  return spans;
+}
+
+/**
+ * @param {string} source
+ * @param {RegExp} placeholder - Global
+ * @param {Span[]} spans - In order
+ * @returns {Placement[]}
+ */
+function placePlaceholders(source, placeholder, spans) {
+  /** @type {Placement[]} */
+  const placements = [];
+  let next = 0;
+
+  for (const match of source.matchAll(placeholder)) {
+    while (next < spans.length && /** @type {Span} */ (spans[next]).end <= match.index) next++;
+    const span = spans[next];
+    const context = span && span.start <= match.index ? span.context : 'code';
+    let padding = '';
+    // Restoring a fragment puts back the whitespace around it, which, in code, replaces
+    // whatever the minifier left there, but in a string adds to what it wrote instead
+    // (e.g., a line break it escaped as `\n`)
+    if (context !== 'code' && context !== 'comment') {
+      let start = match.index;
+      let end = match.index + match[0].length;
+      while (start > 0 && RE_WHITESPACE.test(source[start - 1] ?? '')) start--;
+      while (end < source.length && RE_WHITESPACE.test(source[end] ?? '')) end++;
+      padding = source.slice(start, match.index) + '|' + source.slice(match.index + match[0].length, end);
+    }
+    placements.push({ text: match[0], index: match.index, context, padding });
+  }
+
+  return placements;
+}
+
+/**
+ * Whether every placeholder the output holds reads as it did in the source, and only once:
+ * A fragment written for one kind of string, or for code, may break another (e.g., a value
+ * escaped for single quotes, now in double quotes), and one written twice renders twice
+ * @param {Placement[]} before
+ * @param {Placement[]} after
+ * @returns {boolean}
+ */
+function keepsPlacements(before, after) {
+  const placements = new Map(before.map(placement => [placement.text, placement]));
+  const seen = new Set();
+
+  for (const { text, context, padding } of after) {
+    const original = placements.get(text);
+    if (!original || seen.has(text) || original.padding !== padding) return false;
+    // What an unquoted URL can hold, a string can, too
+    if (original.context !== context && !(original.context === 'url' && (context === '"' || context === '\''))) return false;
+    seen.add(text);
+  }
+
+  return true;
+}
+
+/**
+ * Whether what comes before an index allows a CSS rule to start there
+ * @param {string} source
+ * @param {number} index
+ * @returns {boolean}
+ */
+function isRuleStart(source, index) {
+  let position = index;
+  while (position > 0) {
+    const char = source[--position] ?? '';
+    if (char === '\n' || char === '\r' || char === ';' || char === '{' || char === '}') return true;
+    if (!RE_WHITESPACE.test(char)) return char === ')' || (char === '/' && source[position - 1] === '*');
+  }
+  return true;
 }
 
 /**
@@ -550,7 +499,7 @@ function findDroppableAtRulePlaceholders(source, placeholder) {
   let start = -1;
 
   for (let i = 0; i <= source.length; i++) {
-    const end = skipCommentOrString(source, i, false);
+    const end = skipCommentOrString(source, i);
     if (end > i) {
       i = end - 1;
       continue;
@@ -569,54 +518,177 @@ function findDroppableAtRulePlaceholders(source, placeholder) {
 }
 
 /**
- * Whether what comes before an index allows a statement or rule to start there
- * @param {string} source
- * @param {number} index
- * @param {Set<number>} colons - Colons after which a statement starts
- * @param {boolean} isJS
+ * Whether code that starts with fragments still holds them where they stood: A fragment
+ * starting a statement or rule can render as anything, or as nothing, while engines read
+ * it as an identifier or selector and join it with the code around it, or drop it, so only
+ * output of nothing but fragments holds up, and only where no label or `case` went with it
+ * @param {Placement[]} starts
+ * @param {Placement[]} after
+ * @param {string} output
+ * @param {RegExp} placeholder
  * @returns {boolean}
  */
-function isCodeStart(source, index, colons, isJS) {
-  let position = index;
-  while (position > 0) {
-    const char = source[--position] ?? '';
-    if (char === '\n' || char === '\r' || char === ';' || char === '{' || char === '}') return true;
-    if (!RE_WHITESPACE.test(char)) {
-      return char === ')' || (char === '/' && source[position - 1] === '*') || colons.has(position) || (isJS && isBlockKeywordEnd(source, position));
-    }
-  }
-  return true;
+function keepsStarts(starts, after, output, placeholder) {
+  if (!starts.length) return true;
+  const kept = new Set(after.map(placement => placement.text));
+  return !output.replace(placeholder, '').trim() && starts.every(placement => kept.has(placement.text));
 }
 
 /**
- * Whether minified CSS or JavaScript can stand in for its source. A fragment starting a
- * statement or rule can render as anything, or as nothing, while engines read it as an
- * identifier or selector and join it with the code around it, or drop it; a fragment in
- * an at-rule Lightning CSS cannot read would go with that at-rule
+ * Whether minified CSS can stand in for its source; a fragment in an at-rule Lightning CSS
+ * cannot read would go with that at-rule
  * @param {string} source
  * @param {unknown} output - Anything but a string, from a minifier of one’s own, passes
  * @param {RegExp} placeholder - Global pattern matching one fragment placeholder
- * @param {boolean} [isJS] - Whether the code is JavaScript rather than CSS
  * @returns {boolean}
  */
-function isMinifiedCodeSafe(source, output, placeholder, isJS = false) {
+function isMinifiedCSSSafe(source, output, placeholder) {
   if (typeof output !== 'string' || output === source) return true;
 
-  const matches = [...source.matchAll(placeholder)];
-  if (!matches.length) return true;
+  const before = placePlaceholders(source, placeholder, findCSSSpans(source));
+  if (!before.length) return true;
+  const after = placePlaceholders(output, placeholder, findCSSSpans(output));
 
-  const colons = isJS ? findStatementColons(source) : new Set();
-  const starts = matches.filter(match => isCodeStart(source, match.index, colons, isJS));
-  const kept = new Set(Array.from(output.matchAll(placeholder), match => match[0]));
+  const starts = before.filter(placement => placement.context === 'code' && isRuleStart(source, placement.index));
+  if (!keepsStarts(starts, after, output, placeholder) || !keepsPlacements(before, after)) return false;
+  if (!source.includes('@')) return true;
+  const kept = new Set(after.map(placement => placement.text));
+  return findDroppableAtRulePlaceholders(source, placeholder).every(token => kept.has(token));
+}
 
-  // Output of nothing but fragments only holds up where no label or `case` went with the code
-  if (starts.length && (colons.size || output.replace(placeholder, '').trim() || !starts.every(match => kept.has(match[0])))) return false;
-  return isJS || !source.includes('@') || findDroppableAtRulePlaceholders(source, placeholder).every(token => kept.has(token));
+/** @type {Promise<typeof import('acorn')> | undefined} */
+let acornPromise;
+
+/**
+ * @param {boolean} inline - Whether the code is an event handler, which may `return`
+ * @param {boolean} isModule
+ * @param {Span[]} spans - Receives the comments
+ * @returns {import('acorn').Options}
+ */
+function getAcornOptions(inline, isModule, spans) {
+  return {
+    allowReturnOutsideFunction: inline,
+    ecmaVersion: 'latest',
+    onComment: (_block, _text, start, end) => spans.push({ start, end, context: 'comment' }),
+    sourceType: isModule ? 'module' : 'script'
+  };
+}
+
+/**
+ * Parse JavaScript for its comments, strings, template literals, and regular expressions,
+ * and for where its statements start
+ * @param {typeof import('acorn')} acorn
+ * @param {string} source
+ * @param {boolean} inline
+ * @param {boolean} isModule
+ * @returns {{spans: Span[], statements: Set<number>, labeled: boolean} | null} Null where
+ *  the code does not parse
+ */
+function parseJS(acorn, source, inline, isModule) {
+  /** @type {Span[]} */
+  const spans = [];
+  /** @type {any[]} */
+  const stack = [];
+
+  try {
+    stack.push(acorn.parse(source, getAcornOptions(inline, isModule, spans)));
+  } catch {
+    return null;
+  }
+
+  const statements = new Set();
+  let labeled = false;
+  while (stack.length) {
+    const node = stack.pop();
+    const type = node.type;
+    if (type === 'Literal') {
+      if (typeof node.value === 'string') spans.push({ start: node.start, end: node.end, context: source[node.start] ?? '' });
+      else if (node.regex) spans.push({ start: node.start, end: node.end, context: '/' });
+      continue;
+    }
+    if (type === 'TemplateElement') {
+      spans.push({ start: node.start, end: node.end, context: '`' });
+      continue;
+    }
+    if (type === 'LabeledStatement' || type === 'SwitchCase') labeled = true;
+    if (type.endsWith('Statement')) statements.add(node.start);
+    for (const value of Object.values(node)) {
+      if (Array.isArray(value)) {
+        for (const child of value) if (typeof child?.type === 'string') stack.push(child);
+      } else if (typeof value?.type === 'string') {
+        stack.push(value);
+      }
+    }
+  }
+
+  spans.sort((spanA, spanB) => spanA.start - spanB.start);
+  return { spans, statements, labeled };
+}
+
+/**
+ * Tokenize JavaScript for its comments, strings, template literals, and regular expressions,
+ * which is all minified code needs and takes less than parsing it. Tokens read without
+ * parsing may come out wrong around regular expressions, which can only make a fragment
+ * seem to have moved.
+ * @param {typeof import('acorn')} acorn
+ * @param {string} source
+ * @param {boolean} inline
+ * @param {boolean} isModule
+ * @returns {Span[] | null} Null where the code does not tokenize
+ */
+function tokenizeJS(acorn, source, inline, isModule) {
+  /** @type {Span[]} */
+  const spans = [];
+
+  try {
+    for (const token of acorn.tokenizer(source, getAcornOptions(inline, isModule, spans))) {
+      const label = token.type.label;
+      if (label === 'string') spans.push({ start: token.start, end: token.end, context: source[token.start] ?? '' });
+      else if (label === 'template' || label === 'invalidTemplate') spans.push({ start: token.start, end: token.end, context: '`' });
+      else if (label === 'regexp') spans.push({ start: token.start, end: token.end, context: '/' });
+    }
+  } catch {
+    return null;
+  }
+
+  spans.sort((spanA, spanB) => spanA.start - spanB.start);
+  return spans;
+}
+
+/**
+ * Whether minified JavaScript can stand in for its source; code that doesn’t parse with
+ * its fragments in it stays as written, as does code whose output Acorn cannot read where
+ * it has to
+ * @param {string} source
+ * @param {unknown} output - Anything but a string, from a minifier of one’s own, passes
+ * @param {RegExp} placeholder - Global pattern matching one fragment placeholder
+ * @param {boolean} [inline] - Whether the code is an event handler
+ * @param {boolean} [isModule]
+ * @returns {Promise<boolean>}
+ */
+async function isMinifiedJSSafe(source, output, placeholder, inline = false, isModule = false) {
+  if (typeof output !== 'string' || output === source || source.search(placeholder) === -1) return true;
+
+  const acorn = await (acornPromise ??= import('acorn'));
+  const read = parseJS(acorn, source, inline, isModule);
+  if (!read) return false;
+  const before = placePlaceholders(source, placeholder, read.spans);
+
+  const starts = before.filter(placement => read.statements.has(placement.index));
+  if (starts.length && read.labeled) return false;
+
+  // Minifying keeps code code, so where every fragment is in code, there’s nothing to
+  // tokenize the output for
+  const spansOutput = before.every(placement => placement.context === 'code') ? [] : tokenizeJS(acorn, output, inline, isModule);
+  if (!spansOutput) return false;
+  const after = placePlaceholders(output, placeholder, spansOutput);
+  return keepsStarts(starts, after, output, placeholder) && keepsPlacements(before, after);
 }
 
 export {
   toDelimitedFragment,
   toFragment,
   replaceCustomFragments,
-  isMinifiedCodeSafe
+  isMinifiedCSSSafe,
+  isMinifiedJSSafe
 };

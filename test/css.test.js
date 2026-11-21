@@ -31,12 +31,12 @@ describe('CSS', () => {
 
     input = '<div style="background: url(\'images/<% image %>\')"></div>';
     assert.strictEqual(await minify(input), input);
-    output = '<div style="background:url(images/<% image %>)"></div>'; // Lightning CSS removes unnecessary quotes
-    assert.strictEqual(await minify(input, { minifyCSS: true }), output);
+    // Lightning CSS would remove the quotes, which the fragment may need
+    assert.strictEqual(await minify(input, { minifyCSS: true }), input);
     assert.strictEqual(await minify(input, {
       collapseWhitespace: true,
       minifyCSS: true
-    }), output);
+    }), input);
 
     input = '<style>\np {\n  background: url(images/<% image %>);\n}\n</style>';
     assert.strictEqual(await minify(input), input);
@@ -49,12 +49,12 @@ describe('CSS', () => {
 
     input = '<style>p { background: url("images/<% image %>") }</style>';
     assert.strictEqual(await minify(input), input);
-    output = '<style>p{background:url(images/<% image %>)}</style>'; // Lightning CSS removes unnecessary quotes
-    assert.strictEqual(await minify(input, { minifyCSS: true }), output);
+    // Lightning CSS would remove the quotes, which the fragment may need
+    assert.strictEqual(await minify(input, { minifyCSS: true }), input);
     assert.strictEqual(await minify(input, {
       collapseWhitespace: true,
       minifyCSS: true
-    }), output);
+    }), input);
 
     input = '<link rel="stylesheet" href="css/style-mobile.css" media="(max-width: 737px)">';
     assert.strictEqual(await minify(input), input);

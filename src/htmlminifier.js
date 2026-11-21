@@ -85,7 +85,7 @@ import {
 
 import { declinesMinify, processOptions } from './lib/options.js';
 import { canScriptFollow, canStyleSheetsJoin, getMergeKey, holdsHashbang, joinScripts, joinStyleSheets } from './lib/merging.js';
-import { toFragment, replaceCustomFragments, isMinifiedCodeSafe } from './lib/fragments.js';
+import { toFragment, replaceCustomFragments, isMinifiedCSSSafe, isMinifiedJSSafe } from './lib/fragments.js';
 
 /** @import { ProcessedOptions } from './lib/options.js' */
 
@@ -1208,11 +1208,15 @@ async function minifyHTML(value, options, partialMarkup) {
             return (chunks?.[1] ?? '') + uidAttr + index + uidAttr + (chunks?.[2] ?? '');
           });
           const result = fn(source, ...args);
-          const finish = (/** @type {string} */ output) => {
-            if (isMinifiedCodeSafe(source, output, uidPlaceholderPattern, isJS)) return output;
+          const settle = (/** @type {string} */ output, /** @type {boolean} */ isSafe) => {
+            if (isSafe) return output;
             options.log('Keeping CSS or JavaScript as written, as minifying could break or lose a custom fragment');
             return source;
           };
+          // `args` are the inline and module flags `minifyJS` is called with
+          const finish = (/** @type {string} */ output) => isJS
+            ? isMinifiedJSSafe(source, output, uidPlaceholderPattern, Boolean(args[0]), Boolean(args[1])).then(isSafe => settle(output, isSafe))
+            : settle(output, isMinifiedCSSSafe(source, output, uidPlaceholderPattern));
           return isThenable(result) ? Promise.resolve(result).then(finish) : finish(result);
         };
 
