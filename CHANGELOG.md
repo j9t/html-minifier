@@ -12,6 +12,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 * Fixed `minifyCSS` and `minifyJS` changing the quotes around custom fragments in strings; such code now stays as written
 * Fixed `minifyJS` doubling whitespace next to custom fragments in strings that Terser escapes (e.g., a tab before `<?= $x ?>` in a string became `\t` and the tab)
 * Fixed `minifyJS` rewriting escapes right before custom fragments in strings into ones the rendered fragment could extend (`"\x00<?= $x ?>"` became `"\0<?= $x ?>"`, which reads differently before a digit); such code now stays as written
+* Fixed `minifyCSS` and `minifyJS` reordering custom fragments, which changes the order template code runs in; such code now stays as written
 * Fixed `minifyCSS` reading escaped quotes (`x\"`) as the start of a string when checking custom fragments
 
 ### Changed

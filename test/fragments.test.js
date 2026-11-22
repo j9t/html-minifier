@@ -190,6 +190,11 @@ describe('Fragments', () => {
       assert.strictEqual(isMinifiedCSSSafe('a { top: U0U }', 'a{top:U0U}b{top:U0U}', placeholder), false);
     });
 
+    test('Fails on fragments that change order', () => {
+      assert.strictEqual(isMinifiedCSSSafe('a { top: U0U } b { top: U1U }', 'b{top:U1U}a{top:U0U}', placeholder), false);
+      assert.strictEqual(isMinifiedCSSSafe('a { top: U0U } b { top: U1U }', 'b{top:U1U}', placeholder), true);
+    });
+
     test('Reads escaped quotes as part of names, not as strings', () => {
       assert.strictEqual(isMinifiedCSSSafe('a { b: x\\"; c: U0U }', 'a{b:x\\";c:U0U}', placeholder), true);
     });
@@ -241,6 +246,11 @@ describe('Fragments', () => {
       assert.strictEqual(await isMinifiedJSSafe('a = `${U0U}`', 'a=`${U0U}`', placeholder), true);
       assert.strictEqual(await isMinifiedJSSafe('a = "U0U"; b()', 'a="U0U",b()', placeholder), true);
       assert.strictEqual(await isMinifiedJSSafe('a = `\nU0U`', 'a=`\\nU0U`', placeholder), false);
+    });
+
+    test('Fails on fragments that change order', async () => {
+      assert.strictEqual(await isMinifiedJSSafe('var a = U0U; f(U1U, a)', 'f(U1U,U0U)', placeholder), false);
+      assert.strictEqual(await isMinifiedJSSafe('f(U0U); g(U1U)', 'f(U0U),g(U1U)', placeholder), true);
     });
 
     test('Fails on fragments that move from code into a string', async () => {

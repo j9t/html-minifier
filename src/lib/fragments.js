@@ -15,7 +15,8 @@ import { LRU } from './utils.js';
 const RE_WHITESPACE = /\s/;
 const RE_CSS_NAME_CHAR = /[\w-]/;
 const RE_URL_OPEN = /url\(\s*/iy;
-// An escape right before a fragment, which what it renders could extend (`\0` before a digit)
+// An escape right before a fragment, which the fragment’s output could extend
+// (`\0` before a digit)
 const RE_ESCAPE_END = /\\+[^\\\s]{0,9}$/;
 
 // Run on at most the eleven characters from the `@`
@@ -351,8 +352,8 @@ function replaceCustomFragments(value, fragments, replacer) {
 
 /**
  * @typedef {{start: number, end: number, context: string}} Span
- *  Stretch of code that a placeholder within reads as text of in: a comment, a string
- *  (as its quote), a template literal, a regular expression, or an unquoted URL
+ *  Stretch of code in which a placeholder is text rather than code: a comment, a string
+ *  (by its quote), a template literal, a regular expression, or an unquoted URL
  * @typedef {{text: string, index: number, context: string, padding: string}} Placement
  *  A placeholder, where it stands, what it reads as there (`code` outside spans), and,
  *  within a string or the like, the whitespace around it
@@ -467,10 +468,13 @@ function placePlaceholders(source, placeholder, spans) {
 function keepsPlacements(before, after) {
   const placements = new Map(before.map(placement => [placement.text, placement]));
   const seen = new Set();
+  // Template code runs in the order it’s written, so fragments must keep theirs
+  let last = -1;
 
   for (const { text, context, padding } of after) {
     const original = placements.get(text);
-    if (!original || seen.has(text) || original.padding !== padding) return false;
+    if (!original || seen.has(text) || original.padding !== padding || original.index < last) return false;
+    last = original.index;
     // What an unquoted URL can hold, a string can, too
     if (original.context !== context && !(original.context === 'url' && (context === '"' || context === '\''))) return false;
     seen.add(text);
