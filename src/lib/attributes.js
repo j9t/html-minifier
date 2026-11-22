@@ -137,15 +137,29 @@ function deduplicateAttributes(attrs, caseSensitive) {
     return attrs;
   }
 
+  // Most tags hold a few attributes, which are faster compared with each other than in a set
+  const keys = attrs.map(attr => caseSensitive ? attr.name : attr.name.toLowerCase());
+  let hasDuplicates = false;
+  if (keys.length <= 8) {
+    for (let i = 1; i < keys.length && !hasDuplicates; i++) {
+      hasDuplicates = keys.lastIndexOf(/** @type {string} */ (keys[i]), i - 1) !== -1;
+    }
+  } else {
+    hasDuplicates = new Set(keys).size !== keys.length;
+  }
+  if (!hasDuplicates) {
+    return attrs;
+  }
+
   const seen = new Set();
   let writeIndex = 0;
 
-  for (const attr of attrs) {
-    const key = caseSensitive ? attr.name : attr.name.toLowerCase();
+  for (let i = 0; i < attrs.length; i++) {
+    const key = keys[i];
 
     if (!seen.has(key)) {
       seen.add(key);
-      attrs[writeIndex++] = attr;
+      attrs[writeIndex++] = /** @type {HTMLAttribute} */ (attrs[i]);
     }
   }
 
@@ -786,6 +800,15 @@ function dedupeClassNames(value) {
     return value;
   }
   const names = value.split(RE_ATTR_WS_COLLAPSE);
+  // As with attributes, a short list is faster checked name by name than through a set
+  if (names.length <= 16) {
+    for (let i = 1; i < names.length; i++) {
+      if (names.lastIndexOf(/** @type {string} */ (names[i]), i - 1) !== -1) {
+        return [...new Set(names)].join(' ');
+      }
+    }
+    return value;
+  }
   const unique = new Set(names);
   return unique.size === names.length ? value : [...unique].join(' ');
 }

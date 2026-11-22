@@ -521,7 +521,7 @@ function rangesIntersect(ranges, other) {
 // Embedding a pattern in a larger regex drops the flags it carried, so the two
 // a source can carry on its own are rewritten into it
 //
-// @@ Replace with inline `(?i:…)` and `(?s:…)` modifiers once Node floor reaches 24
+// @@ Replace with inline `(?i:…)`, `(?m:…)`, and `(?s:…)` modifiers once the Node floor reaches 24
 
 /** @param {string} char @returns {boolean} Whether the character has a single-character counterpart */
 function foldsCase(char) {

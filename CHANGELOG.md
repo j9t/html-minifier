@@ -4,10 +4,20 @@ As of version 5.0.0, all notable changes to HTML Minifier (HM) are documented in
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [5.4.1] - 2026-11-22
+
+### Fixed
+
+* Fixed `minifyJS` breaking scripts where a custom fragment starts a statement after a label or `case` the fragment check missed—after a template literal holding a backtick (``var s = `${"`"}`; l: <?= $x ?>;`` became ``var s="`";b(), <?= $x ?>``), after a label with a non-ASCII name, and after a label within a block (`switch (a) { case 1: { l: <?= $x ?> } }`)—by parsing JavaScript with Acorn rather than reading it by hand
+* Fixed `minifyCSS` and `minifyJS` changing the quotes around custom fragments in strings; such code now stays as written
+* Fixed `minifyJS` doubling whitespace next to custom fragments in strings that Terser escapes (e.g., a tab before `<?= $x ?>` in a string became `\t` and the tab)
+* Fixed `minifyJS` rewriting escapes right before custom fragments in strings into ones the rendered fragment could extend (`"\x00<?= $x ?>"` became `"\0<?= $x ?>"`, which reads differently before a digit); such code now stays as written
+* Fixed `minifyCSS` and `minifyJS` reordering custom fragments, which changes the order template code runs in; such code now stays as written
+* Fixed `minifyCSS` reading escaped quotes (`x\"`) as the start of a string when checking custom fragments
 
 ### Changed
 
+* Made minification faster by checking short attribute and class lists for repeats without building a set
 * Changed the backtest’s user agent to `html-minifier-backtest (+https://github.com/j9t/html-minifier/tree/main/backtest)`, dropping the placeholder version and adding a URL
 
 ## [5.4.0] - 2026-11-20

@@ -304,7 +304,7 @@ async function main({ argv = process.argv.slice(2), dirWork = __dirname } = {}) 
 
   const modes = [args.core ? 'core: external minifiers disabled' : '', args.cold ? 'cold: caches off, so CSS/JS/SVG work is redone every iteration' : ''].filter(Boolean);
   console.log(`Benchmarking ${fileNames.length} file(s)${modes.length ? ' (' + modes.join('; ') + ')' : ''}, fastest of ${args.iterations} iteration(s)`);
-  console.log(`* Options: ${args.preset ? `preset “${args.preset}”` : args.config}; compressed with Gzip level ${GZIP_LEVEL} and Brotli quality ${BROTLI_QUALITY}`);
+  console.log(`• Options: ${args.preset ? `preset “${args.preset}”` : args.config}; compressed with Gzip level ${GZIP_LEVEL} and Brotli quality ${BROTLI_QUALITY}`);
 
   const compareCompressed = compressionComparable(baseline);
 
@@ -315,10 +315,10 @@ async function main({ argv = process.argv.slice(2), dirWork = __dirname } = {}) 
 
     const mismatches = baselineMismatches(baseline, args);
     if (mismatches.length) {
-      console.log(`* Warning: Baseline settings differ (${mismatches.join('; ')})—deltas may not be comparable`);
+      console.log(`• Warning: Baseline settings differ (${mismatches.join('; ')})—deltas may not be comparable`);
     }
     if (!compareCompressed) {
-      console.log('* Note: Baseline has no compressed sizes at these levels—re-run with `--save` to compare them');
+      console.log('• Note: Baseline has no compressed sizes at these levels—re-run with `--save` to compare them');
     }
   }
   console.log('');
