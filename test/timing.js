@@ -3,9 +3,10 @@ import assert from 'node:assert';
 /**
  * Assert that `run` grows linearly with `count`: Doubling the input doubles a linear run but
  * quadruples a quadratic one. Comparing growth rather than absolute time keeps the test
- * independent of the machine. The best of several runs, alternating sizes, discounts load
- * from parallel tests, and the constant absorbs timer noise where both runs are near-instant.
- * Load that still skews one size gets more attempts, which a quadratic run fails all of.
+ * independent of the machine. Measuring CPU time and the best of several runs, alternating
+ * sizes, discount load from parallel tests, and the constant absorbs timer noise where both
+ * runs are near-instant. Load that still skews one size gets more attempts, which a quadratic
+ * run fails all of.
  *
  * Sizes double up to `count` from far below it, so that a regression fails where it still
  * takes milliseconds, rather than running for minutes at full size.
@@ -15,9 +16,10 @@ import assert from 'node:assert';
  */
 export async function assertLinearGrowth(run, count, label) {
   const time = async (/** @type {number} */ size) => {
-    const started = performance.now();
+    const started = process.cpuUsage();
     await run(size);
-    return performance.now() - started;
+    const { user, system } = process.cpuUsage(started);
+    return (user + system) / 1000;
   };
 
   for (let size = Math.ceil(count / 128); ; size = Math.min(size * 2, count)) {
