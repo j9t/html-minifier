@@ -9,8 +9,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 ### Fixed
 
 * Fixed `minifyJS` breaking scripts where a custom fragment starts a statement after a label or `case` the fragment check missed—after a template literal holding a backtick (``var s = `${"`"}`; l: <?= $x ?>;`` became ``var s="`";b(), <?= $x ?>``), after a label with a non-ASCII name, and after a label within a block (`switch (a) { case 1: { l: <?= $x ?> } }`)—by parsing JavaScript with Acorn rather than reading it by hand
-* Fixed `minifyCSS` and `minifyJS` changing the quotes around custom fragments in strings, which breaks values escaped for the original quotes (e.g., `var a = '<?= $x ?>'` became `var a="<?= $x ?>"`, and `url('<?= $u ?>')` became `url(<?= $u ?>)`), turning template literals holding custom fragments into strings, and repeating custom fragments (`x = { <?= $x ?> }` became `x={<?= $x ?>:<?= $x ?>}`); such code now stays as written
+* Fixed `minifyCSS` and `minifyJS` changing the quotes around custom fragments in strings; such code now stays as written
 * Fixed `minifyJS` doubling whitespace next to custom fragments in strings that Terser escapes (e.g., a tab before `<?= $x ?>` in a string became `\t` and the tab)
+* Fixed `minifyJS` rewriting escapes right before custom fragments in strings into ones the rendered fragment could extend (`"\x00<?= $x ?>"` became `"\0<?= $x ?>"`, which reads differently before a digit); such code now stays as written
+* Fixed `minifyCSS` reading escaped quotes (`x\"`) as the start of a string when checking custom fragments
 
 ### Changed
 

@@ -4214,11 +4214,14 @@ describe('HTML', () => {
       '<script>var a = `<?= $x ?>`;</script>',
       '<script>var a = `\n<?= $x ?>\n`; f(a);</script>',
       '<script>f(`${a}\n<?= $x ?>`);</script>',
-      '<script>x = { <?= $x ?> }</script>'
+      '<script>x = { <?= $x ?> }</script>',
+      '<script>f("\\x00<?= $x ?>");</script>'
     ];
     for (const input of inputs) {
       assert.strictEqual(await minify(input, { minifyJS: true }), input);
     }
+    const quoted = '<script>use({ <%= key %>: 1 });</script>';
+    assert.strictEqual(await minify(quoted, { minifyJS: { format: { quote_keys: true } } }), quoted);
   });
 
   test('Keeps scripts as written where a custom fragment leaves them unparsable', async () => {
@@ -4260,8 +4263,8 @@ describe('HTML', () => {
       '<script type="module">import"a";f(<?= $x ?>)</script>'
     );
     assert.strictEqual(
-      await minify('<a onclick="if (a) { return <?= $x ?>; }  return false">', { minifyJS: true }),
-      '<a onclick="return!!a&& <?= $x ?>">'
+      await minify('<a onclick="if (a) { return f(<?= $x ?>); }  return false">', { minifyJS: true }),
+      '<a onclick="return!!a&&f(<?= $x ?>)">'
     );
   });
 

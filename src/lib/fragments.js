@@ -15,6 +15,8 @@ import { LRU } from './utils.js';
 const RE_WHITESPACE = /\s/;
 const RE_CSS_NAME_CHAR = /[\w-]/;
 const RE_URL_OPEN = /url\(\s*/iy;
+// An escape right before a fragment, which what it renders could extend (`\0` before a digit)
+const RE_ESCAPE_END = /\\+[^\\\s]{0,9}$/;
 
 // Run on at most the eleven characters from the `@`
 const RE_DROPPABLE_AT_RULE = /^@(?:charset|import|namespace)(?![\w-])/i;
@@ -390,6 +392,11 @@ function findCSSSpans(source) {
   const spans = [];
 
   for (let i = 0; i < source.length; i++) {
+    // An escaped quote is part of a name, not a string
+    if (source[i] === '\\' && source[i + 1] !== '\n') {
+      i++;
+      continue;
+    }
     const end = skipCommentOrString(source, i);
     if (end > i) {
       spans.push({ start: i, end, context: source[i] === '/' ? 'comment' : source[i] ?? '' });
@@ -434,13 +441,14 @@ function placePlaceholders(source, placeholder, spans) {
     let padding = '';
     // Restoring a fragment puts back the whitespace around it, which, in code, replaces
     // whatever the minifier left there, but in a string adds to what it wrote instead
-    // (e.g., a line break it escaped as `\n`)
+    // (e.g., a line break it escaped as `\n`); an escape before it has to stay, too
     if (context !== 'code' && context !== 'comment') {
       let start = match.index;
       let end = match.index + match[0].length;
       while (start > 0 && RE_WHITESPACE.test(source[start - 1] ?? '')) start--;
       while (end < source.length && RE_WHITESPACE.test(source[end] ?? '')) end++;
-      padding = source.slice(start, match.index) + '|' + source.slice(match.index + match[0].length, end);
+      const escape = RE_ESCAPE_END.exec(source.slice(Math.max(0, start - 16), start))?.[0] ?? '';
+      padding = escape + source.slice(start, match.index) + '|' + source.slice(match.index + match[0].length, end);
     }
     placements.push({ text: match[0], index: match.index, context, padding });
   }
@@ -677,9 +685,8 @@ async function isMinifiedJSSafe(source, output, placeholder, inline = false, isM
   const starts = before.filter(placement => read.statements.has(placement.index));
   if (starts.length && read.labeled) return false;
 
-  // Minifying keeps code code, so where every fragment is in code, there’s nothing to
-  // tokenize the output for
-  const spansOutput = before.every(placement => placement.context === 'code') ? [] : tokenizeJS(acorn, output, inline, isModule);
+  // Code may end up in a string (a key, under Terser’s `quote_keys`), so the output is read, too
+  const spansOutput = tokenizeJS(acorn, output, inline, isModule);
   if (!spansOutput) return false;
   const after = placePlaceholders(output, placeholder, spansOutput);
   return keepsStarts(starts, after, output, placeholder) && keepsPlacements(before, after);

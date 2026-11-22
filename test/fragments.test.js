@@ -190,6 +190,10 @@ describe('Fragments', () => {
       assert.strictEqual(isMinifiedCSSSafe('a { top: U0U }', 'a{top:U0U}b{top:U0U}', placeholder), false);
     });
 
+    test('Reads escaped quotes as part of names, not as strings', () => {
+      assert.strictEqual(isMinifiedCSSSafe('a { b: x\\"; c: U0U }', 'a{b:x\\";c:U0U}', placeholder), true);
+    });
+
     test('Scans long inputs in linear time', async () => {
       const sources = [
         (/** @type {number} */ count) => '@import U0U;'.repeat(count),
@@ -237,6 +241,16 @@ describe('Fragments', () => {
       assert.strictEqual(await isMinifiedJSSafe('a = `${U0U}`', 'a=`${U0U}`', placeholder), true);
       assert.strictEqual(await isMinifiedJSSafe('a = "U0U"; b()', 'a="U0U",b()', placeholder), true);
       assert.strictEqual(await isMinifiedJSSafe('a = `\nU0U`', 'a=`\\nU0U`', placeholder), false);
+    });
+
+    test('Fails on fragments that move from code into a string', async () => {
+      assert.strictEqual(await isMinifiedJSSafe('use({ U0U: 1 })', 'use({"U0U":1})', placeholder), false);
+    });
+
+    test('Fails on escapes before fragments that change', async () => {
+      assert.strictEqual(await isMinifiedJSSafe('a = "\\x00U0U"', 'a="\\0U0U"', placeholder), false);
+      assert.strictEqual(await isMinifiedJSSafe('a = "\\nU0U"', 'a="\\nU0U"', placeholder), true);
+      assert.strictEqual(await isMinifiedJSSafe('a = \'\\\\U0U\'; b()', 'a=\'\\\\U0U\',b()', placeholder), true);
     });
 
     test('Fails on fragments written twice', async () => {
