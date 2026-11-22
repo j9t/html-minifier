@@ -171,6 +171,7 @@ i,
 
 i {
 	font-style: normal;
+	outline: 1px solid var(--color-accent);
 }
 
 code,
