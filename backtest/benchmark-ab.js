@@ -171,7 +171,7 @@ async function main() {
   const labelB = args.aa ? `${args.ref} (copy)` : 'working tree';
 
   console.log(`A: ${args.ref} @ ${commit}; B: ${labelB}`);
-  console.log(`* ${files.length} file(s), ${args.pairs} pair(s) of runs in both orders, fastest of ${args.rounds} round(s) per file`);
+  console.log(`• ${files.length} file(s), ${args.pairs} pair(s) of runs in both orders, fastest of ${args.rounds} round(s) per file`);
 
   try {
     extractRef(args.ref, dirA);
@@ -193,7 +193,7 @@ async function main() {
       const mean = sum(pcts) / pcts.length;
       console.log(`collapseWhitespace ${mode}: B−A ${formatPct(mean)} (runs from ${formatPct(Math.min(...pcts))} to ${formatPct(Math.max(...pcts))})`);
       const changed = bytes.filter(delta => delta !== 0).length;
-      console.log(`* Output: ${changed ? `${changed} file(s) differ, ${sum(bytes).toLocaleString('en-US')} bytes in total` : 'identical'}`);
+      console.log(`• Output: ${changed ? `${changed} file(s) differ, ${sum(bytes).toLocaleString('en-US')} bytes in total` : 'identical'}`);
       const rows = files.map((name, i) => ({ name, delta: deltas[i], bytes: bytes[i] }))
         .sort((x, y) => Math.abs(y.delta) - Math.abs(x.delta))
         .slice(0, args.top);
