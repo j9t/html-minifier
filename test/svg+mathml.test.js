@@ -1655,7 +1655,8 @@ describe('SVG and MathML', () => {
     }
   });
 
-  test('Costs a page little more for a single inline SVG', () => {
+  // @@ Drop the skip once the Node floor reaches 24
+  test('Costs a page little more for a single inline SVG', { skip: Number(process.versions.node.split('.')[0]) < 24 && 'Node 22’s V8 slows pages after foreign content regardless' }, () => {
     // Slowing the rest of the page down shows only in a process that hasn’t minified foreign
     // content before, so each attempt runs in a new one, timing the page without SVG first
     const urlMinifier = new URL('../src/htmlminifier.js', import.meta.url).href;
