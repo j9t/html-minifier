@@ -2,6 +2,7 @@ import Alpine from 'alpinejs';
 import HTMLMinifier, { getPreset } from '../src/htmlminifier.js';
 import { optionDefinitions } from '../src/lib/option-definitions.js';
 import { paramCase } from '../src/lib/utils.js';
+import { changedOptionIds, matchesFilter, optionFilterText } from './lib/filter.js';
 import { getOptions } from './lib/get-options.js';
 import { annotateInvisibles } from './lib/show-invisibles.js';
 import { decodeState, encodeState } from './lib/url-state.js';
@@ -224,6 +225,8 @@ const defaultOptions = siteOptionIds.map(id => {
   };
 });
 
+const optionFilterTexts = new Map(defaultOptions.map(option => [option.id, optionFilterText(option)]));
+
 const sillyClone = (o) => JSON.parse(JSON.stringify(o));
 
 const formatNumber = (num) => num.toLocaleString('en-US');
@@ -270,6 +273,9 @@ const updateUrlWithState = (input, options, showInvisibles) => {
 // names because Alpine maps its shorthands to the default prefix before `prefix()` runs
 const minifierData = () => ({
   options: sillyClone(defaultOptions),
+  optionFilter: '',
+  // Counts the options a preset or selection changed while the filter hid them
+  presetNote: '',
   input: '',
   output: '',
   showInvisibles: false,
@@ -332,6 +338,17 @@ const minifierData = () => ({
     }
   },
 
+  // Some browsers clear a search field (on Escape or with its clear button)
+  // without an `input` event, which the model would miss
+  bindOptionFilter: {
+    'data-x-on:keydown.escape'() {
+      this.optionFilter = '';
+    },
+    'data-x-on:search'(event) {
+      this.optionFilter = event.target.value;
+    }
+  },
+
   bindOptionInput: {
     'data-x-bind:disabled'() {
       return this.option.disabled === true;
@@ -363,9 +380,13 @@ const minifierData = () => ({
   bindPreset: {
     'data-x-on:click.prevent'(event) {
       const { preset } = event.currentTarget.dataset;
+      const before = this.options;
       if (preset === 'all' || preset === 'none') this.selectAllOptions(preset === 'all');
       else if (preset === 'reset') this.resetOptions();
       else this.applyPreset(preset);
+      const hidden = changedOptionIds(before, this.options)
+        .filter(id => !matchesFilter(optionFilterTexts.get(id), this.optionFilter)).length;
+      this.presetNote = hidden ? `Also changed ${hidden} hidden option${hidden === 1 ? '' : 's'}` : '';
     }
   },
 
@@ -393,6 +414,17 @@ const minifierData = () => ({
   // The marked input stands in for the textarea except while it is edited or empty
   get inputMarked() {
     return this.showInvisibles && !this.editingInput && this.input !== '';
+  },
+
+  // Empty without a filter, so that only a filtered list is announced
+  get optionFilterStatus() {
+    if (!this.optionFilter.trim()) return '';
+    const count = this.options.filter(option => this.showsOption(option)).length;
+    return count ? `${count} of ${this.options.length} options` : 'No options match';
+  },
+
+  showsOption(option) {
+    return matchesFilter(optionFilterTexts.get(option.id), this.optionFilter);
   },
 
   // Swap the marked input for the textarea, keeping size, scroll position, and a clicked caret
@@ -451,6 +483,7 @@ const minifierData = () => ({
     }
 
     this.$watch('options', () => this.scheduleMinify());
+    this.$watch('optionFilter', () => { this.presetNote = ''; });
   },
 
   // Debounced, as text options change with each keystroke

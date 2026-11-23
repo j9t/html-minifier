@@ -52,7 +52,7 @@ body {
 
 header,
 footer p:not(:last-child),
-.options > div:first-child {
+.options > div:not(:last-child) {
 	margin-bottom: 1rem;
 }
 
@@ -103,16 +103,21 @@ button {
 
 input[type='text'],
 input[type='number'],
+input[type='search'],
 span.quiet {
 	display: block;
 }
 
+/* Set heights, as Safari draws search fields taller at narrow widths */
 input[type='text'],
-input[type='number'] {
+input[type='number'],
+input[type='search'] {
 	background: var(--color-field);
 	border: 1px solid var(--color-field-border);
 	border-radius: var(--radius);
+	box-sizing: border-box;
 	font-size: .875rem;
+	height: 1.75em;
 	margin: .2rem 0;
 	padding: .125rem .25rem;
 }
@@ -131,6 +136,12 @@ input[type='checkbox'] {
 	margin: 0 2px 0 0;
 	position: relative;
 	vertical-align: middle;
+}
+
+/* Drops Safari’s own search field look */
+input[type='search'] {
+	appearance: none;
+	width: 100%;
 }
 
 button {
