@@ -1,6 +1,7 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert';
 import { existsSync, readFileSync } from 'node:fs';
+import { changedOptionIds, matchesFilter, optionFilterText } from '../lib/filter.js';
 import { getOptions } from '../lib/get-options.js';
 import { annotateInvisibles } from '../lib/show-invisibles.js';
 import { decodeState, encodeState } from '../lib/url-state.js';
@@ -135,6 +136,55 @@ describe('Web version', () => {
 
     test('Takes a hash that will not decode as no state', () => {
       assert.strictEqual(decodeState('not-a-state'), null);
+    });
+  });
+
+  describe('`optionFilterText`/`matchesFilter`/`changedOptionIds`', () => {
+    const option = {
+      id: 'removeEmptyElements',
+      label: 'Remove empty elements',
+      helpText: 'Remove all elements with empty contents (e.g., <code>&lt;td&gt;</code>)'
+    };
+    const text = optionFilterText(option);
+
+    test('`optionFilterText` finds an option by its label, name, CLI flag, and description', () => {
+      for (const query of ['remove empty', 'removeEmptyElements', '--remove-empty-elements', 'contents']) {
+        assert.ok(matchesFilter(text, query), query);
+      }
+    });
+
+    test('`optionFilterText` reads the description as text, not markup', () => {
+      assert.ok(matchesFilter(text, '<td>'));
+      assert.ok(!matchesFilter(text, 'code'));
+    });
+
+    test('`matchesFilter` ignores case and requires every word, in any order', () => {
+      assert.ok(matchesFilter(text, 'ELEMENTS empty'));
+      assert.ok(!matchesFilter(text, 'empty attributes'));
+    });
+
+    test('`matchesFilter` matches anything with an empty or blank query', () => {
+      assert.ok(matchesFilter(text, ''));
+      assert.ok(matchesFilter(text, '  '));
+    });
+
+    test('`changedOptionIds` names the options whose choice changed', () => {
+      const before = [
+        { id: 'collapseWhitespace', type: 'checkbox', checked: true },
+        { id: 'removeComments', type: 'checkbox', checked: false },
+        { id: 'maxLineLength', type: 'number', value: '' }
+      ];
+      const after = [
+        { ...before[0] },
+        { ...before[1], checked: true },
+        { ...before[2], value: '80' }
+      ];
+      assert.deepStrictEqual(changedOptionIds(before, after), ['removeComments', 'maxLineLength']);
+    });
+
+    test('`changedOptionIds` takes a value of another type that reads the same as unchanged', () => {
+      const before = [{ id: 'maxLineLength', type: 'number', value: '80' }];
+      assert.deepStrictEqual(changedOptionIds(before, [{ ...before[0], value: 80 }]), []);
     });
   });
 
