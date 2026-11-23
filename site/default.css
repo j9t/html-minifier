@@ -18,6 +18,12 @@
 	color-scheme: light dark;
 }
 
+/* @@ Merge with rules of similar declarations once broadly supported */
+::selection {
+	background: var(--color-accent);
+	color: var(--color-on-accent);
+}
+
 :not(code) {
 	font-family: ui-sans-serif, system-ui, sans-serif;
 }
@@ -164,6 +170,7 @@ a:focus-visible {
 }
 
 i,
+.badge span:last-child,
 .invisible {
 	background: var(--color-accent);
 	color: var(--color-on-accent);
@@ -197,11 +204,6 @@ code {
 .badge span:first-child {
 	background: var(--color-text);
 	color: var(--color-background);
-}
-
-.badge span:last-child {
-	background: var(--color-accent);
-	color: var(--color-on-accent);
 }
 
 .badge:hover span:last-child,
