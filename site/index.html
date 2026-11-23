@@ -48,9 +48,14 @@
 				</div>
 			</div>
 			<div class="options">
+				<div class="form-group">
+					<label for="option-filter">Filter options:</label>
+					<input type="search" id="option-filter" data-x-model="optionFilter" data-x-bind="bindOptionFilter">
+					<span class="quiet" role="status" data-x-text="optionFilterStatus"></span>
+				</div>
 				<div>
 					<template data-x-for="option in options">
-						<div>
+						<div data-x-show="showsOption(option)">
 							<template data-x-if="option.type === 'checkbox'">
 								<div class="form-group">
 									<input type="checkbox" data-x-model="option.checked" data-x-bind="bindOptionInput">
@@ -80,6 +85,7 @@
 					<a href="#" data-preset="none" data-x-bind="bindPreset">none</a>,
 					<a href="#" data-preset="reset" data-x-bind="bindPreset">reset</a>
 					(<a href="https://github.com/j9t/html-minifier?tab=readme-ov-file#options-quick-reference" target="_blank">all options explained</a>)
+					<span class="quiet" role="status" data-x-text="presetNote"></span>
 				</div>
 			</div>
 		</main>
