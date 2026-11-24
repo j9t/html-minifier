@@ -1046,7 +1046,8 @@ async function minifyHTML(value, options, partialMarkup) {
   // Entries changed while a start tag trims, with what they were, while recording
   /** @type {Array<[number, string]> | null} */
   let trimsRecorded = null;
-  // Whether the last element is a removed block, which text after it reads past
+  // Whether the last element is a removed block (or one removed after an element
+  // that doesn’t render), which text after it reads past
   let followsRemovedBlock = false;
   // End tags not written, for the start tag that comes next (`text` is empty where one can’t be)
   /** @type {Array<{tag: string, text: string}>} */
@@ -2914,8 +2915,8 @@ async function minifyHTML(value, options, partialMarkup) {
             }
             if (openElement.before.gapIndex !== -1) transparentGapIndex = openElement.before.gapIndex;
           }
-          // @@ Keep space by removed inline elements near `script` (`a<script>1</script><b></b> c`)
-          followsRemovedBlock = !inlineElements.has(lowerTag || tag) && !inlineElementsTransparent.has(lowerTag || tag);
+          // Text after it reads past it if it’s a block or follows an element that doesn’t render
+          followsRemovedBlock = !inlineElements.has(lowerTag || tag) && !inlineElementsTransparent.has(lowerTag || tag) || inlineElementsTransparentAfter.has(charsPrevTag);
           // What it made optional is up to what comes next now
           if (openElement?.omittedEndTag) {
             bufferPush(openElement.omittedEndTag.text, true);

@@ -4,6 +4,12 @@ As of version 5.0.0, all notable changes to HTML Minifier (HM) are documented in
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+* Fixed `removeEmptyElements` with `collapseWhitespace` dropping the space after an empty inline element it removes right after an element that doesn’t render, like a non-empty `script` (e.g., `<p>a<script>1</script><span></span> b</p>` became `<p>a<script>1</script>b</p>`)
+
 ## [5.4.1] - 2026-11-22
 
 ### Fixed
