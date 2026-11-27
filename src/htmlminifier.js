@@ -3190,19 +3190,29 @@ async function minifyHTML(value, options, partialMarkup) {
   }
 
   // Post-processing: Optimize SVG blocks with SVGO
-  // @@ Keep `htmlmin:ignore` placeholders, which SVGO drops as comments, losing what they hold
   // Run all SVGO calls in parallel, then splice results in reverse to preserve indices
   const minifySVG = options.minifySVG;
   if (minifySVG && svgBlocks.length) {
-    const optimized = await Promise.all(
-      svgBlocks.map(({ start, end }) =>
-        minifySVG(buffer.slice(start, end).join(''))
-      )
-    );
+    const optimized = await Promise.all(svgBlocks.map(({ start, end }) => {
+      const source = buffer.slice(start, end).join('');
+      // `htmlmin:ignore` placeholders are comments, which SVGO drops with what they stand for
+      if (uidIgnore && source.includes(uidIgnore)) {
+        options.log('Skipping SVGO for an `svg` element holding `htmlmin:ignore` markup, which SVGO would drop');
+        // Attribute values were escaped for SVGO, placeholders in them included
+        const escaped = '&lt;!--' + uidIgnore;
+        for (let i = start; i < end; i++) {
+          const entry = buffer[i] ?? '';
+          if (entry.includes(escaped)) bufferSet(i, entry.replaceAll(escaped, '<!--' + uidIgnore));
+        }
+        return null;
+      }
+      return minifySVG(source);
+    }));
     for (let i = svgBlocks.length - 1; i >= 0; i--) {
       const block = svgBlocks[i];
-      if (block) {
-        buffer.splice(block.start, block.end - block.start, optimized[i] ?? '');
+      const result = optimized[i];
+      if (block && result != null) {
+        buffer.splice(block.start, block.end - block.start, result);
         bufferTags?.splice(block.start, block.end - block.start, false);
       }
     }
