@@ -3195,7 +3195,10 @@ async function minifyHTML(value, options, partialMarkup) {
   if (minifySVG && svgBlocks.length) {
     const optimized = await Promise.all(svgBlocks.map(({ start, end }) => {
       const source = buffer.slice(start, end).join('');
-      // `htmlmin:ignore` placeholders are comments, which SVGO drops with what they stand for
+      // `htmlmin:ignore` placeholders are comments, which SVGO drops with what they stand for.
+      // (Keeping them, or lifting the markup out and dropping it back in, wouldn’t be safe,
+      // either: SVGO may move or remove what surrounds them, and it can’t see what they hold,
+      // like references to IDs and definitions it then removes or renames.)
       if (uidIgnore && source.includes(uidIgnore)) {
         options.log('Skipping SVGO for an `svg` element holding `htmlmin:ignore` markup, which SVGO would drop');
         // Attribute values were escaped for SVGO, placeholders in them included

@@ -17,13 +17,13 @@
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@swc/core": "^1.16.22",
-    "@types/node": "^26.6.6",
+    "@types/node": "^26.6.11",
     "alpinejs": "^3.17.5",
-    "eslint": "^10.15.0",
+    "eslint": "^10.16.0",
     "globals": "^17.14.0",
     "parse5": "^8.1.1",
     "typescript": "^7.0.2",
-    "vite": "^8.3.8"
+    "vite": "^8.4.0"
   },
   "engines": {
     "node": ">=22.13"
@@ -99,5 +99,5 @@
   },
   "type": "module",
   "types": "dist/types/htmlminifier.d.ts",
-  "version": "5.4.1"
+  "version": "5.4.2"
 }
