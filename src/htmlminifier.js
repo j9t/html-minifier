@@ -1680,7 +1680,13 @@ async function minifyHTML(value, options, partialMarkup) {
 
   // `atEnd` is the side of the block, `neighbor` the entry on that side
   function trimIgnoreEdge(/** @type {string} */ content, /** @type {number} */ neighbor, /** @type {boolean} */ atEnd) {
-    const text = buffer[neighbor];
+    let text = buffer[neighbor];
+    if (!text) return;
+    // Text passing SVGO as a placeholder is trimmed where it’s kept
+    const token = uidSVGRawText && text.startsWith('/*!' + uidSVGRawText) && text.endsWith('*/')
+      ? +text.slice(3 + uidSVGRawText.length, -2)
+      : -1;
+    if (token !== -1) text = svgRawTexts[token];
     if (!text) return;
     const inner = edgeWhitespaceLength(content, atEnd);
     const outer = inner && edgeWhitespaceLength(text, !atEnd);
@@ -1688,7 +1694,9 @@ async function minifyHTML(value, options, partialMarkup) {
     if (options.preserveLineBreaks &&
         RE_LINE_BREAK.test(atEnd ? text.slice(0, outer) : text.slice(-outer)) &&
         !RE_LINE_BREAK.test(atEnd ? content.slice(-inner) : content.slice(0, inner))) return;
-    bufferSet(neighbor, atEnd ? text.slice(outer) : text.slice(0, -outer));
+    const trimmed = atEnd ? text.slice(outer) : text.slice(0, -outer);
+    if (token !== -1) svgRawTexts[token] = trimmed;
+    else bufferSet(neighbor, trimmed);
   }
 
   function lastStartTagIndex() {

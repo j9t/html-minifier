@@ -1773,6 +1773,11 @@ describe('SVG and MathML', () => {
       assert.strictEqual(await minify(`<svg><g   id="a"></g>${ignore}<g   id="b"></g>${ignore}</svg>`, options), '<svg><g id="a"></g><g   id="b"></g></svg>');
       assert.strictEqual(await minify(`<svg><text>a ${ignore} x ${ignore} b</text></svg>`, options), '<svg><text>a x b</text></svg>');
       assert.strictEqual(await minify(`<svg><rect title="${ignore}x  y${ignore}"/></svg>`, options), '<svg><rect title="x  y"/></svg>');
+      // HTML text with whitespace at an end passes SVGO as a placeholder, which still collapses
+      assert.strictEqual(
+        await minify(`<svg><foreignObject><p>a ${ignore} x ${ignore} b</p></foreignObject></svg>`, options),
+        '<svg><foreignObject><p>a x b</p></foreignObject></svg>'
+      );
       assert.ok(logs.some(message => message.includes('htmlmin:ignore')));
 
       // Other `svg` elements are still optimized, as is one an ignored block holds entirely
