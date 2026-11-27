@@ -1786,8 +1786,12 @@ describe('SVG and MathML', () => {
         '<svg><g id="a"></g><g id="b"></g></svg><svg/><svg><g></g></svg>'
       );
 
-      // A function of one’s own is skipped, too
+      // A function of one’s own is skipped, too, also for raw text in HTML content
       assert.strictEqual(await minify(`<svg>${ignore}<g></g>${ignore}</svg>`, { minifySVG: () => '<svg/>' }), '<svg><g></g></svg>');
+      assert.strictEqual(
+        await minify(`<svg><foreignObject><script>${ignore}keep()${ignore}</script></foreignObject></svg>`, { minifySVG: () => '<svg/>' }),
+        '<svg><foreignObject><script>keep()</script></foreignObject></svg>'
+      );
     });
 
     test('Leaves CSS within an `svg` element as written only through `canMinifySVG`', async () => {

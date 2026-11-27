@@ -3207,7 +3207,9 @@ async function minifyHTML(value, options, partialMarkup) {
       // (Keeping them, or lifting the markup out and dropping it back in, wouldn’t be safe,
       // either: SVGO may move or remove what surrounds them, and it can’t see what they hold,
       // like references to IDs and definitions it then removes or renames.)
-      if (uidIgnore && source.includes(uidIgnore)) {
+      // Raw text in HTML content holds them as text, passing SVGO as a placeholder.
+      if (uidIgnore && (source.includes(uidIgnore) || svgRawTexts.some((text, index) =>
+        text.includes(uidIgnore) && source.includes('/*!' + uidSVGRawText + index + '*/')))) {
         options.log('Skipping SVGO for an `svg` element holding `htmlmin:ignore` markup, which SVGO would drop');
         // Attribute values were escaped for SVGO, placeholders in them included
         const escaped = '&lt;!--' + uidIgnore;
