@@ -6456,6 +6456,56 @@ describe('HTML', () => {
     assert.strictEqual(await minify(`<p>a\n<script></script>${ignore}<span>b</span>${ignore}\n</p>`, { collapseWhitespace: true }), '<p>a <script></script><span>b</span></p>');
   });
 
+  test('Drops whitespace next to `htmlmin:ignore` blocks that start or end with whitespace', async () => {
+    const ignore = '<!-- htmlmin:ignore -->';
+    const collapse = { collapseWhitespace: true };
+    const assertStable = async (input, output, options) => {
+      assert.strictEqual(await minify(input, options), output);
+      assert.strictEqual(await minify(output, options), output);
+    };
+
+    // The block’s own whitespace stands in for the whitespace outside it
+    await assertStable(`a ${ignore} x ${ignore} b`, 'a x b', collapse);
+    await assertStable(`<div>\n\t${ignore}\n<span>x</span>\n${ignore}\n\t</div>`, '<div>\n<span>x</span>\n</div>', { collapseWhitespace: true, preserveLineBreaks: true });
+    await assertStable(`<span>a</span> ${ignore} <b>x</b> ${ignore} <span>b</span>`, '<span>a</span> <b>x</b> <span>b</span>', collapse);
+    await assertStable(`<p>a ${ignore} x ${ignore} b</p>`, '<p>a x b</p>', { collapseWhitespace: true, conservativeCollapse: true });
+    await assertStable(` ${ignore} x ${ignore} `, ' x ', { collapseWhitespace: true, partialMarkup: true });
+    await assertStable(`<p>a ${ignore} x ${ignore} b</p>`, '<p\n>a x b</p>', { collapseWhitespace: true, maxLineLength: 5 });
+
+    // The block’s own whitespace stays, even where it would go once no longer ignored
+    assert.strictEqual(await minify(`<div>a\n${ignore}\nx\n${ignore}\nb</div>`, collapse), '<div>a\nx\nb</div>');
+    assert.strictEqual(await minify(`<div> ${ignore} x ${ignore} </div>`, collapse), '<div> x </div>');
+    assert.strictEqual(await minify(`a ${ignore} x ${ignore} \n ${ignore} y ${ignore} b`, collapse), 'a x  y b');
+    assert.strictEqual(await minify(`<div></div> ${ignore} x ${ignore} <div></div>`, collapse), '<div></div> x <div></div>');
+
+    // A line break outside stays where the block holds none
+    assert.strictEqual(await minify(`<p>a\n${ignore} x ${ignore}\nb</p>`, { collapseWhitespace: true, preserveLineBreaks: true }), '<p>a\n x \nb</p>');
+
+    // A no-break space isn’t collapsible whitespace, outside or in the block
+    await assertStable(`a&nbsp;${ignore} x ${ignore}&nbsp;b`, 'a&nbsp; x &nbsp;b', collapse);
+    assert.strictEqual(await minify(`a ${ignore}\u00a0x\u00a0${ignore} b`, collapse), 'a \u00a0x\u00a0 b');
+
+    // Whitespace elsewhere stays: Across a tag, which the block’s whitespace doesn’t lie beyond …
+    assert.strictEqual(await minify(`<p>a <span>${ignore} x ${ignore}</span> b</p>`, collapse), '<p>a <span> x </span> b</p>');
+    // … where it doesn’t collapse …
+    assert.strictEqual(await minify(`<pre>a ${ignore} x ${ignore} b</pre>`, collapse), '<pre>a  x  b</pre>');
+    assert.strictEqual(await minify(`<textarea>a ${ignore} x ${ignore} b</textarea>`, collapse), '<textarea>a  x  b</textarea>');
+    assert.strictEqual(await minify(`<div title="a ${ignore} x ${ignore} b">c</div>`, collapse), '<div title="a  x  b">c</div>');
+    // … and without `collapseWhitespace`
+    assert.strictEqual(await minify(`a ${ignore} x ${ignore} b`), `a  x  b`);
+  });
+
+  test('Drops whitespace between custom fragments and `htmlmin:ignore` blocks under `trimCustomFragments`', async () => {
+    const ignore = '<!-- htmlmin:ignore -->';
+    const input = `a {{ x }} ${ignore} y ${ignore} {{ z }} b`;
+    const options = { collapseWhitespace: true, ignoreCustomFragments: [/\{\{[\s\S]*?\}\}/] };
+    assert.strictEqual(await minify(input, { ...options, trimCustomFragments: true }), 'a {{ x }} y {{ z }} b');
+    assert.strictEqual(await minify('a {{ x }} y {{ z }} b', { ...options, trimCustomFragments: true }), 'a {{ x }} y {{ z }} b');
+
+    // Otherwise, whitespace around custom fragments stays
+    assert.strictEqual(await minify(input, options), 'a {{ x }}  y  {{ z }} b');
+  });
+
   test('Minifies `meta` viewport', async () => {
     let input, output;
 

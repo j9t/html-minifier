@@ -47,6 +47,7 @@ import {
   buildInlineSets,
   defaultInlineSets,
   endsWithWhitespace,
+  isAsciiWhitespace,
   trimWhitespace,
   collapseWhitespaceAll,
   collapseNoBreakSpaces,
@@ -702,6 +703,7 @@ const RE_END_TAG = /^<\//;
 const RE_WHITESPACE_ONLY = /^\s+$/;
 const RE_TABS = /\t/g;
 const RE_TRAILING_WHITESPACE = /\s$/;
+const RE_LINE_BREAK = /[\n\r]/;
 const RE_LINE_BREAK_BLANKS_END = /(?:\r\n?|\n)[ \t\f]*$/;
 const RE_BLANKS_LINE_BREAK_START = /^[ \t\f]*(?:\r\n?|\n)/;
 const RE_BLANKS_START = /^[ \t\f]+/;
@@ -953,6 +955,21 @@ async function createSortFns(value, options, uidIgnore, ignoredMarkupChunks) {
   }
 }
 
+// The length of the ASCII whitespace `str` starts or ends with
+/**
+ * @param {string} str
+ * @param {boolean} atEnd
+ */
+function edgeWhitespaceLength(str, atEnd) {
+  let length = 0;
+  if (atEnd) {
+    while (length < str.length && isAsciiWhitespace(str.charCodeAt(str.length - 1 - length))) length++;
+  } else {
+    while (length < str.length && isAsciiWhitespace(str.charCodeAt(length))) length++;
+  }
+  return length;
+}
+
 // Match `/^<\/([\w:-]+)>$/` by hand—the regex engine’s per-call setup costs more
 // than the scan on these short buffer entries
 /**
@@ -1092,6 +1109,10 @@ async function minifyHTML(value, options, partialMarkup) {
   let textVerbatim = false;
   /** @type {string[]} */
   const ignoredMarkupChunks = [];
+  // Placeholders of `htmlmin:ignore` blocks where whitespace collapses, each followed
+  // by where in `buffer` it went
+  /** @type {Array<string | number>} */
+  const ignoredMarkupCollapsing = [];
   /** @type {Array<[string, string, string]>} */
   const ignoredCustomMarkupChunks = [];
   // Custom fragments whose surrounding whitespace is never trimmed: in tags, where it
@@ -1639,6 +1660,35 @@ async function minifyHTML(value, options, partialMarkup) {
     if (index < buffer.length) {
       bufferSet(index, (buffer[index] ?? '').replace(RE_WS_START, ''));
     }
+  }
+
+  // Whitespace next to an `htmlmin:ignore` block that starts or ends with whitespace renders
+  // the same without it; a line break under `preserveLineBreaks` stays unless the block has one
+  function trimIgnoreEdges() {
+    const indexStart = '<!--'.length + (uidIgnore ?? '').length;
+    for (let i = 0; i < ignoredMarkupCollapsing.length; i += 2) {
+      const placeholder = /** @type {string} */ (ignoredMarkupCollapsing[i]);
+      const indexPushed = /** @type {number} */ (ignoredMarkupCollapsing[i + 1]);
+      // Entries removed before a placeholder move it down
+      const index = buffer[indexPushed] === placeholder ? indexPushed : buffer.lastIndexOf(placeholder, indexPushed);
+      if (index === -1) continue;
+      const content = ignoredMarkupChunks[+placeholder.slice(indexStart, -3)] ?? '';
+      trimIgnoreEdge(content, findNeighbors(index)[0], false);
+      trimIgnoreEdge(content, findNeighbors(index + 1)[1], true);
+    }
+  }
+
+  // `atEnd` is the side of the block, `neighbor` the entry on that side
+  function trimIgnoreEdge(/** @type {string} */ content, /** @type {number} */ neighbor, /** @type {boolean} */ atEnd) {
+    const text = buffer[neighbor];
+    if (!text) return;
+    const inner = edgeWhitespaceLength(content, atEnd);
+    const outer = inner && edgeWhitespaceLength(text, !atEnd);
+    if (!outer) return;
+    if (options.preserveLineBreaks &&
+        RE_LINE_BREAK.test(atEnd ? text.slice(0, outer) : text.slice(-outer)) &&
+        !RE_LINE_BREAK.test(atEnd ? content.slice(-inner) : content.slice(0, inner))) return;
+    bufferSet(neighbor, atEnd ? text.slice(outer) : text.slice(0, -outer));
   }
 
   function lastStartTagIndex() {
@@ -2347,6 +2397,9 @@ async function minifyHTML(value, options, partialMarkup) {
               }
             }
           }
+        }
+        if (!stackNoTrimWhitespace.length && !stackNoCollapseWhitespace.length) {
+          ignoredMarkupCollapsing.push(comment, buffer.length);
         }
       }
     }
@@ -3131,7 +3184,13 @@ async function minifyHTML(value, options, partialMarkup) {
     await mergeElements(mergeRecords);
   }
 
+  // Before SVGO joins entries, which `trimIgnoreEdges` would have to search past
+  if (ignoredMarkupCollapsing.length) {
+    trimIgnoreEdges();
+  }
+
   // Post-processing: Optimize SVG blocks with SVGO
+  // @@ Keep `htmlmin:ignore` placeholders, which SVGO drops as comments, losing what they hold
   // Run all SVGO calls in parallel, then splice results in reverse to preserve indices
   const minifySVG = options.minifySVG;
   if (minifySVG && svgBlocks.length) {
