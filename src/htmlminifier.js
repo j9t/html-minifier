@@ -3201,15 +3201,17 @@ async function minifyHTML(value, options, partialMarkup) {
   // Run all SVGO calls in parallel, then splice results in reverse to preserve indices
   const minifySVG = options.minifySVG;
   if (minifySVG && svgBlocks.length) {
+    // Raw text in HTML content holds `htmlmin:ignore` placeholders as text, passing SVGO as a token
+    const ignoreTokens = uidIgnore
+      ? svgRawTexts.flatMap((text, index) => text.includes(uidIgnore) ? ['/*!' + uidSVGRawText + index + '*/'] : [])
+      : [];
     const optimized = await Promise.all(svgBlocks.map(({ start, end }) => {
       const source = buffer.slice(start, end).join('');
       // `htmlmin:ignore` placeholders are comments, which SVGO drops with what they stand for.
       // (Keeping them, or lifting the markup out and dropping it back in, wouldn’t be safe,
       // either: SVGO may move or remove what surrounds them, and it can’t see what they hold,
       // like references to IDs and definitions it then removes or renames.)
-      // Raw text in HTML content holds them as text, passing SVGO as a placeholder.
-      if (uidIgnore && (source.includes(uidIgnore) || svgRawTexts.some((text, index) =>
-        text.includes(uidIgnore) && source.includes('/*!' + uidSVGRawText + index + '*/')))) {
+      if (uidIgnore && (source.includes(uidIgnore) || ignoreTokens.some((token) => source.includes(token)))) {
         options.log('Skipping SVGO for an `svg` element holding `htmlmin:ignore` markup, which SVGO would drop');
         // Attribute values were escaped for SVGO, placeholders in them included
         const escaped = '&lt;!--' + uidIgnore;
