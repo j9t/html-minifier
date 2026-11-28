@@ -512,7 +512,7 @@ const result = await minify(html, {
 });
 ```
 
-To exempt individual `svg` elements, pass `canMinifySVG` a synchronous function. It receives each outermost `svg` element, including any `svg` elements nested in it, as the HTML pass wrote it (e.g., without comments under `removeComments`), and one for which it returns `false` skips SVGO. To keep an `svg` element exactly as written, [wrap it in `<!-- htmlmin:ignore -->`](#ignoring-chunks-of-markup) instead.
+To exempt individual `svg` elements, pass `canMinifySVG` a synchronous function. It receives each outermost `svg` element, including any `svg` elements nested in it, as the HTML pass wrote it (e.g., without comments under `removeComments`), and one for which it returns `false` skips SVGO. To keep an `svg` element exactly as written, [wrap it in `<!-- htmlmin:ignore -->`](#ignoring-chunks-of-markup) instead. An `svg` element that holds `<!-- htmlmin:ignore -->` markup skips SVGO, as SVGO would drop it.
 
 ```js
 const result = await minify(html, {

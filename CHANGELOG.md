@@ -4,11 +4,13 @@ As of version 5.0.0, all notable changes to HTML Minifier (HM) are documented in
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [5.4.2] - 2026-11-28
 
 ### Fixed
 
 * Fixed `removeEmptyElements` with `collapseWhitespace` dropping the space after an empty inline element it removes right after an element that doesn’t render, like a non-empty `script` (e.g., `<p>a<script>1</script><span></span> b</p>` became `<p>a<script>1</script>b</p>`)
+* Fixed `collapseWhitespace` keeping whitespace next to `htmlmin:ignore` blocks that start or end with whitespace, which doubled it and changed the output when minified again (e.g., `a <!-- htmlmin:ignore --> x <!-- htmlmin:ignore --> b` became `a  x  b`), including at the edges of `partialMarkup` and, under `trimCustomFragments`, next to custom fragments
+* Fixed `minifySVG` dropping `htmlmin:ignore` markup within `svg` elements, along with the markers (e.g., `<svg><!-- htmlmin:ignore --><g id="a"></g><!-- htmlmin:ignore --></svg>` became `<svg/>`); such `svg` elements now skip SVGO
 
 ## [5.4.1] - 2026-11-22
 

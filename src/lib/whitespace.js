@@ -34,18 +34,18 @@ const trimWhitespace = str => {
   if (!str) return str;
   let start = 0;
   let end = str.length;
-  while (start < end && isAsciiWs(str.charCodeAt(start))) start++;
-  while (end > start && isAsciiWs(str.charCodeAt(end - 1))) end--;
+  while (start < end && isAsciiWhitespace(str.charCodeAt(start))) start++;
+  while (end > start && isAsciiWhitespace(str.charCodeAt(end - 1))) end--;
   return start === 0 && end === str.length ? str : str.slice(start, end);
 };
 
 /** @param {number} code */
-function isAsciiWs(code) {
+function isAsciiWhitespace(code) {
   return code === 32 || code === 10 || code === 13 || code === 9 || code === 12;
 }
 
 /** @param {number} code */
-function isWsOrNbsp(code) {
+function isWhitespaceOrNbsp(code) {
   return code === 32 || code === 10 || code === 13 || code === 9 || code === 12 || code === 160;
 }
 
@@ -64,7 +64,7 @@ function isAllWhitespace(str) {
 // Whether the last character is whitespace, no-break space included
 /** @param {string} str */
 function endsWithWhitespace(str) {
-  return str.length > 0 && isWsOrNbsp(str.charCodeAt(str.length - 1));
+  return str.length > 0 && isWhitespaceOrNbsp(str.charCodeAt(str.length - 1));
 }
 
 // Module scope so the hot path doesn’t allocate a closure per call
@@ -189,7 +189,7 @@ function collapseWhitespaceKnown(str, options, trimLeft, trimRight, collapseAll,
       let hasLineBreak = false;
       for (; leadEnd < str.length; leadEnd++) {
         const code = str.charCodeAt(leadEnd);
-        if (!isAsciiWs(code)) break;
+        if (!isAsciiWhitespace(code)) break;
         // Settling the line break in the same pass keeps the run from being walked twice
         if (code === 10 || code === 13) hasLineBreak = true;
       }
@@ -203,7 +203,7 @@ function collapseWhitespaceKnown(str, options, trimLeft, trimRight, collapseAll,
       let hasLineBreak = false;
       for (; trailStart > 0; trailStart--) {
         const code = str.charCodeAt(trailStart - 1);
-        if (!isAsciiWs(code)) break;
+        if (!isAsciiWhitespace(code)) break;
         if (code === 10 || code === 13) hasLineBreak = true;
       }
       if (hasLineBreak) {
@@ -217,7 +217,7 @@ function collapseWhitespaceKnown(str, options, trimLeft, trimRight, collapseAll,
     // Find the leading whitespace boundary with a loop, so the common case neither
     // allocates a replacer closure nor runs the regex machinery
     let start = 0;
-    while (start < str.length && isWsOrNbsp(str.charCodeAt(start))) {
+    while (start < str.length && isWhitespaceOrNbsp(str.charCodeAt(start))) {
       start++;
     }
     if (start > 0) {
@@ -241,7 +241,7 @@ function collapseWhitespaceKnown(str, options, trimLeft, trimRight, collapseAll,
     // Find trailing whitespace boundary manually (avoids polynomial backtracking
     // with `/[ \n\r\t\f\xA0]+$/` on strings with long internal whitespace runs)
     let end = str.length;
-    while (end > 0 && isWsOrNbsp(str.charCodeAt(end - 1))) {
+    while (end > 0 && isWhitespaceOrNbsp(str.charCodeAt(end - 1))) {
       end--;
     }
     if (end < str.length) {
@@ -418,6 +418,7 @@ export {
   buildInlineSets,
   defaultInlineSets,
   endsWithWhitespace,
+  isAsciiWhitespace,
   trimWhitespace,
   collapseWhitespaceAll,
   collapseNoBreakSpaces,

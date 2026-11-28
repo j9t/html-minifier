@@ -1764,6 +1764,36 @@ describe('SVG and MathML', () => {
       assert.strictEqual(result, '<svg>\n  <!-- keep -->\n  <rect width="100"  height="100" />\n</svg>');
     });
 
+    test('Skips SVGO for an `svg` element holding `htmlmin:ignore` markup', async () => {
+      const ignore = '<!-- htmlmin:ignore -->';
+      const logs = [];
+      const options = { minifySVG: true, collapseWhitespace: true, log: message => logs.push(String(message)) };
+
+      // In content, in text, and in attribute values, which SVGO would all drop
+      assert.strictEqual(await minify(`<svg><g   id="a"></g>${ignore}<g   id="b"></g>${ignore}</svg>`, options), '<svg><g id="a"></g><g   id="b"></g></svg>');
+      assert.strictEqual(await minify(`<svg><text>a ${ignore} x ${ignore} b</text></svg>`, options), '<svg><text>a x b</text></svg>');
+      assert.strictEqual(await minify(`<svg><rect title="${ignore}x  y${ignore}"/></svg>`, options), '<svg><rect title="x  y"/></svg>');
+      // HTML text with whitespace at an end passes SVGO as a placeholder, which still collapses
+      assert.strictEqual(
+        await minify(`<svg><foreignObject><p>a ${ignore} x ${ignore} b</p></foreignObject></svg>`, options),
+        '<svg><foreignObject><p>a x b</p></foreignObject></svg>'
+      );
+      assert.ok(logs.some(message => message.includes('htmlmin:ignore')));
+
+      // Other `svg` elements are still optimized, as is one an ignored block holds entirely
+      assert.strictEqual(
+        await minify(`<svg><g id="a"></g>${ignore}<g id="b"></g>${ignore}</svg><svg><g id="c"></g></svg>${ignore}<svg><g></g></svg>${ignore}`, options),
+        '<svg><g id="a"></g><g id="b"></g></svg><svg/><svg><g></g></svg>'
+      );
+
+      // A function of one’s own is skipped, too, also for raw text in HTML content
+      assert.strictEqual(await minify(`<svg>${ignore}<g></g>${ignore}</svg>`, { minifySVG: () => '<svg/>' }), '<svg><g></g></svg>');
+      assert.strictEqual(
+        await minify(`<svg><foreignObject><script>${ignore}keep()${ignore}</script></foreignObject></svg>`, { minifySVG: () => '<svg/>' }),
+        '<svg><foreignObject><script>keep()</script></foreignObject></svg>'
+      );
+    });
+
     test('Leaves CSS within an `svg` element as written only through `canMinifySVG`', async () => {
       const source = '<svg><style>.a { fill: red; }</style><rect class="a" width="10" height="10"/></svg>';
       const options = { minifySVG: true, minifyCSS: true, canMinifyCSS: () => false };

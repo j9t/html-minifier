@@ -47,6 +47,7 @@ import {
   buildInlineSets,
   defaultInlineSets,
   endsWithWhitespace,
+  isAsciiWhitespace,
   trimWhitespace,
   collapseWhitespaceAll,
   collapseNoBreakSpaces,
@@ -702,6 +703,7 @@ const RE_END_TAG = /^<\//;
 const RE_WHITESPACE_ONLY = /^\s+$/;
 const RE_TABS = /\t/g;
 const RE_TRAILING_WHITESPACE = /\s$/;
+const RE_LINE_BREAK = /[\n\r]/;
 const RE_LINE_BREAK_BLANKS_END = /(?:\r\n?|\n)[ \t\f]*$/;
 const RE_BLANKS_LINE_BREAK_START = /^[ \t\f]*(?:\r\n?|\n)/;
 const RE_BLANKS_START = /^[ \t\f]+/;
@@ -953,6 +955,21 @@ async function createSortFns(value, options, uidIgnore, ignoredMarkupChunks) {
   }
 }
 
+// The length of the ASCII whitespace `str` starts or ends with
+/**
+ * @param {string} str
+ * @param {boolean} atEnd
+ */
+function edgeWhitespaceLength(str, atEnd) {
+  let length = 0;
+  if (atEnd) {
+    while (length < str.length && isAsciiWhitespace(str.charCodeAt(str.length - 1 - length))) length++;
+  } else {
+    while (length < str.length && isAsciiWhitespace(str.charCodeAt(length))) length++;
+  }
+  return length;
+}
+
 // Match `/^<\/([\w:-]+)>$/` by hand—the regex engine’s per-call setup costs more
 // than the scan on these short buffer entries
 /**
@@ -1092,6 +1109,10 @@ async function minifyHTML(value, options, partialMarkup) {
   let textVerbatim = false;
   /** @type {string[]} */
   const ignoredMarkupChunks = [];
+  // Placeholders of `htmlmin:ignore` blocks where whitespace collapses, each followed
+  // by where in `buffer` it went
+  /** @type {Array<string | number>} */
+  const ignoredMarkupCollapsing = [];
   /** @type {Array<[string, string, string]>} */
   const ignoredCustomMarkupChunks = [];
   // Custom fragments whose surrounding whitespace is never trimmed: in tags, where it
@@ -1639,6 +1660,43 @@ async function minifyHTML(value, options, partialMarkup) {
     if (index < buffer.length) {
       bufferSet(index, (buffer[index] ?? '').replace(RE_WS_START, ''));
     }
+  }
+
+  // Whitespace next to an `htmlmin:ignore` block that starts or ends with whitespace renders
+  // the same without it; a line break under `preserveLineBreaks` stays unless the block has one
+  function trimIgnoreEdges() {
+    const indexStart = '<!--'.length + (uidIgnore ?? '').length;
+    for (let i = 0; i < ignoredMarkupCollapsing.length; i += 2) {
+      const placeholder = /** @type {string} */ (ignoredMarkupCollapsing[i]);
+      const indexPushed = /** @type {number} */ (ignoredMarkupCollapsing[i + 1]);
+      // Entries removed before a placeholder move it down
+      const index = buffer[indexPushed] === placeholder ? indexPushed : buffer.lastIndexOf(placeholder, indexPushed);
+      if (index === -1) continue;
+      const content = ignoredMarkupChunks[+placeholder.slice(indexStart, -3)] ?? '';
+      trimIgnoreEdge(content, findNeighbors(index)[0], false);
+      trimIgnoreEdge(content, findNeighbors(index + 1)[1], true);
+    }
+  }
+
+  // `atEnd` is the side of the block, `neighbor` the entry on that side
+  function trimIgnoreEdge(/** @type {string} */ content, /** @type {number} */ neighbor, /** @type {boolean} */ atEnd) {
+    let text = buffer[neighbor];
+    if (!text) return;
+    // Text passing SVGO as a placeholder is trimmed where it’s kept
+    const token = uidSVGRawText && text.startsWith('/*!' + uidSVGRawText) && text.endsWith('*/')
+      ? +text.slice(3 + uidSVGRawText.length, -2)
+      : -1;
+    if (token !== -1) text = svgRawTexts[token];
+    if (!text) return;
+    const inner = edgeWhitespaceLength(content, atEnd);
+    const outer = inner && edgeWhitespaceLength(text, !atEnd);
+    if (!outer) return;
+    if (options.preserveLineBreaks &&
+        RE_LINE_BREAK.test(atEnd ? text.slice(0, outer) : text.slice(-outer)) &&
+        !RE_LINE_BREAK.test(atEnd ? content.slice(-inner) : content.slice(0, inner))) return;
+    const trimmed = atEnd ? text.slice(outer) : text.slice(0, -outer);
+    if (token !== -1) svgRawTexts[token] = trimmed;
+    else bufferSet(neighbor, trimmed);
   }
 
   function lastStartTagIndex() {
@@ -2347,6 +2405,9 @@ async function minifyHTML(value, options, partialMarkup) {
               }
             }
           }
+        }
+        if (!stackNoTrimWhitespace.length && !stackNoCollapseWhitespace.length) {
+          ignoredMarkupCollapsing.push(comment, buffer.length);
         }
       }
     }
@@ -3131,19 +3192,42 @@ async function minifyHTML(value, options, partialMarkup) {
     await mergeElements(mergeRecords);
   }
 
+  // Before SVGO joins entries, which `trimIgnoreEdges` would have to search past
+  if (ignoredMarkupCollapsing.length) {
+    trimIgnoreEdges();
+  }
+
   // Post-processing: Optimize SVG blocks with SVGO
   // Run all SVGO calls in parallel, then splice results in reverse to preserve indices
   const minifySVG = options.minifySVG;
   if (minifySVG && svgBlocks.length) {
-    const optimized = await Promise.all(
-      svgBlocks.map(({ start, end }) =>
-        minifySVG(buffer.slice(start, end).join(''))
-      )
-    );
+    // Raw text in HTML content holds `htmlmin:ignore` placeholders as text, passing SVGO as a token
+    const ignoreTokens = uidIgnore
+      ? svgRawTexts.flatMap((text, index) => text.includes(uidIgnore) ? ['/*!' + uidSVGRawText + index + '*/'] : [])
+      : [];
+    const optimized = await Promise.all(svgBlocks.map(({ start, end }) => {
+      const source = buffer.slice(start, end).join('');
+      // `htmlmin:ignore` placeholders are comments, which SVGO drops with what they stand for.
+      // (Keeping them, or lifting the markup out and dropping it back in, wouldn’t be safe,
+      // either: SVGO may move or remove what surrounds them, and it can’t see what they hold,
+      // like references to IDs and definitions it then removes or renames.)
+      if (uidIgnore && (source.includes(uidIgnore) || ignoreTokens.some((token) => source.includes(token)))) {
+        options.log('Skipping SVGO for an `svg` element holding `htmlmin:ignore` markup, which SVGO would drop');
+        // Attribute values were escaped for SVGO, placeholders in them included
+        const escaped = '&lt;!--' + uidIgnore;
+        for (let i = start; i < end; i++) {
+          const entry = buffer[i] ?? '';
+          if (entry.includes(escaped)) bufferSet(i, entry.replaceAll(escaped, '<!--' + uidIgnore));
+        }
+        return null;
+      }
+      return minifySVG(source);
+    }));
     for (let i = svgBlocks.length - 1; i >= 0; i--) {
       const block = svgBlocks[i];
-      if (block) {
-        buffer.splice(block.start, block.end - block.start, optimized[i] ?? '');
+      const result = optimized[i];
+      if (block && result != null) {
+        buffer.splice(block.start, block.end - block.start, result);
         bufferTags?.splice(block.start, block.end - block.start, false);
       }
     }
